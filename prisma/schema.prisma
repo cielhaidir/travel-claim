@@ -1,0 +1,494 @@
+// Travel and Claim Management System - Prisma Schema
+// Database: PostgreSQL
+// Generated Prisma Client: ../generated/prisma
+
+generator client {
+    provider = "prisma-client-js"
+    output   = "../generated/prisma"
+}
+
+datasource db {
+    provider = "postgresql"
+    // url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Role {
+    EMPLOYEE
+    SUPERVISOR
+    MANAGER
+    DIRECTOR
+    FINANCE
+    ADMIN
+}
+
+enum TravelType {
+    SALES
+    OPERATIONAL
+    MEETING
+    TRAINING
+}
+
+enum TravelStatus {
+    DRAFT
+    SUBMITTED
+    APPROVED_L1
+    APPROVED_L2
+    APPROVED_L3
+    APPROVED_L4
+    APPROVED_L5
+    REJECTED
+    REVISION
+    LOCKED
+    CLOSED
+}
+
+enum ApprovalLevel {
+    L1_SUPERVISOR
+    L2_MANAGER
+    L3_DIRECTOR
+    L4_SENIOR_DIRECTOR
+    L5_EXECUTIVE
+}
+
+enum ApprovalStatus {
+    PENDING
+    APPROVED
+    REJECTED
+    REVISION_REQUESTED
+}
+
+enum ClaimType {
+    ENTERTAINMENT
+    NON_ENTERTAINMENT
+}
+
+enum ClaimStatus {
+    DRAFT
+    SUBMITTED
+    APPROVED
+    REJECTED
+    REVISION
+    PAID
+}
+
+enum EntertainmentType {
+    MEAL
+    GIFT
+    EVENT
+    HOSPITALITY
+    OTHER
+}
+
+enum NonEntertainmentCategory {
+    TRANSPORT
+    PHONE_BILLING
+    TRAVEL_EXPENSES
+    OVERTIME_MEALS
+    BPJS_HEALTH
+    EQUIPMENT_STATIONERY
+    MOTORCYCLE_SERVICE
+    ACCOMMODATION
+    OTHER
+}
+
+enum NotificationChannel {
+    EMAIL
+    WHATSAPP
+    IN_APP
+    PUSH
+}
+
+enum NotificationStatus {
+    PENDING
+    SENT
+    DELIVERED
+    FAILED
+    READ
+}
+
+enum AuditAction {
+    CREATE
+    UPDATE
+    DELETE
+    APPROVE
+    REJECT
+    SUBMIT
+    LOCK
+    CLOSE
+    REOPEN
+}
+
+// ============================================================================
+// AUTHENTICATION MODELS (NextAuth.js)
+// ============================================================================
+
+// Necessary for Next auth
+model Account {
+    id                       String  @id @default(cuid())
+    userId                   String
+    type                     String
+    provider                 String
+    providerAccountId        String
+    refresh_token            String? // @db.Text
+    access_token             String? // @db.Text
+    expires_at               Int?
+    token_type               String?
+    scope                    String?
+    id_token                 String? // @db.Text
+    session_state            String?
+    user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    refresh_token_expires_in Int?
+
+    @@unique([provider, providerAccountId])
+}
+
+model Session {
+    id           String   @id @default(cuid())
+    sessionToken String   @unique
+    userId       String
+    expires      DateTime
+    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+    id            String    @id @default(cuid())
+    name          String?
+    email         String?   @unique
+    emailVerified DateTime?
+    image         String?
+    accounts      Account[]
+    sessions      Session[]
+    
+    // Extended user fields
+    employeeId    String?   @unique @db.VarChar(50)
+    role          Role      @default(EMPLOYEE)
+    departmentId  String?
+    department    Department? @relation(fields: [departmentId], references: [id])
+    
+    // Manager hierarchy
+    supervisorId  String?
+    supervisor    User?     @relation("Supervision", fields: [supervisorId], references: [id])
+    directReports User[]    @relation("Supervision")
+    
+    // Phone for WhatsApp
+    phoneNumber   String?   @db.VarChar(20)
+    
+    // Soft delete
+    deletedAt     DateTime?
+    
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    
+    // Relations
+    travelRequests        TravelRequest[]      @relation("TravelRequester")
+    travelParticipations  TravelParticipant[]
+    claims                Claim[]
+    approvals             Approval[]
+    notifications         Notification[]
+    auditLogs             AuditLog[]
+
+    
+    @@index([employeeId])
+    @@index([email])
+    @@index([departmentId])
+    @@index([supervisorId])
+    @@index([role])
+}
+
+model VerificationToken {
+    identifier String
+    token      String   @unique
+    expires    DateTime
+
+    @@unique([identifier, token])
+}
+
+// ============================================================================
+// ORGANIZATIONAL STRUCTURE
+// ============================================================================
+
+model Department {
+    id          String    @id @default(cuid())
+    name        String    @db.VarChar(100)
+    code        String    @unique @db.VarChar(20)
+    description String?   @db.Text
+    
+    // Department hierarchy
+    parentId    String?
+    parent      Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+    children    Department[] @relation("DepartmentHierarchy")
+    
+    // Managers
+    managerId   String?
+    directorId  String?
+    
+    deletedAt   DateTime?
+    createdAt   DateTime  @default(now())
+    updatedAt   DateTime  @updatedAt
+    
+    users       User[]
+    
+    @@index([code])
+    @@index([parentId])
+}
+
+// ============================================================================
+// TRAVEL REQUEST SYSTEM
+// ============================================================================
+
+model TravelRequest {
+    id              String        @id @default(cuid())
+    requestNumber   String        @unique @db.VarChar(50)
+    
+    // Requester
+    requesterId     String
+    requester       User          @relation("TravelRequester", fields: [requesterId], references: [id])
+    
+    // Travel details
+    purpose         String        @db.Text
+    destination     String        @db.VarChar(255)
+    travelType      TravelType
+    startDate       DateTime
+    endDate         DateTime
+    estimatedBudget Decimal?      @db.Decimal(15, 2)
+    
+    // Sales-specific fields
+    projectName     String?       @db.VarChar(255)
+    customerName    String?       @db.VarChar(255)
+    salesPerson     String?       @db.VarChar(100)
+    
+    // Status
+    status          TravelStatus  @default(DRAFT)
+    
+    // Financial
+    totalReimbursed Decimal?      @db.Decimal(15, 2)
+    
+    // Lifecycle timestamps
+    submittedAt     DateTime?
+    lockedAt        DateTime?
+    closedAt        DateTime?
+    deletedAt       DateTime?
+    
+    createdAt       DateTime      @default(now())
+    updatedAt       DateTime      @updatedAt
+    
+    // Relations
+    participants    TravelParticipant[]
+    approvals       Approval[]
+    claims          Claim[]
+    
+    @@index([requesterId, status])
+    @@index([status, createdAt])
+    @@index([requestNumber])
+    @@index([travelType])
+    @@index([startDate, endDate])
+}
+
+model TravelParticipant {
+    id              String        @id @default(cuid())
+    travelRequestId String
+    travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+    
+    userId          String
+    user            User          @relation(fields: [userId], references: [id])
+    
+    role            String?       @db.VarChar(100) // e.g., "Presenter", "Observer"
+    notes           String?       @db.Text
+    
+    createdAt       DateTime      @default(now())
+    
+    @@unique([travelRequestId, userId])
+    @@index([userId])
+}
+
+// ============================================================================
+// APPROVAL SYSTEM
+// ============================================================================
+
+model Approval {
+    id              String          @id @default(cuid())
+    
+    // Can be linked to either travel request or claim
+    travelRequestId String?
+    travelRequest   TravelRequest?  @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+    
+    claimId         String?
+    claim           Claim?          @relation(fields: [claimId], references: [id], onDelete: Cascade)
+    
+    // Approval details
+    level           ApprovalLevel
+    status          ApprovalStatus  @default(PENDING)
+    
+    approverId      String
+    approver        User            @relation(fields: [approverId], references: [id])
+    
+    comments        String?         @db.Text
+    rejectionReason String?         @db.Text
+    
+    // Timestamps
+    approvedAt      DateTime?
+    rejectedAt      DateTime?
+    createdAt       DateTime        @default(now())
+    updatedAt       DateTime        @updatedAt
+    
+    @@index([travelRequestId, level])
+    @@index([claimId, level])
+    @@index([approverId, status])
+    @@index([status, createdAt])
+}
+
+// ============================================================================
+// CLAIMS SYSTEM
+// ============================================================================
+
+model Claim {
+    id              String        @id @default(cuid())
+    claimNumber     String        @unique @db.VarChar(50)
+    
+    travelRequestId String
+    travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id])
+    
+    submitterId     String
+    submitter       User          @relation(fields: [submitterId], references: [id])
+    
+    // Claim type
+    claimType       ClaimType
+    status          ClaimStatus   @default(DRAFT)
+    
+    // Entertainment-specific fields
+    entertainmentType    EntertainmentType?
+    entertainmentDate    DateTime?
+    entertainmentLocation String?       @db.VarChar(255)
+    entertainmentAddress String?        @db.Text
+    guestName            String?        @db.VarChar(255)
+    guestCompany         String?        @db.VarChar(255)
+    guestPosition        String?        @db.VarChar(100)
+    isGovernmentOfficial Boolean?       @default(false)
+    
+    // Non-entertainment-specific fields
+    expenseCategory      NonEntertainmentCategory?
+    expenseDate          DateTime?
+    expenseDestination   String?       @db.VarChar(255)
+    customerName         String?       @db.VarChar(255)
+    
+    // Common fields
+    amount          Decimal       @db.Decimal(15, 2)
+    description     String        @db.Text
+    notes           String?       @db.Text
+    
+    // Payment
+    isPaid          Boolean       @default(false)
+    paidAt          DateTime?
+    paidBy          String?       @db.VarChar(100)
+    paymentReference String?      @db.VarChar(100)
+    
+    // Metadata
+    submittedVia    String?       @db.VarChar(50) // "web" or "whatsapp"
+    
+    deletedAt       DateTime?
+    createdAt       DateTime      @default(now())
+    updatedAt       DateTime      @updatedAt
+    
+    // Relations
+    attachments     Attachment[]
+    approvals       Approval[]
+    
+    @@index([travelRequestId])
+    @@index([submitterId, status])
+    @@index([status, createdAt])
+    @@index([claimNumber])
+    @@index([claimType])
+}
+
+model Attachment {
+    id              String    @id @default(cuid())
+    claimId         String
+    claim           Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+    
+    filename        String    @db.VarChar(255)
+    originalName    String    @db.VarChar(255)
+    mimeType        String    @db.VarChar(100)
+    fileSize        Int       // bytes
+    storageUrl      String    @db.Text
+    storageProvider String    @db.VarChar(50) // "local", "r2", etc.
+    
+    // OCR/AI extracted data
+    ocrExtractedData Json?
+    ocrConfidence    Decimal?  @db.Decimal(5, 2) // 0-100
+    
+    deletedAt       DateTime?
+    createdAt       DateTime  @default(now())
+    
+    @@index([claimId])
+}
+
+// ============================================================================
+// NOTIFICATION SYSTEM
+// ============================================================================
+
+model Notification {
+    id              String              @id @default(cuid())
+    userId          String
+    user            User                @relation(fields: [userId], references: [id])
+    
+    // Notification content
+    title           String              @db.VarChar(255)
+    message         String              @db.Text
+    channel         NotificationChannel
+    status          NotificationStatus  @default(PENDING)
+    
+    // Links
+    entityType      String?             @db.VarChar(50) // "TravelRequest", "Claim"
+    entityId        String?
+    actionUrl       String?             @db.Text
+    
+    // Delivery
+    sentAt          DateTime?
+    deliveredAt     DateTime?
+    readAt          DateTime?
+    failedAt        DateTime?
+    errorMessage    String?             @db.Text
+    
+    // Metadata
+    priority        String              @db.VarChar(20) @default("NORMAL") // "LOW", "NORMAL", "HIGH"
+    templateId      String?             @db.VarChar(100)
+    
+    createdAt       DateTime            @default(now())
+    
+    @@index([userId, status])
+    @@index([status, createdAt])
+    @@index([channel])
+}
+
+// ============================================================================
+// AUDIT & COMPLIANCE
+// ============================================================================
+
+model AuditLog {
+    id              String      @id @default(cuid())
+    userId          String
+    user            User        @relation(fields: [userId], references: [id])
+    
+    // Action details
+    action          AuditAction
+    entityType      String      @db.VarChar(50)
+    entityId        String
+    
+    // Changes
+    changes         Json?       // Before/after snapshots
+    metadata        Json?       // Additional context
+    
+    // Request info
+    ipAddress       String?     @db.VarChar(45)
+    userAgent       String?     @db.Text
+    
+    createdAt       DateTime    @default(now())
+    
+    @@index([userId, createdAt])
+    @@index([entityType, entityId])
+    @@index([action, createdAt])
+}
