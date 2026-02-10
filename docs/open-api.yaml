@@ -1,0 +1,1093 @@
+openapi: 3.0.3
+info:
+  title: Travel & Claim Tool API
+  version: 1.0.0
+  description: >
+    Tool-style API for n8n + WhatsApp agent to manage trip-linked reimbursement claims.
+    Backed by Prisma schema (User, TravelRequest, Claim, Attachment, Approval).
+servers:
+  - url: https://api.yourcompany.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local dev
+
+tags:
+  - name: Tools
+    description: Tool endpoints intended for orchestrators (n8n/agents)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/tools/get_user_by_phone:
+    post:
+      tags: [Tools]
+      operationId: getUserByPhone
+      summary: Resolve WhatsApp phone number to User
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetUserByPhoneRequest'
+            examples:
+              example:
+                value:
+                  phoneNumber: "+6281234567890"
+      responses:
+        '200':
+          description: User resolved (or null if not found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUserByPhoneResponse'
+              examples:
+                found:
+                  value:
+                    user:
+                      id: "ckuuser0001"
+                      name: "Budi"
+                      email: "budi@company.com"
+                      employeeId: "EMP-001"
+                      role: "EMPLOYEE"
+                      departmentId: "ckudep0001"
+                      supervisorId: "ckuuser0002"
+                      phoneNumber: "+6281234567890"
+                notFound:
+                  value:
+                    user: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/tools/list_my_travel_requests:
+    post:
+      tags: [Tools]
+      operationId: listMyTravelRequests
+      summary: List eligible TravelRequests for a user (for linking claims)
+      description: >
+        Returns TravelRequests where the user is requester or participant.
+        You can filter by eligibility rules in backend (e.g., APPROVED/LOCKED/CLOSED).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListMyTravelRequestsRequest'
+            examples:
+              example:
+                value:
+                  userId: "ckuuser0001"
+                  eligibleOnly: true
+                  limit: 5
+      responses:
+        '200':
+          description: TravelRequest list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMyTravelRequestsResponse'
+              examples:
+                example:
+                  value:
+                    items:
+                      - id: "ckutr0001"
+                        requestNumber: "TRIP-24012"
+                        destination: "Bandung"
+                        startDate: "2026-01-05T00:00:00.000Z"
+                        endDate: "2026-01-07T00:00:00.000Z"
+                        customerName: "PT XYZ"
+                        status: "APPROVED"
+                    nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/tools/create_claim_draft:
+    post:
+      tags: [Tools]
+      operationId: createClaimDraft
+      summary: Create a new Claim draft linked to a TravelRequest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClaimDraftRequest'
+            examples:
+              entertainment:
+                value:
+                  travelRequestId: "ckutr0001"
+                  submitterId: "ckuuser0001"
+                  claimType: "ENTERTAINMENT"
+                  submittedVia: "whatsapp"
+              nonEntertainment:
+                value:
+                  travelRequestId: "ckutr0001"
+                  submitterId: "ckuuser0001"
+                  claimType: "NON_ENTERTAINMENT"
+                  submittedVia: "whatsapp"
+      responses:
+        '200':
+          description: Claim draft created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateClaimDraftResponse'
+              examples:
+                example:
+                  value:
+                    claimId: "ckuclaim0001"
+                    claimNumber: "CLM-2026-000231"
+                    status: "DRAFT"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: TravelRequest or User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/update_claim_draft:
+    post:
+      tags: [Tools]
+      operationId: updateClaimDraft
+      summary: Patch fields of a Claim draft (upsert during chat)
+      description: >
+        Backend should validate required fields depending on claimType and return missingRequiredFields.
+        Use this endpoint repeatedly as the user provides info.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClaimDraftRequest'
+            examples:
+              entertainmentPatch:
+                value:
+                  claimId: "ckuclaim0001"
+                  patch:
+                    amount: 1250000
+                    description: "Dinner entertainment"
+                    notes: "REAL_COMPANY: PT ABC"
+                    entertainmentType: "MEAL"
+                    entertainmentDate: "2026-01-05T00:00:00.000Z"
+                    entertainmentLocation: "Sushi Tei Senayan"
+                    entertainmentAddress: "Jl. ..."
+                    guestName: "Andi"
+                    guestCompany: "Kementerian X"
+                    guestPosition: "Procurement"
+                    isGovernmentOfficial: true
+              nonEntertainmentPatch:
+                value:
+                  claimId: "ckuclaim0002"
+                  patch:
+                    amount: 950000
+                    description: "Hotel 2 malam"
+                    expenseCategory: "ACCOMMODATION"
+                    expenseDate: "2026-01-06T00:00:00.000Z"
+                    expenseDestination: "Bandung"
+                    customerName: "PT XYZ"
+      responses:
+        '200':
+          description: Claim updated + validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateClaimDraftResponse'
+              examples:
+                ok:
+                  value:
+                    claimId: "ckuclaim0001"
+                    status: "DRAFT"
+                    missingRequiredFields: []
+                    validationErrors: []
+                missing:
+                  value:
+                    claimId: "ckuclaim0001"
+                    status: "DRAFT"
+                    missingRequiredFields: ["notes"]
+                    validationErrors: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Claim not editable (e.g., already submitted/paid/locked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/add_claim_attachment:
+    post:
+      tags: [Tools]
+      operationId: addClaimAttachment
+      summary: Add receipt/attachment to a Claim
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddClaimAttachmentRequest'
+            examples:
+              example:
+                value:
+                  claimId: "ckuclaim0001"
+                  file:
+                    filename: "receipt-1.jpg"
+                    originalName: "IMG_1234.jpg"
+                    mimeType: "image/jpeg"
+                    fileSize: 234567
+                    storageUrl: "https://storage.example.com/r2/receipt-1.jpg"
+                    storageProvider: "r2"
+                  ocrExtractedData: null
+                  ocrConfidence: null
+      responses:
+        '200':
+          description: Attachment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddClaimAttachmentResponse'
+              examples:
+                example:
+                  value:
+                    attachmentId: "ckuat0001"
+                    claimId: "ckuclaim0001"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Claim not editable (e.g., already submitted/paid/locked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/list_claim_attachments:
+    post:
+      tags: [Tools]
+      operationId: listClaimAttachments
+      summary: List attachments for a Claim
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListClaimAttachmentsRequest'
+            examples:
+              example:
+                value:
+                  claimId: "ckuclaim0001"
+      responses:
+        '200':
+          description: Attachment list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListClaimAttachmentsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/delete_claim_attachment:
+    post:
+      tags: [Tools]
+      operationId: deleteClaimAttachment
+      summary: Delete attachment (soft delete recommended)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteClaimAttachmentRequest'
+            examples:
+              example:
+                value:
+                  claimId: "ckuclaim0001"
+                  attachmentId: "ckuat0001"
+      responses:
+        '200':
+          description: Attachment deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteClaimAttachmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Attachment or Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Claim not editable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/get_claim:
+    post:
+      tags: [Tools]
+      operationId: getClaim
+      summary: Get a Claim for review/resume
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetClaimRequest'
+            examples:
+              example:
+                value:
+                  claimId: "ckuclaim0001"
+      responses:
+        '200':
+          description: Claim data (including attachments summary)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetClaimResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/submit_claim:
+    post:
+      tags: [Tools]
+      operationId: submitClaim
+      summary: Submit a Claim (creates approvals + sets status SUBMITTED)
+      description: >
+        Backend must validate required fields + optional receipt policy, then create Approval chain
+        and update claim status to SUBMITTED.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitClaimRequest'
+            examples:
+              example:
+                value:
+                  claimId: "ckuclaim0001"
+                  submitterId: "ckuuser0001"
+      responses:
+        '200':
+          description: Claim submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitClaimResponse'
+              examples:
+                example:
+                  value:
+                    claimId: "ckuclaim0001"
+                    status: "SUBMITTED"
+                    createdApprovals:
+                      - id: "ckuapp0001"
+                        level: "L1_SUPERVISOR"
+                        status: "PENDING"
+                        approverId: "ckuuser0002"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Claim not submittable (missing fields, already submitted, locked, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tools/get_claim_status:
+    post:
+      tags: [Tools]
+      operationId: getClaimStatus
+      summary: Get claim status by claimNumber or claimId
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetClaimStatusRequest'
+            examples:
+              byNumber:
+                value:
+                  claimNumber: "CLM-2026-000231"
+              byId:
+                value:
+                  claimId: "ckuclaim0001"
+      responses:
+        '200':
+          description: Claim status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetClaimStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Bad request / validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing/invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ---------------------------
+    # Common
+    # ---------------------------
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "amount must be > 0"
+            details:
+              type: object
+              additionalProperties: true
+
+    Role:
+      type: string
+      enum: [EMPLOYEE, SUPERVISOR, MANAGER, DIRECTOR, FINANCE, ADMIN]
+
+    TravelStatus:
+      type: string
+      enum:
+        [DRAFT, SUBMITTED, APPROVED_L1, APPROVED_L2, APPROVED_L3, APPROVED_L4, APPROVED_L5, APPROVED, REJECTED, REVISION, LOCKED, CLOSED]
+
+    ClaimType:
+      type: string
+      enum: [ENTERTAINMENT, NON_ENTERTAINMENT]
+
+    ClaimStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, REVISION, PAID]
+
+    EntertainmentType:
+      type: string
+      enum: [MEAL, GIFT, EVENT, HOSPITALITY, OTHER]
+
+    NonEntertainmentCategory:
+      type: string
+      enum:
+        [TRANSPORT, PHONE_BILLING, TRAVEL_EXPENSES, OVERTIME_MEALS, BPJS_HEALTH, EQUIPMENT_STATIONERY, MOTORCYCLE_SERVICE, ACCOMMODATION, OTHER]
+
+    ApprovalLevel:
+      type: string
+      enum: [L1_SUPERVISOR, L2_MANAGER, L3_DIRECTOR, L4_SENIOR_DIRECTOR, L5_EXECUTIVE]
+
+    ApprovalStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, REVISION_REQUESTED]
+
+    FileInput:
+      type: object
+      required: [filename, originalName, mimeType, fileSize, storageUrl, storageProvider]
+      properties:
+        filename:
+          type: string
+          example: "receipt-1.jpg"
+        originalName:
+          type: string
+          example: "IMG_1234.jpg"
+        mimeType:
+          type: string
+          example: "image/jpeg"
+        fileSize:
+          type: integer
+          example: 234567
+        storageUrl:
+          type: string
+          format: uri
+          example: "https://storage.example.com/r2/receipt-1.jpg"
+        storageProvider:
+          type: string
+          example: "r2"
+
+    # ---------------------------
+    # get_user_by_phone
+    # ---------------------------
+    GetUserByPhoneRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          type: string
+          description: E.164 format recommended
+          example: "+6281234567890"
+
+    UserSummary:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        employeeId:
+          type: string
+          nullable: true
+        role:
+          $ref: '#/components/schemas/Role'
+        departmentId:
+          type: string
+          nullable: true
+        supervisorId:
+          type: string
+          nullable: true
+        phoneNumber:
+          type: string
+          nullable: true
+
+    GetUserByPhoneResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          allOf:
+            - $ref: '#/components/schemas/UserSummary'
+          nullable: true
+
+    # ---------------------------
+    # list_my_travel_requests
+    # ---------------------------
+    ListMyTravelRequestsRequest:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+        eligibleOnly:
+          type: boolean
+          default: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+        cursor:
+          type: string
+          nullable: true
+
+    TravelRequestSummary:
+      type: object
+      required: [id, requestNumber, destination, startDate, endDate, status]
+      properties:
+        id:
+          type: string
+        requestNumber:
+          type: string
+        destination:
+          type: string
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        customerName:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/TravelStatus'
+
+    ListMyTravelRequestsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelRequestSummary'
+        nextCursor:
+          type: string
+          nullable: true
+
+    # ---------------------------
+    # create_claim_draft
+    # ---------------------------
+    CreateClaimDraftRequest:
+      type: object
+      required: [travelRequestId, submitterId, claimType]
+      properties:
+        travelRequestId:
+          type: string
+        submitterId:
+          type: string
+        claimType:
+          $ref: '#/components/schemas/ClaimType'
+        submittedVia:
+          type: string
+          description: e.g. "web" or "whatsapp"
+          default: "whatsapp"
+
+    CreateClaimDraftResponse:
+      type: object
+      required: [claimId, claimNumber, status]
+      properties:
+        claimId:
+          type: string
+        claimNumber:
+          type: string
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+
+    # ---------------------------
+    # update_claim_draft
+    # ---------------------------
+    UpdateClaimDraftRequest:
+      type: object
+      required: [claimId, patch]
+      properties:
+        claimId:
+          type: string
+        patch:
+          $ref: '#/components/schemas/ClaimPatch'
+
+    ClaimPatch:
+      type: object
+      description: >
+        Patch any subset of fields. Backend should ignore unknown fields.
+        amount is numeric (IDR). Dates are ISO 8601.
+      additionalProperties: false
+      properties:
+        # common
+        amount:
+          type: number
+          example: 1250000
+        description:
+          type: string
+          example: "Hotel 2 malam"
+        notes:
+          type: string
+          nullable: true
+          example: "REAL_COMPANY: PT ABC"
+        # entertainment
+        entertainmentType:
+          $ref: '#/components/schemas/EntertainmentType'
+        entertainmentDate:
+          type: string
+          format: date-time
+        entertainmentLocation:
+          type: string
+        entertainmentAddress:
+          type: string
+        guestName:
+          type: string
+          nullable: true
+        guestCompany:
+          type: string
+          nullable: true
+        guestPosition:
+          type: string
+          nullable: true
+        isGovernmentOfficial:
+          type: boolean
+        # non-entertainment
+        expenseCategory:
+          $ref: '#/components/schemas/NonEntertainmentCategory'
+        expenseDate:
+          type: string
+          format: date-time
+        expenseDestination:
+          type: string
+        customerName:
+          type: string
+          nullable: true
+
+    UpdateClaimDraftResponse:
+      type: object
+      required: [claimId, status, missingRequiredFields, validationErrors]
+      properties:
+        claimId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+        missingRequiredFields:
+          type: array
+          items:
+            type: string
+          description: >
+            Backend-evaluated list of required fields still missing for the claim's type.
+        validationErrors:
+          type: array
+          items:
+            type: string
+
+    # ---------------------------
+    # add_claim_attachment
+    # ---------------------------
+    AddClaimAttachmentRequest:
+      type: object
+      required: [claimId, file]
+      properties:
+        claimId:
+          type: string
+        file:
+          $ref: '#/components/schemas/FileInput'
+        ocrExtractedData:
+          type: object
+          nullable: true
+          additionalProperties: true
+        ocrConfidence:
+          type: number
+          nullable: true
+          description: 0-100
+          example: 87.5
+
+    AddClaimAttachmentResponse:
+      type: object
+      required: [attachmentId, claimId]
+      properties:
+        attachmentId:
+          type: string
+        claimId:
+          type: string
+
+    # ---------------------------
+    # list_claim_attachments
+    # ---------------------------
+    ListClaimAttachmentsRequest:
+      type: object
+      required: [claimId]
+      properties:
+        claimId:
+          type: string
+
+    AttachmentSummary:
+      type: object
+      required: [id, filename, originalName, mimeType, fileSize, storageUrl, storageProvider, createdAt]
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        fileSize:
+          type: integer
+        storageUrl:
+          type: string
+          format: uri
+        storageProvider:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ListClaimAttachmentsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentSummary'
+
+    # ---------------------------
+    # delete_claim_attachment
+    # ---------------------------
+    DeleteClaimAttachmentRequest:
+      type: object
+      required: [claimId, attachmentId]
+      properties:
+        claimId:
+          type: string
+        attachmentId:
+          type: string
+
+    DeleteClaimAttachmentResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    # ---------------------------
+    # get_claim
+    # ---------------------------
+    GetClaimRequest:
+      type: object
+      required: [claimId]
+      properties:
+        claimId:
+          type: string
+
+    ClaimDetails:
+      type: object
+      required: [id, claimNumber, travelRequestId, submitterId, claimType, status, amount, description, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        claimNumber:
+          type: string
+        travelRequestId:
+          type: string
+        submitterId:
+          type: string
+        claimType:
+          $ref: '#/components/schemas/ClaimType'
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+
+        # common
+        amount:
+          type: string
+          description: Decimal as string
+          example: "1250000.00"
+        description:
+          type: string
+        notes:
+          type: string
+          nullable: true
+
+        # entertainment
+        entertainmentType:
+          $ref: '#/components/schemas/EntertainmentType'
+          nullable: true
+        entertainmentDate:
+          type: string
+          format: date-time
+          nullable: true
+        entertainmentLocation:
+          type: string
+          nullable: true
+        entertainmentAddress:
+          type: string
+          nullable: true
+        guestName:
+          type: string
+          nullable: true
+        guestCompany:
+          type: string
+          nullable: true
+        guestPosition:
+          type: string
+          nullable: true
+        isGovernmentOfficial:
+          type: boolean
+
+        # non-entertainment
+        expenseCategory:
+          $ref: '#/components/schemas/NonEntertainmentCategory'
+          nullable: true
+        expenseDate:
+          type: string
+          format: date-time
+          nullable: true
+        expenseDestination:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
+
+        # payment
+        isPaid:
+          type: boolean
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        paidBy:
+          type: string
+          nullable: true
+        paymentReference:
+          type: string
+          nullable: true
+
+        submittedVia:
+          type: string
+          nullable: true
+
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GetClaimResponse:
+      type: object
+      required: [claim, attachments]
+      properties:
+        claim:
+          $ref: '#/components/schemas/ClaimDetails'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentSummary'
+
+    # ---------------------------
+    # submit_claim
+    # ---------------------------
+    SubmitClaimRequest:
+      type: object
+      required: [claimId, submitterId]
+      properties:
+        claimId:
+          type: string
+        submitterId:
+          type: string
+
+    CreatedApproval:
+      type: object
+      required: [id, level, status, approverId]
+      properties:
+        id:
+          type: string
+        level:
+          $ref: '#/components/schemas/ApprovalLevel'
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        approverId:
+          type: string
+
+    SubmitClaimResponse:
+      type: object
+      required: [claimId, status, createdApprovals]
+      properties:
+        claimId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+        createdApprovals:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreatedApproval'
+
+    # ---------------------------
+    # get_claim_status
+    # ---------------------------
+    GetClaimStatusRequest:
+      type: object
+      properties:
+        claimId:
+          type: string
+        claimNumber:
+          type: string
+      oneOf:
+        - required: [claimId]
+        - required: [claimNumber]
+
+    GetClaimStatusResponse:
+      type: object
+      required: [claimId, claimNumber, status, isPaid]
+      properties:
+        claimId:
+          type: string
+        claimNumber:
+          type: string
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+        isPaid:
+          type: boolean
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        paymentReference:
+          type: string
+          nullable: true

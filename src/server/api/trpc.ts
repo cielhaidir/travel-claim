@@ -10,6 +10,8 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
+import { type OpenApiMeta } from "trpc-to-openapi";
+import { type Role } from "../../../generated/prisma";
 
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
@@ -43,19 +45,22 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
  * ZodErrors so that you get typesafety on the frontend if your procedure fails due to validation
  * errors on the backend.
  */
-const t = initTRPC.context<typeof createTRPCContext>().create({
-  transformer: superjson,
-  errorFormatter({ shape, error }) {
-    return {
-      ...shape,
-      data: {
-        ...shape.data,
-        zodError:
-          error.cause instanceof ZodError ? error.cause.flatten() : null,
-      },
-    };
-  },
-});
+const t = initTRPC
+  .context<typeof createTRPCContext>()
+  .meta<OpenApiMeta>()
+  .create({
+    transformer: superjson,
+    errorFormatter({ shape, error }) {
+      return {
+        ...shape,
+        data: {
+          ...shape.data,
+          zodError:
+            error.cause instanceof ZodError ? error.cause.flatten() : null,
+        },
+      };
+    },
+  });
 
 /**
  * Create a server-side caller.
@@ -111,6 +116,54 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
 /**
+ * Middleware: Enforce user authentication
+ *
+ * Throws UNAUTHORIZED error if user is not authenticated
+ */
+const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Authentication required"
+    });
+  }
+  return next({
+    ctx: {
+      // infers the `session` as non-nullable
+      session: { ...ctx.session, user: ctx.session.user },
+    },
+  });
+});
+
+/**
+ * Middleware: Enforce role requirements
+ *
+ * @param allowedRoles - Array of roles that are allowed to access this procedure
+ */
+const enforceRole = (allowedRoles: Role[]) => {
+  return t.middleware(({ ctx, next }) => {
+    if (!ctx.session?.user?.role) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Authentication required"
+      });
+    }
+    if (!allowedRoles.includes(ctx.session.user.role)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Insufficient permissions for this operation"
+      });
+    }
+    return next({
+      ctx: {
+        // Preserve the non-nullable session type from protectedProcedure
+        session: ctx.session,
+      },
+    });
+  });
+};
+
+/**
  * Protected (authenticated) procedure
  *
  * If you want a query or mutation to ONLY be accessible to logged in users, use this. It verifies
@@ -118,10 +171,15 @@ export const publicProcedure = t.procedure.use(timingMiddleware);
  *
  * @see https://trpc.io/docs/procedures
  */
-export const protectedProcedure = t.procedure
+// export const protectedProcedure = t.procedure
+//   .use(timingMiddleware)
+//   .use(enforceUserIsAuthed);
+
+  export const protectedProcedure = t.procedure
   .use(timingMiddleware)
+  .use(enforceUserIsAuthed)
   .use(({ ctx, next }) => {
-    if (!ctx.session?.user) {
+    if (!ctx.session || !ctx.session.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });
     }
     return next({
@@ -131,3 +189,34 @@ export const protectedProcedure = t.procedure
       },
     });
   });
+
+
+/**
+ * Supervisor procedure - requires SUPERVISOR, MANAGER, DIRECTOR, or ADMIN role
+ */
+export const supervisorProcedure = protectedProcedure
+  .use(enforceRole(["SUPERVISOR", "MANAGER", "DIRECTOR", "ADMIN"]));
+
+/**
+ * Manager procedure - requires MANAGER, DIRECTOR, or ADMIN role
+ */
+export const managerProcedure = protectedProcedure
+  .use(enforceRole(["MANAGER", "DIRECTOR", "ADMIN"]));
+
+/**
+ * Director procedure - requires DIRECTOR or ADMIN role
+ */
+export const directorProcedure = protectedProcedure
+  .use(enforceRole(["DIRECTOR", "ADMIN"]));
+
+/**
+ * Finance procedure - requires FINANCE or ADMIN role
+ */
+export const financeProcedure = protectedProcedure
+  .use(enforceRole(["FINANCE", "ADMIN"]));
+
+/**
+ * Admin procedure - requires ADMIN role only
+ */
+export const adminProcedure = protectedProcedure
+  .use(enforceRole(["ADMIN"]));

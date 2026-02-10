@@ -9,7 +9,7 @@ generator client {
 
 datasource db {
     provider = "postgresql"
-    // url      = env("DATABASE_URL")
+    url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -40,6 +40,7 @@ enum TravelStatus {
     APPROVED_L3
     APPROVED_L4
     APPROVED_L5
+    APPROVED
     REJECTED
     REVISION
     LOCKED
@@ -190,6 +191,7 @@ model User {
     approvals             Approval[]
     notifications         Notification[]
     auditLogs             AuditLog[]
+    password           String?
 
     
     @@index([employeeId])
@@ -312,7 +314,7 @@ model TravelParticipant {
 model Approval {
     id              String          @id @default(cuid())
     
-    // Can be linked to either travel request or claim
+    // Can be linked to either business trip request or claim
     travelRequestId String?
     travelRequest   TravelRequest?  @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
     
