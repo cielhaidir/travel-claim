@@ -331,7 +331,7 @@ export const userRouter = createTRPCRouter({
         protect: true,
         tags: ['Users'],
         summary: 'Get organizational hierarchy',
-      }
+      },
     })
     .input(
       z.object({
