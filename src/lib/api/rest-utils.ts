@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { z, ZodError } from "zod";
-import { authOptions } from "@/server/auth/config";
+import { auth } from "@/server/auth";
 import { Role } from "../../../generated/prisma";
 
 // Standard API response format
@@ -58,8 +57,8 @@ export function successResponse<T>(
 }
 
 // Get authenticated session
-export async function getAuthSession(request: NextRequest) {
-  const session = await getServerSession(authOptions);
+export async function getAuthSession(_request: NextRequest) {
+  const session = await auth();
   
   if (!session?.user) {
     throw new ApiError("Unauthorized", "UNAUTHORIZED", 401);
@@ -111,7 +110,7 @@ export async function validateBody<T>(
         "Validation error",
         "VALIDATION_ERROR",
         400,
-        error.errors
+        error.issues
       );
     }
     throw new ApiError("Invalid JSON body", "BAD_REQUEST", 400);
@@ -158,7 +157,7 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
       "Validation error",
       "VALIDATION_ERROR",
       400,
-      error.errors
+      error.issues
     );
   }
 

@@ -367,8 +367,8 @@ export const dashboardRouter = createTRPCRouter({
     })
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
       })
     )
     .output(z.any())
@@ -595,8 +595,8 @@ export const dashboardRouter = createTRPCRouter({
     })
     .input(
       z.object({
-        startDate: z.date(),
-        endDate: z.date(),
+        startDate: z.coerce.date(),
+        endDate: z.coerce.date(),
         departmentId: z.string().optional(),
       })
     )
@@ -683,8 +683,8 @@ export const dashboardRouter = createTRPCRouter({
     })
     .input(
       z.object({
-        startDate: z.date(),
-        endDate: z.date(),
+        startDate: z.coerce.date(),
+        endDate: z.coerce.date(),
         departmentId: z.string().optional(),
       })
     )

@@ -396,9 +396,9 @@ export const notificationRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         status: z.nativeEnum(NotificationStatus),
-        sentAt: z.date().optional(),
-        deliveredAt: z.date().optional(),
-        failedAt: z.date().optional(),
+        sentAt: z.coerce.date().optional(),
+        deliveredAt: z.coerce.date().optional(),
+        failedAt: z.coerce.date().optional(),
         errorMessage: z.string().optional(),
       })
     )
@@ -427,8 +427,8 @@ export const notificationRouter = createTRPCRouter({
   getStatistics: adminProcedure
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         channel: z.nativeEnum(NotificationChannel).optional(),
       })
     )

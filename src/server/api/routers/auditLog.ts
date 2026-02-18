@@ -27,8 +27,8 @@ export const auditLogRouter = createTRPCRouter({
         action: z.nativeEnum(AuditAction).optional(),
         entityType: z.string().optional(),
         entityId: z.string().optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
       })
@@ -206,8 +206,8 @@ export const auditLogRouter = createTRPCRouter({
       z.object({
         action: z.nativeEnum(AuditAction).optional(),
         entityType: z.string().optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
       })
@@ -427,8 +427,8 @@ export const auditLogRouter = createTRPCRouter({
   getStatistics: adminProcedure
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         userId: z.string().optional(),
       })
     )
@@ -555,8 +555,8 @@ export const auditLogRouter = createTRPCRouter({
   export: adminProcedure
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         userId: z.string().optional(),
         entityType: z.string().optional(),
         action: z.nativeEnum(AuditAction).optional(),

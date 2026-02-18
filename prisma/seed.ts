@@ -4,21 +4,29 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Starting database seeding...");
+  // console.log("🌱 Starting database seeding...");
 
-  // Create departments first
-  const departments = await createDepartments();
-  console.log("✅ Departments created");
+  // // Create departments first
+  // const departments = await createDepartments();
+  // console.log("✅ Departments created");
 
-  // Create users with different roles
-  const users = await createUsers(departments);
-  console.log("✅ Users created");
+  // // Create users with different roles
+  // const users = await createUsers(departments);
+  // console.log("✅ Users created");
+
+  const admin = await prisma.user.findFirst(
+    { where: { role: "ADMIN" } }
+  );
+
+  // Create Chart of Accounts
+  const chartOfAccounts = await createChartOfAccounts(admin);
+  console.log("✅ Chart of Accounts created");
 
   // Create travel requests with APPROVED status
-  await createTravelRequests(users);
-  console.log("✅ Travel requests created");
+//   await createTravelRequests(users);
+//   console.log("✅ Travel requests created");
 
-  console.log("🎉 Seeding completed successfully!");
+//   console.log("🎉 Seeding completed successfully!");
 }
 
 async function createDepartments() {
@@ -222,6 +230,324 @@ async function createUsers(departments: any) {
     employee2,
     employee3,
   };
+}
+
+async function createChartOfAccounts(adminUser: any) {
+  // Create parent expense account
+  const expenseAccount = await prisma.chartOfAccount.upsert({
+    where: { code: "6000" },
+    update: {},
+    create: {
+      code: "6000",
+      name: "Operating Expenses",
+      accountType: "EXPENSE",
+      category: "Operating",
+      isActive: true,
+      description: "All operating expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created parent account: ${expenseAccount.code} - ${expenseAccount.name}`);
+
+  // Create travel & transportation expense accounts
+  const travelExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6100" },
+    update: {},
+    create: {
+      code: "6100",
+      name: "Travel & Transportation",
+      accountType: "EXPENSE",
+      category: "Travel",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "All travel and transportation related expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${travelExpense.code} - ${travelExpense.name}`);
+
+  // Create subcategory accounts under Travel
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6110" },
+    update: {},
+    create: {
+      code: "6110",
+      name: "Airfare",
+      accountType: "EXPENSE",
+      category: "Travel",
+      subcategory: "Transportation",
+      parentId: travelExpense.id,
+      isActive: true,
+      description: "Air travel expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6120" },
+    update: {},
+    create: {
+      code: "6120",
+      name: "Ground Transportation",
+      accountType: "EXPENSE",
+      category: "Travel",
+      subcategory: "Transportation",
+      parentId: travelExpense.id,
+      isActive: true,
+      description: "Taxi, car rental, fuel, parking expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6130" },
+    update: {},
+    create: {
+      code: "6130",
+      name: "Accommodation",
+      accountType: "EXPENSE",
+      category: "Travel",
+      subcategory: "Lodging",
+      parentId: travelExpense.id,
+      isActive: true,
+      description: "Hotel and lodging expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create meal & entertainment expense accounts
+  const mealExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6200" },
+    update: {},
+    create: {
+      code: "6200",
+      name: "Meals & Entertainment",
+      accountType: "EXPENSE",
+      category: "Entertainment",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Business meals and entertainment expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${mealExpense.code} - ${mealExpense.name}`);
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6210" },
+    update: {},
+    create: {
+      code: "6210",
+      name: "Business Meals",
+      accountType: "EXPENSE",
+      category: "Entertainment",
+      subcategory: "Meals",
+      parentId: mealExpense.id,
+      isActive: true,
+      description: "Business-related meal expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6220" },
+    update: {},
+    create: {
+      code: "6220",
+      name: "Client Entertainment",
+      accountType: "EXPENSE",
+      category: "Entertainment",
+      subcategory: "Hospitality",
+      parentId: mealExpense.id,
+      isActive: true,
+      description: "Entertainment expenses for clients and prospects",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create communication expense accounts
+  const commExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6300" },
+    update: {},
+    create: {
+      code: "6300",
+      name: "Communication Expenses",
+      accountType: "EXPENSE",
+      category: "Communication",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Phone, internet, and communication expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${commExpense.code} - ${commExpense.name}`);
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6310" },
+    update: {},
+    create: {
+      code: "6310",
+      name: "Phone & Mobile",
+      accountType: "EXPENSE",
+      category: "Communication",
+      subcategory: "Telecommunications",
+      parentId: commExpense.id,
+      isActive: true,
+      description: "Phone and mobile billing expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create office & supplies expense accounts
+  const officeExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6400" },
+    update: {},
+    create: {
+      code: "6400",
+      name: "Office & Supplies",
+      accountType: "EXPENSE",
+      category: "Office",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Office supplies and equipment expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${officeExpense.code} - ${officeExpense.name}`);
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6410" },
+    update: {},
+    create: {
+      code: "6410",
+      name: "Stationery & Supplies",
+      accountType: "EXPENSE",
+      category: "Office",
+      subcategory: "Supplies",
+      parentId: officeExpense.id,
+      isActive: true,
+      description: "Office stationery and supplies",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create employee benefits expense accounts
+  const benefitsExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6500" },
+    update: {},
+    create: {
+      code: "6500",
+      name: "Employee Benefits",
+      accountType: "EXPENSE",
+      category: "Benefits",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Employee benefits and welfare expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${benefitsExpense.code} - ${benefitsExpense.name}`);
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6510" },
+    update: {},
+    create: {
+      code: "6510",
+      name: "BPJS & Health Insurance",
+      accountType: "EXPENSE",
+      category: "Benefits",
+      subcategory: "Insurance",
+      parentId: benefitsExpense.id,
+      isActive: true,
+      description: "BPJS health insurance and medical benefits",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6520" },
+    update: {},
+    create: {
+      code: "6520",
+      name: "Overtime Meals",
+      accountType: "EXPENSE",
+      category: "Benefits",
+      subcategory: "Meals",
+      parentId: benefitsExpense.id,
+      isActive: true,
+      description: "Employee overtime meal allowances",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create vehicle & maintenance expense accounts
+  const vehicleExpense = await prisma.chartOfAccount.upsert({
+    where: { code: "6600" },
+    update: {},
+    create: {
+      code: "6600",
+      name: "Vehicle Expenses",
+      accountType: "EXPENSE",
+      category: "Vehicle",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Vehicle-related expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: ${vehicleExpense.code} - ${vehicleExpense.name}`);
+
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6610" },
+    update: {},
+    create: {
+      code: "6610",
+      name: "Vehicle Maintenance",
+      accountType: "EXPENSE",
+      category: "Vehicle",
+      subcategory: "Maintenance",
+      parentId: vehicleExpense.id,
+      isActive: true,
+      description: "Motorcycle and vehicle maintenance and service",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+
+  // Create miscellaneous expense account
+  await prisma.chartOfAccount.upsert({
+    where: { code: "6900" },
+    update: {},
+    create: {
+      code: "6900",
+      name: "Other Expenses",
+      accountType: "EXPENSE",
+      category: "Miscellaneous",
+      parentId: expenseAccount.id,
+      isActive: true,
+      description: "Other miscellaneous business expenses",
+      createdById: adminUser.id,
+      updatedById: adminUser.id,
+    },
+  });
+  console.log(`   💰 Created account: 6900 - Other Expenses`);
+
+  return { expenseAccount, travelExpense, mealExpense, commExpense, officeExpense, benefitsExpense, vehicleExpense };
 }
 
 async function createTravelRequests(users: any) {

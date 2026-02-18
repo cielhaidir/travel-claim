@@ -33,6 +33,12 @@ const navigationItems: NavItem[] = [
     roles: ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE_MANAGER", "ADMIN"],
   },
   {
+    label: "Chart of Accounts",
+    href: "/chart-of-accounts",
+    icon: "📋",
+    roles: ["FINANCE_MANAGER", "ADMIN"],
+  },
+  {
     label: "Finance",
     href: "/finance",
     icon: "💳",

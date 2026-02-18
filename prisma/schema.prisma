@@ -123,6 +123,14 @@ enum AuditAction {
     REOPEN
 }
 
+enum COAType {
+    ASSET
+    LIABILITY
+    EQUITY
+    REVENUE
+    EXPENSE
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
@@ -191,7 +199,11 @@ model User {
     approvals             Approval[]
     notifications         Notification[]
     auditLogs             AuditLog[]
-    password           String?
+    password              String?
+    
+    // Chart of Accounts relations
+    coaCreated            ChartOfAccount[] @relation("COACreatedBy")
+    coaUpdated            ChartOfAccount[] @relation("COAUpdatedBy")
 
     
     @@index([employeeId])
@@ -236,6 +248,45 @@ model Department {
     
     @@index([code])
     @@index([parentId])
+}
+
+// ============================================================================
+// CHART OF ACCOUNTS (COA)
+// ============================================================================
+
+model ChartOfAccount {
+    id            String   @id @default(cuid())
+    code          String   @unique @db.VarChar(20)
+    name          String   @db.VarChar(100)
+    accountType   COAType
+    category      String   @db.VarChar(50)
+    subcategory   String?  @db.VarChar(50)
+    
+    // Self-referential hierarchy
+    parentId      String?
+    parent        ChartOfAccount?  @relation("COAParent", fields: [parentId], references: [id])
+    children      ChartOfAccount[] @relation("COAParent")
+    
+    isActive      Boolean  @default(true)
+    description   String?  @db.Text
+    
+    // Audit fields
+    createdById   String
+    createdBy     User     @relation("COACreatedBy", fields: [createdById], references: [id])
+    updatedById   String
+    updatedBy     User     @relation("COAUpdatedBy", fields: [updatedById], references: [id])
+    
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
+    
+    // Relations
+    claims        Claim[]
+    auditLogs     AuditLog[] @relation("COAAuditLogs")
+    
+    @@index([code])
+    @@index([accountType])
+    @@index([parentId])
+    @@index([isActive])
 }
 
 // ============================================================================
@@ -382,6 +433,10 @@ model Claim {
     description     String        @db.Text
     notes           String?       @db.Text
     
+    // Chart of Accounts
+    coaId           String?
+    chartOfAccount  ChartOfAccount? @relation(fields: [coaId], references: [id])
+    
     // Payment
     isPaid          Boolean       @default(false)
     paidAt          DateTime?
@@ -404,6 +459,7 @@ model Claim {
     @@index([status, createdAt])
     @@index([claimNumber])
     @@index([claimType])
+    @@index([coaId])
 }
 
 model Attachment {
@@ -480,6 +536,10 @@ model AuditLog {
     entityType      String      @db.VarChar(50)
     entityId        String
     
+    // Chart of Accounts relation (optional)
+    chartOfAccountId String?
+    chartOfAccount   ChartOfAccount? @relation("COAAuditLogs", fields: [chartOfAccountId], references: [id])
+    
     // Changes
     changes         Json?       // Before/after snapshots
     metadata        Json?       // Additional context
@@ -493,4 +553,5 @@ model AuditLog {
     @@index([userId, createdAt])
     @@index([entityType, entityId])
     @@index([action, createdAt])
+    @@index([chartOfAccountId])
 }

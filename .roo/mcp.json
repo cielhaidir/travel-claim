@@ -1,0 +1,23 @@
+{
+	"mcpServers": {
+		"travel-claim-system": {
+			"url": "http://localhost:3000/api/mcp/sse",
+			"transport": "sse",
+			"headers": {
+				"Authorization": "Bearer e900ffa36722e00e275cc372b462972f11ac133d4b802b9703523e99703920d0"
+			},
+			"alwaysAllow": [
+				"get_user_by_phone",
+				"list_my_travel_requests",
+				"get_claim",
+				"create_entertainment_claim_draft",
+				"create_nonentertainment_claim_draft",
+				"update_claim_draft",
+				"submit_claim",
+				"list_claim_attachments",
+				"add_claim_attachment",
+				"delete_claim_attachment"
+			]
+		}
+	}
+}

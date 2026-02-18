@@ -1,18 +1,17 @@
 import { appRouter } from "@/server/api/root";
 import { createTRPCContext } from "@/server/api/trpc";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { type NextRequest } from "next/server";
-import { createOpenApiFetchHandler } from "trpc-to-openapi";
 
 export const dynamic = "force-dynamic";
 
-const handler = (req: NextRequest) => {
-  return createOpenApiFetchHandler({
-    endpoint: "/api",
+const handler = (req: NextRequest) =>
+  fetchRequestHandler({
+    endpoint: "/api/trpc",
+    req,
     router: appRouter,
     createContext: () => createTRPCContext({ headers: req.headers }),
-    req,
   });
-};
 
 export {
   handler as GET,

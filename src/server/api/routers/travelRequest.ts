@@ -25,15 +25,20 @@ export const travelRequestRouter = createTRPCRouter({
         protect: true,
         tags: ['Travel Requests'],
         summary: 'Get all travel requests',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "list_my_travel_requests",
+        description: "List all travel requests for the current user that are eligible for claims",
+      },
     })
     .input(
       z.object({
         status: z.nativeEnum(TravelStatus).optional(),
         travelType: z.nativeEnum(TravelType).optional(),
         requesterId: z.string().optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
       })
@@ -321,8 +326,8 @@ export const travelRequestRouter = createTRPCRouter({
         purpose: z.string().min(10),
         destination: z.string().min(1),
         travelType: z.nativeEnum(TravelType),
-        startDate: z.date(),
-        endDate: z.date(),
+        startDate: z.coerce.date(),
+        endDate: z.coerce.date(),
         estimatedBudget: z.number().positive().optional(),
         projectName: z.string().optional(),
         customerName: z.string().optional(),
@@ -368,7 +373,7 @@ export const travelRequestRouter = createTRPCRouter({
             : undefined,
         },
         include: {
-          requester: true,
+          requester: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
           participants: {
             include: {
               user: true,
@@ -410,8 +415,8 @@ export const travelRequestRouter = createTRPCRouter({
         purpose: z.string().min(10).optional(),
         destination: z.string().min(1).optional(),
         travelType: z.nativeEnum(TravelType).optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         estimatedBudget: z.number().positive().optional(),
         projectName: z.string().optional(),
         customerName: z.string().optional(),
@@ -483,7 +488,7 @@ export const travelRequestRouter = createTRPCRouter({
             : undefined,
         },
         include: {
-          requester: true,
+          requester: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
           participants: {
             include: {
               user: true,
@@ -596,7 +601,7 @@ export const travelRequestRouter = createTRPCRouter({
         include: {
           approvals: {
             include: {
-              approver: true,
+              approver: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, image: true } },
             },
           },
         },
@@ -835,8 +840,8 @@ export const travelRequestRouter = createTRPCRouter({
     })
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         departmentId: z.string().optional(),
       })
     )

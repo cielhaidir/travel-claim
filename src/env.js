@@ -27,6 +27,12 @@ export const env = createEnv({
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
+    // Required for MCP SSE transport; optional when using Streamable HTTP (/api/mcp/mcp)
+    REDIS_URL: z.string().url().optional(),
+    // Static API token for MCP header-based authentication (e.g. used by Roo/Claude Desktop)
+    MCP_API_TOKEN: z.string().optional(),
+    // Email of the user to impersonate when MCP_API_TOKEN is used
+    MCP_API_TOKEN_USER_EMAIL: z.string().email().optional(),
   },
 
   /**
@@ -49,6 +55,9 @@ export const env = createEnv({
     AZURE_AD_TENANT_ID: process.env.AZURE_AD_TENANT_ID,
     DATABASE_URL: process.env.DATABASE_URL,
     NODE_ENV: process.env.NODE_ENV,
+    REDIS_URL: process.env.REDIS_URL,
+    MCP_API_TOKEN: process.env.MCP_API_TOKEN,
+    MCP_API_TOKEN_USER_EMAIL: process.env.MCP_API_TOKEN_USER_EMAIL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

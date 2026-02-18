@@ -17,7 +17,12 @@ export const attachmentRouter = createTRPCRouter({
         protect: true,
         tags: ['Attachments'],
         summary: 'Get attachments by claim ID',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "list_claim_attachments",
+        description: "List all attachments for a specific claim",
+      },
     })
     .input(z.object({ claimId: z.string() }))
     .output(z.any())
@@ -88,10 +93,10 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: true,
+              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
               travelRequest: {
                 include: {
-                  requester: true,
+                  requester: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, image: true } },
                   participants: true,
                 },
               },
@@ -136,7 +141,12 @@ export const attachmentRouter = createTRPCRouter({
         protect: true,
         tags: ['Attachments'],
         summary: 'Create attachment metadata',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "add_claim_attachment",
+        description: "Add an attachment to a claim with metadata",
+      },
     })
     .input(
       z.object({
@@ -279,7 +289,7 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: true,
+              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
             },
           },
         },
@@ -334,7 +344,12 @@ export const attachmentRouter = createTRPCRouter({
         protect: true,
         tags: ['Attachments'],
         summary: 'Delete attachment',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "delete_claim_attachment",
+        description: "Delete an attachment from a claim",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -344,7 +359,7 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: true,
+              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
             },
           },
         },

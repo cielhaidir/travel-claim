@@ -34,8 +34,8 @@ export const claimRouter = createTRPCRouter({
         claimType: z.nativeEnum(ClaimType).optional(),
         travelRequestId: z.string().optional(),
         submitterId: z.string().optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
       }).optional()
@@ -151,7 +151,12 @@ export const claimRouter = createTRPCRouter({
         protect: true,
         tags: ['Claims'],
         summary: 'Get claim by ID',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "get_claim",
+        description: "Get detailed information about a specific claim for review or resume",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -310,13 +315,18 @@ export const claimRouter = createTRPCRouter({
         protect: true,
         tags: ['Claims'],
         summary: 'Create entertainment claim',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "create_entertainment_claim_draft",
+        description: "Create a draft entertainment claim for a travel request",
+      },
     })
     .input(
       z.object({
         travelRequestId: z.string(),
         entertainmentType: z.nativeEnum(EntertainmentType),
-        entertainmentDate: z.date(),
+        entertainmentDate: z.coerce.date(),
         entertainmentLocation: z.string(),
         entertainmentAddress: z.string().optional(),
         guestName: z.string(),
@@ -389,7 +399,7 @@ export const claimRouter = createTRPCRouter({
           ...claimData,
         },
         include: {
-          submitter: true,
+          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
           travelRequest: true,
         },
       });
@@ -419,13 +429,18 @@ export const claimRouter = createTRPCRouter({
         protect: true,
         tags: ['Claims'],
         summary: 'Create non-entertainment claim',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "create_nonentertainment_claim_draft",
+        description: "Create a draft non-entertainment claim for a travel request",
+      },
     })
     .input(
       z.object({
         travelRequestId: z.string(),
         expenseCategory: z.nativeEnum(NonEntertainmentCategory),
-        expenseDate: z.date(),
+        expenseDate: z.coerce.date(),
         expenseDestination: z.string().optional(),
         customerName: z.string().optional(),
         amount: z.number().positive(),
@@ -494,7 +509,7 @@ export const claimRouter = createTRPCRouter({
           ...claimData,
         },
         include: {
-          submitter: true,
+          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
           travelRequest: true,
         },
       });
@@ -517,11 +532,25 @@ export const claimRouter = createTRPCRouter({
 
   // Update claim (only in DRAFT or REVISION status)
   update: protectedProcedure
+    .meta({
+      openapi: {
+        method: 'PUT',
+        path: '/claims/{id}',
+        protect: true,
+        tags: ['Claims'],
+        summary: 'Update claim',
+      },
+      mcp: {
+        enabled: true,
+        name: "update_claim_draft",
+        description: "Update a claim draft (only works for DRAFT or REVISION status)",
+      },
+    })
     .input(
       z.object({
         id: z.string(),
         entertainmentType: z.nativeEnum(EntertainmentType).optional(),
-        entertainmentDate: z.date().optional(),
+        entertainmentDate: z.coerce.date().optional(),
         entertainmentLocation: z.string().optional(),
         entertainmentAddress: z.string().optional(),
         guestName: z.string().optional(),
@@ -529,7 +558,7 @@ export const claimRouter = createTRPCRouter({
         guestPosition: z.string().optional(),
         isGovernmentOfficial: z.boolean().optional(),
         expenseCategory: z.nativeEnum(NonEntertainmentCategory).optional(),
-        expenseDate: z.date().optional(),
+        expenseDate: z.coerce.date().optional(),
         expenseDestination: z.string().optional(),
         customerName: z.string().optional(),
         amount: z.number().positive().optional(),
@@ -572,7 +601,7 @@ export const claimRouter = createTRPCRouter({
         where: { id },
         data: updateData,
         include: {
-          submitter: true,
+          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
           travelRequest: true,
           attachments: true,
         },
@@ -597,6 +626,20 @@ export const claimRouter = createTRPCRouter({
 
   // Submit claim for approval
   submit: protectedProcedure
+    .meta({
+      openapi: {
+        method: 'POST',
+        path: '/claims/{id}/submit',
+        protect: true,
+        tags: ['Claims'],
+        summary: 'Submit claim for approval',
+      },
+      mcp: {
+        enabled: true,
+        name: "submit_claim",
+        description: "Submit a draft claim for approval",
+      },
+    })
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -684,7 +727,7 @@ export const claimRouter = createTRPCRouter({
         include: {
           approvals: {
             include: {
-              approver: true,
+              approver: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, image: true } },
             },
           },
         },
@@ -840,8 +883,8 @@ export const claimRouter = createTRPCRouter({
   getStatistics: financeProcedure
     .input(
       z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
         departmentId: z.string().optional(),
       })
     )

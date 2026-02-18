@@ -10,8 +10,22 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
-import { type OpenApiMeta } from "trpc-to-openapi";
+import { type McpMeta } from "trpc-to-mcp";
 import { type Role } from "../../../generated/prisma";
+
+// OpenApiMeta stub — trpc-to-openapi removed (zod v4 incompatible).
+// Keeps existing .meta({ openapi: ... }) calls compiling without the package.
+interface OpenApiMeta {
+  openapi?: {
+    method?: string;
+    path?: string;
+    summary?: string;
+    description?: string;
+    tags?: string[];
+    protect?: boolean;
+    [key: string]: unknown;
+  };
+}
 
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
@@ -47,7 +61,7 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
  */
 const t = initTRPC
   .context<typeof createTRPCContext>()
-  .meta<OpenApiMeta>()
+  .meta<McpMeta & OpenApiMeta>()
   .create({
     transformer: superjson,
     errorFormatter({ shape, error }) {
@@ -129,6 +143,7 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   }
   return next({
     ctx: {
+      ...ctx,
       // infers the `session` as non-nullable
       session: { ...ctx.session, user: ctx.session.user },
     },
@@ -156,6 +171,7 @@ const enforceRole = (allowedRoles: Role[]) => {
     }
     return next({
       ctx: {
+        ...ctx,
         // Preserve the non-nullable session type from protectedProcedure
         session: ctx.session,
       },
@@ -184,6 +200,7 @@ const enforceRole = (allowedRoles: Role[]) => {
     }
     return next({
       ctx: {
+        ...ctx,
         // infers the `session` as non-nullable
         session: { ...ctx.session, user: ctx.session.user },
       },

@@ -60,6 +60,75 @@ export const userRouter = createTRPCRouter({
     return user;
   }),
 
+  // Get user by phone number (dedicated MCP tool)
+  getByPhone: managerProcedure
+    .meta({
+      openapi: {
+        method: 'GET',
+        path: '/users/by-phone',
+        protect: true,
+        tags: ['Users'],
+        summary: 'Get user by phone number',
+      },
+      mcp: {
+        enabled: true,
+        name: "get_user_by_phone",
+        description: "Get user information by phone number",
+      },
+    })
+    .input(
+      z.object({
+        search: z.string().min(1),
+      })
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findFirst({
+        where: {
+          deletedAt: null,
+          phoneNumber: { contains: input.search, mode: "insensitive" },
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          emailVerified: true,
+          image: true,
+          employeeId: true,
+          role: true,
+          departmentId: true,
+          supervisorId: true,
+          phoneNumber: true,
+          deletedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          department: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          supervisor: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          _count: {
+            select: {
+              directReports: true,
+              travelRequests: true,
+              claims: true,
+            },
+          },
+        },
+      });
+
+      return { user };
+    }),
+
   // Get all users with filters
   getAll: managerProcedure
     .meta({
@@ -69,7 +138,7 @@ export const userRouter = createTRPCRouter({
         protect: true,
         tags: ['Users'],
         summary: 'Get all users',
-      }
+      },
     })
     .input(
       z.object({
@@ -100,6 +169,7 @@ export const userRouter = createTRPCRouter({
           { name: { contains: input.search, mode: "insensitive" } },
           { email: { contains: input.search, mode: "insensitive" } },
           { employeeId: { contains: input.search, mode: "insensitive" } },
+          { phoneNumber: { contains: input.search, mode: "insensitive" } },
         ];
       }
 
