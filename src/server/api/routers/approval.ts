@@ -24,7 +24,12 @@ export const approvalRouter = createTRPCRouter({
         protect: true,
         tags: ['Approvals'],
         summary: 'Get my approvals',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "list_my_approvals",
+        description: "List all pending and historical approvals assigned to the current supervisor/manager",
+      },
     })
     .input(
       z.object({
@@ -125,7 +130,12 @@ export const approvalRouter = createTRPCRouter({
         protect: true,
         tags: ['Approvals'],
         summary: 'Get pending approvals count',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "get_pending_approvals_count",
+        description: "Get the number of pending approvals waiting for the current user's action",
+      },
     })
     .input(z.object({}))
     .output(z.number())
@@ -147,7 +157,12 @@ export const approvalRouter = createTRPCRouter({
         protect: true,
         tags: ['Approvals'],
         summary: 'Get approval by ID',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "get_approval_by_id",
+        description: "Get detailed information about a specific approval by its ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -277,7 +292,12 @@ export const approvalRouter = createTRPCRouter({
         protect: true,
         tags: ['Approvals'],
         summary: 'Approve travel request',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "approve_travel_request",
+        description: "Approve a travel request approval at the current supervisor/manager level",
+      },
     })
     .input(
       z.object({
@@ -408,7 +428,12 @@ export const approvalRouter = createTRPCRouter({
         protect: true,
         tags: ['Approvals'],
         summary: 'Reject travel request',
-      }
+      },
+      mcp: {
+        enabled: true,
+        name: "reject_travel_request",
+        description: "Reject a travel request with a mandatory rejection reason",
+      },
     })
     .input(
       z.object({
@@ -486,6 +511,20 @@ export const approvalRouter = createTRPCRouter({
 
   // Request revision for travel request
   requestRevision: supervisorProcedure
+    .meta({
+      openapi: {
+        method: 'POST',
+        path: '/approvals/{approvalId}/request-revision',
+        protect: true,
+        tags: ['Approvals'],
+        summary: 'Request revision for travel request',
+      },
+      mcp: {
+        enabled: true,
+        name: "request_travel_request_revision",
+        description: "Request a revision for a travel request, resetting all approvals back to pending",
+      },
+    })
     .input(
       z.object({
         approvalId: z.string(),
@@ -574,6 +613,20 @@ export const approvalRouter = createTRPCRouter({
 
   // Approve claim
   approveClaim: supervisorProcedure
+    .meta({
+      openapi: {
+        method: 'POST',
+        path: '/approvals/{approvalId}/approve-claim',
+        protect: true,
+        tags: ['Approvals'],
+        summary: 'Approve claim',
+      },
+      mcp: {
+        enabled: true,
+        name: "approve_claim",
+        description: "Approve a claim at the current supervisor/manager level",
+      },
+    })
     .input(
       z.object({
         approvalId: z.string(),
@@ -666,6 +719,20 @@ export const approvalRouter = createTRPCRouter({
 
   // Reject claim
   rejectClaim: supervisorProcedure
+    .meta({
+      openapi: {
+        method: 'POST',
+        path: '/approvals/{approvalId}/reject-claim',
+        protect: true,
+        tags: ['Approvals'],
+        summary: 'Reject claim',
+      },
+      mcp: {
+        enabled: true,
+        name: "reject_claim",
+        description: "Reject a claim with a mandatory rejection reason",
+      },
+    })
     .input(
       z.object({
         approvalId: z.string(),
@@ -742,6 +809,20 @@ export const approvalRouter = createTRPCRouter({
 
   // Request revision for claim
   requestClaimRevision: supervisorProcedure
+    .meta({
+      openapi: {
+        method: 'POST',
+        path: '/approvals/{approvalId}/request-claim-revision',
+        protect: true,
+        tags: ['Approvals'],
+        summary: 'Request revision for claim',
+      },
+      mcp: {
+        enabled: true,
+        name: "request_claim_revision",
+        description: "Request a revision for a claim, resetting all approvals back to pending",
+      },
+    })
     .input(
       z.object({
         approvalId: z.string(),

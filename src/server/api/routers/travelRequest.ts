@@ -451,7 +451,7 @@ export const travelRequestRouter = createTRPCRouter({
       }
 
       // Can only update DRAFT or REVISION requests
-      if (![TravelStatus.DRAFT, TravelStatus.REVISION].includes(existing.status)) {
+      if (!([TravelStatus.DRAFT, TravelStatus.REVISION] as TravelStatus[]).includes(existing.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only update requests in DRAFT or REVISION status",
@@ -554,7 +554,7 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      if (![TravelStatus.DRAFT, TravelStatus.REVISION].includes(request.status)) {
+      if (!([TravelStatus.DRAFT, TravelStatus.REVISION] as TravelStatus[]).includes(request.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only submit requests in DRAFT or REVISION status",

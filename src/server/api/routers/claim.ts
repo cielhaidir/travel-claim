@@ -371,7 +371,7 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Check if travel request is approved or locked
-      if (![TravelStatus.APPROVED, TravelStatus.LOCKED].includes(travelRequest.status)) {
+      if (!([ TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]).includes(travelRequest.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Claims can only be created for approved travel requests",
@@ -481,7 +481,7 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Check travel request status
-      if (![TravelStatus.APPROVED, TravelStatus.LOCKED].includes(travelRequest.status)) {
+      if (!([TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]).includes(travelRequest.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Claims can only be created for approved travel requests",
@@ -590,7 +590,7 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Can only update DRAFT or REVISION claims
-      if (![ClaimStatus.DRAFT, ClaimStatus.REVISION].includes(existing.status)) {
+      if (!([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(existing.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only update claims in DRAFT or REVISION status",
@@ -671,7 +671,7 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      if (![ClaimStatus.DRAFT, ClaimStatus.REVISION].includes(claim.status)) {
+      if (!([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(claim.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only submit claims in DRAFT or REVISION status",
@@ -698,7 +698,7 @@ export const claimRouter = createTRPCRouter({
       }
 
       // L2: Finance for high amounts (example: > 5000000)
-      if (claim.amount > 5000000) {
+      if (Number(claim.amount) > 5000000) {
         // Find finance user
         const financeUser = await ctx.db.user.findFirst({
           where: {

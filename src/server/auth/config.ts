@@ -41,6 +41,7 @@ declare module "next-auth" {
  */
 export const authConfig = {
   // secret: process.env.AUTH_SECRET,
+  trustHost: true,
   providers: [
     // Credentials provider (always available)
     CredentialsProvider({
@@ -280,7 +281,7 @@ export const authConfig = {
     },
   },
   events: {
-    async signIn({ user, account, profile, isNewUser }) {
+    async signIn({ user, account, profile: _profile, isNewUser }) {
       // Log authentication event for audit
       if (user.id) {
         try {
