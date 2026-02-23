@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "next build",
+    "postbuild": "cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public",
     "check": "next lint && tsc --noEmit",
     "db:generate": "prisma migrate dev",
     "db:migrate": "prisma migrate deploy",
@@ -18,7 +19,7 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "preview": "next build && next start",
-    "start": "next start",
+    "start": "node .next/standalone/server.js",
     "typecheck": "tsc --noEmit"
   },
   "prisma": {
@@ -34,7 +35,7 @@
     "@trpc/server": "^11.0.0",
     "bcryptjs": "^3.0.3",
     "mcp-handler": "^1.0.7",
-    "next": "^15.2.3",
+    "next": "^16.1.6",
     "next-auth": "5.0.0-beta.30",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -3,16 +3,15 @@
  * for Docker builds.
  */
 import "./src/env.js";
+import path from "path";
 
 /** @type {import("next").NextConfig} */
 const config = {
   output: "standalone",
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  outputFileTracingRoot: path.resolve("./"),
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
 };
+
 
 export default config;

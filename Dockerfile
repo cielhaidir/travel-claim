@@ -41,9 +41,9 @@ ENV SKIP_ENV_VALIDATION=1
 RUN npx prisma generate
 
 RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
+  if [ -f yarn.lock ]; then yarn run next build; \
+  elif [ -f package-lock.json ]; then npx next build; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run next build; \
   else echo "Lockfile not found." && exit 1; \
   fi
 
@@ -93,5 +93,5 @@ ENV PORT=3000
 # https://nextjs.org/docs/pages/api-reference/config/next-config-js/output
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
 
+CMD ["node", "server.js"]

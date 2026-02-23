@@ -60,9 +60,9 @@ services:
 
   # ── Next.js Application ───────────────────────────────────────────────────
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     image: saidhr/travel-claim:latest
     container_name: travel_app
     restart: unless-stopped
@@ -71,6 +71,8 @@ services:
     #     condition: service_healthy
     #   redis:
     #     condition: service_healthy
+    env_file:
+      - .env
     environment:
       # Auth
       AUTH_SECRET: ${AUTH_SECRET}
@@ -82,11 +84,11 @@ services:
       AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET:-}
       AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID:-}
 
-      # Database – points at the postgres service
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-travel-claim}
+      # Database – taken directly from .env (DATABASE_URL)
+      DATABASE_URL: ${DATABASE_URL}
 
-      # Redis – points at the redis service
-      REDIS_URL: redis://redis:6379
+      # Redis – taken directly from .env (REDIS_URL)
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
 
       # MCP
       MCP_API_TOKEN: ${MCP_API_TOKEN:-}
