@@ -6,6 +6,7 @@ import {
   ClaimStatus,
   AuditAction,
   ApprovalLevel,
+  type Prisma,
 } from "../../../../generated/prisma";
 
 import {
@@ -41,7 +42,7 @@ export const approvalRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ApprovalWhereInput = {
         approverId: ctx.session.user.id,
       };
 

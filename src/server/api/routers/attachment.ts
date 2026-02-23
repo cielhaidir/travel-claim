@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { AuditAction } from "../../../../generated/prisma";
+import { AuditAction, type Prisma } from "../../../../generated/prisma";
 
 import {
   createTRPCRouter,
@@ -157,7 +157,7 @@ export const attachmentRouter = createTRPCRouter({
         fileSize: z.number().positive(),
         storageUrl: z.string(),
         storageProvider: z.string().default("local"),
-        ocrExtractedData: z.any().optional(),
+        ocrExtractedData: z.unknown().optional(),
         ocrConfidence: z.number().min(0).max(100).optional(),
       })
     )
@@ -239,7 +239,7 @@ export const attachmentRouter = createTRPCRouter({
           fileSize: input.fileSize,
           storageUrl: input.storageUrl,
           storageProvider: input.storageProvider,
-          ocrExtractedData: input.ocrExtractedData,
+          ocrExtractedData: input.ocrExtractedData as Prisma.InputJsonValue | undefined,
           ocrConfidence: input.ocrConfidence,
         },
       });
@@ -276,13 +276,17 @@ export const attachmentRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        ocrExtractedData: z.any().optional(),
+        ocrExtractedData: z.unknown().optional(),
         ocrConfidence: z.number().min(0).max(100).optional(),
       })
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const { id, ...updateData } = input;
+      const { id, ocrExtractedData, ...rest } = input;
+      const updateData = {
+        ...rest,
+        ...(ocrExtractedData !== undefined && { ocrExtractedData: ocrExtractedData as Prisma.InputJsonValue }),
+      };
 
       const attachment = await ctx.db.attachment.findUnique({
         where: { id },

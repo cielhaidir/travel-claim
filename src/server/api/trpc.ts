@@ -195,7 +195,7 @@ const enforceRole = (allowedRoles: Role[]) => {
   .use(timingMiddleware)
   .use(enforceUserIsAuthed)
   .use(({ ctx, next }) => {
-    if (!ctx.session || !ctx.session.user) {
+    if (!ctx.session?.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });
     }
     return next({

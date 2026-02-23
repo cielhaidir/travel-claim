@@ -15,7 +15,7 @@ import { useState, useEffect } from "react";
 
 export default function LoginPage() {
    const router = useRouter();
-   const { data: session, status } = useSession();
+   const { data: session } = useSession();
    const [email, setEmail] = useState("");
    const [password, setPassword] = useState("");
    const [error, setError] = useState("");
@@ -27,12 +27,6 @@ export default function LoginPage() {
       router.push("/");
     }
   }, [session, router]);
-
-  const handleAzureLogin = () => {
-    signIn("azure-ad", {
-      callbackUrl: "/",
-    });
-  }
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,14 +218,14 @@ export default function LoginPage() {
             Need Help?
           </h3>
           <p className="text-xs text-blue-800">
-            If you're having trouble signing in, please contact your IT administrator 
+            If you&apos;re having trouble signing in, please contact your IT administrator 
             or email support@example.com for assistance.
           </p>
         </div>
 
         <div className="text-center text-sm text-gray-600">
           <p>
-            Don't have access?{" "}
+            Don&apos;t have access?{" "}
             <a href="#" className="font-medium text-blue-600 hover:text-blue-700">
               Request Access
             </a>

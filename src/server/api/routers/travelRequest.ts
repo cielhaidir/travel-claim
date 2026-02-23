@@ -6,6 +6,7 @@ import {
   ApprovalLevel,
   ApprovalStatus,
   AuditAction,
+  type Prisma,
 } from "../../../../generated/prisma";
 
 import {
@@ -45,7 +46,7 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
       };
 
@@ -69,15 +70,14 @@ export const travelRequestRouter = createTRPCRouter({
         where.requesterId = input.requesterId;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ startDate: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ endDate: { lte: input.endDate } });
-        }
+      const andFilters: Prisma.TravelRequestWhereInput[] = [];
+      if (input?.startDate) {
+        andFilters.push({ startDate: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFilters.push({ endDate: { lte: input.endDate } });
+      }
+      if (andFilters.length > 0) where.AND = andFilters;
 
       const requests = await ctx.db.travelRequest.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -847,7 +847,7 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
       };
 
@@ -857,15 +857,14 @@ export const travelRequestRouter = createTRPCRouter({
         };
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersStats: Prisma.TravelRequestWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersStats.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersStats.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersStats.length > 0) where.AND = andFiltersStats;
 
       const [total, byStatus, byType] = await Promise.all([
         ctx.db.travelRequest.count({ where }),

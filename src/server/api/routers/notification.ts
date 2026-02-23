@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import {
   NotificationChannel,
   NotificationStatus,
+  type Prisma,
 } from "../../../../generated/prisma";
 
 import {
@@ -34,7 +35,7 @@ export const notificationRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.NotificationWhereInput = {
         userId: ctx.session.user.id,
       };
 
@@ -434,21 +435,20 @@ export const notificationRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.NotificationWhereInput = {};
 
       if (input?.channel) {
         where.channel = input.channel;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFilters: Prisma.NotificationWhereInput[] = [];
+      if (input?.startDate) {
+        andFilters.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFilters.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFilters.length > 0) where.AND = andFilters;
 
       const [total, byStatus, byChannel, byPriority] = await Promise.all([
         ctx.db.notification.count({ where }),

@@ -9,8 +9,6 @@ import path from "path";
 const config = {
   output: "standalone",
   outputFileTracingRoot: path.resolve("./"),
-  eslint: { ignoreDuringBuilds: true },
-  typescript: { ignoreBuildErrors: true },
 };
 
 

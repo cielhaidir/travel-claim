@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { AuditAction } from "../../../../generated/prisma";
+import { AuditAction, type Prisma } from "../../../../generated/prisma";
 
 import {
   createTRPCRouter,
@@ -35,7 +35,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.AuditLogWhereInput = {};
 
       if (input?.userId) {
         where.userId = input.userId;
@@ -53,15 +53,14 @@ export const auditLogRouter = createTRPCRouter({
         where.entityId = input.entityId;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersMain: Prisma.AuditLogWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersMain.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersMain.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersMain.length > 0) where.AND = andFiltersMain;
 
       const logs = await ctx.db.auditLog.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -214,7 +213,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.AuditLogWhereInput = {
         userId: ctx.session.user.id,
       };
 
@@ -226,15 +225,14 @@ export const auditLogRouter = createTRPCRouter({
         where.entityType = input.entityType;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersMyLogs: Prisma.AuditLogWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersMyLogs.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersMyLogs.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersMyLogs.length > 0) where.AND = andFiltersMyLogs;
 
       const logs = await ctx.db.auditLog.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -396,7 +394,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.AuditLogWhereInput = {};
 
       if (input?.entityTypes && input.entityTypes.length > 0) {
         where.entityType = {
@@ -434,21 +432,20 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.AuditLogWhereInput = {};
 
       if (input?.userId) {
         where.userId = input.userId;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersStats: Prisma.AuditLogWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersStats.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersStats.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersStats.length > 0) where.AND = andFiltersStats;
 
       const [total, byAction, byEntityType, byUser] = await Promise.all([
         ctx.db.auditLog.count({ where }),
@@ -564,7 +561,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.AuditLogWhereInput = {};
 
       if (input?.userId) {
         where.userId = input.userId;
@@ -578,15 +575,14 @@ export const auditLogRouter = createTRPCRouter({
         where.action = input.action;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersExport: Prisma.AuditLogWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersExport.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersExport.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersExport.length > 0) where.AND = andFiltersExport;
 
       const logs = await ctx.db.auditLog.findMany({
         where,

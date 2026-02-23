@@ -3,6 +3,7 @@ import {
   TravelStatus,
   ClaimStatus,
   ApprovalStatus,
+  type Prisma,
 } from "../../../../generated/prisma";
 
 import {
@@ -175,7 +176,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
       };
 
@@ -373,15 +374,16 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const dateFilter: any = {};
+      const dateFilter: Prisma.ClaimWhereInput = {};
       if (input?.startDate || input?.endDate) {
-        dateFilter.createdAt = {};
+        const createdAt: { gte?: Date; lte?: Date } = {};
         if (input.startDate) {
-          dateFilter.createdAt.gte = input.startDate;
+          createdAt.gte = input.startDate;
         }
         if (input.endDate) {
-          dateFilter.createdAt.lte = input.endDate;
+          createdAt.lte = input.endDate;
         }
+        dateFilter.createdAt = createdAt;
       }
 
       // Get financial statistics
@@ -602,7 +604,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,
@@ -690,7 +692,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ClaimWhereInput = {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,

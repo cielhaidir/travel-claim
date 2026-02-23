@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { COAType, AuditAction } from "../../../../generated/prisma";
+import { COAType, AuditAction, type Prisma, type PrismaClient } from "../../../../generated/prisma";
 
 import {
   createTRPCRouter,
@@ -34,7 +34,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {};
+      const where: Prisma.ChartOfAccountWhereInput = {};
 
       if (input?.accountType) {
         where.accountType = input.accountType;
@@ -205,7 +205,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ChartOfAccountWhereInput = {
         parentId: null,
       };
 
@@ -272,7 +272,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ChartOfAccountWhereInput = {
         isActive: true,
       };
 
@@ -314,7 +314,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ChartOfAccountWhereInput = {
         accountType: input.accountType,
       };
 
@@ -850,7 +850,7 @@ export const chartOfAccountRouter = createTRPCRouter({
 
 // Helper function to check if an account is a descendant of another
 async function checkIsDescendant(
-  db: any,
+  db: PrismaClient,
   ancestorId: string,
   descendantId: string
 ): Promise<boolean> {
@@ -859,7 +859,7 @@ async function checkIsDescendant(
     select: { parentId: true },
   });
 
-  if (!descendant || !descendant.parentId) {
+  if (!descendant?.parentId) {
     return false;
   }
 

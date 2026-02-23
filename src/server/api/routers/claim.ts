@@ -8,6 +8,7 @@ import {
   ApprovalLevel,
   TravelStatus,
   AuditAction,
+  type Prisma,
 } from "../../../../generated/prisma";
 
 import {
@@ -42,7 +43,7 @@ export const claimRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ClaimWhereInput = {
         deletedAt: null,
       };
 
@@ -67,15 +68,14 @@ export const claimRouter = createTRPCRouter({
         where.submitterId = input.submitterId;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFilters: Prisma.ClaimWhereInput[] = [];
+      if (input?.startDate) {
+        andFilters.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFilters.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFilters.length > 0) where.AND = andFilters;
 
       const claims = await ctx.db.claim.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -890,7 +890,7 @@ export const claimRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.ClaimWhereInput = {
         deletedAt: null,
       };
 
@@ -900,15 +900,14 @@ export const claimRouter = createTRPCRouter({
         };
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ createdAt: { gte: input.startDate } });
-        }
-        if (input.endDate) {
-          where.AND.push({ createdAt: { lte: input.endDate } });
-        }
+      const andFiltersStats: Prisma.ClaimWhereInput[] = [];
+      if (input?.startDate) {
+        andFiltersStats.push({ createdAt: { gte: input.startDate } });
       }
+      if (input?.endDate) {
+        andFiltersStats.push({ createdAt: { lte: input.endDate } });
+      }
+      if (andFiltersStats.length > 0) where.AND = andFiltersStats;
 
       const [total, byStatus, byType, totalAmount, paidAmount] = await Promise.all([
         ctx.db.claim.count({ where }),

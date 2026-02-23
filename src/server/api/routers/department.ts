@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import type { PrismaClient } from "../../../../generated/prisma";
 
 import {
   createTRPCRouter,
@@ -420,7 +421,7 @@ export const departmentRouter = createTRPCRouter({
 
 // Helper function to check if a department is a descendant of another
 async function checkIsDescendant(
-  db: any,
+  db: PrismaClient,
   ancestorId: string,
   descendantId: string
 ): Promise<boolean> {
@@ -429,7 +430,7 @@ async function checkIsDescendant(
     select: { parentId: true },
   });
 
-  if (!descendant || !descendant.parentId) {
+  if (!descendant?.parentId) {
     return false;
   }
 

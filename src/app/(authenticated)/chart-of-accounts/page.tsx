@@ -28,7 +28,7 @@ export default function ChartOfAccountsPage() {
 
   // Fetch all accounts
   const {
-    data: accountsData,
+    data: accountsDataRaw, // eslint-disable-line @typescript-eslint/no-unsafe-assignment
     isLoading: isLoadingAccounts,
     refetch: refetchAccounts,
   } = api.chartOfAccount.getAll.useQuery(
@@ -40,10 +40,11 @@ export default function ChartOfAccountsPage() {
       refetchOnWindowFocus: false,
     }
   );
+  const accountsData = accountsDataRaw as { accounts: COAAccount[] } | undefined;
 
   // Fetch hierarchy for tree view
   const {
-    data: hierarchyData,
+    data: hierarchyDataRaw, // eslint-disable-line @typescript-eslint/no-unsafe-assignment
     isLoading: isLoadingHierarchy,
     refetch: refetchHierarchy,
   } = api.chartOfAccount.getHierarchy.useQuery(
@@ -56,17 +57,18 @@ export default function ChartOfAccountsPage() {
       refetchOnWindowFocus: false,
     }
   );
+  const hierarchyData = hierarchyDataRaw as COAAccount[] | undefined;
 
   // Fetch active accounts for parent selection
-  const { data: activeAccounts } = api.chartOfAccount.getActiveAccounts.useQuery(
+  const { data: activeAccountsRaw } = api.chartOfAccount.getActiveAccounts.useQuery( // eslint-disable-line @typescript-eslint/no-unsafe-assignment
     {},
     {
       refetchOnWindowFocus: false,
     }
   );
+  const activeAccounts = activeAccountsRaw as COAAccount[] | undefined;
 
   // Mutations
-  const utils = api.useUtils();
 
   const createMutation = api.chartOfAccount.create.useMutation({
     onSuccess: () => {
@@ -95,7 +97,7 @@ export default function ChartOfAccountsPage() {
   });
 
   const deleteMutation = api.chartOfAccount.delete.useMutation({
-    onSuccess: (data) => {
+    onSuccess: (data: { message?: string }) => {
       void refetchAccounts();
       void refetchHierarchy();
       alert(data.message ?? "Account deleted successfully!");
@@ -106,7 +108,7 @@ export default function ChartOfAccountsPage() {
   });
 
   const toggleActiveMutation = api.chartOfAccount.toggleActive.useMutation({
-    onSuccess: (data) => {
+    onSuccess: (data: { isActive: boolean }) => {
       void refetchAccounts();
       void refetchHierarchy();
       alert(`Account ${data.isActive ? "activated" : "deactivated"} successfully!`);
@@ -170,7 +172,6 @@ export default function ChartOfAccountsPage() {
   };
 
   const handleToggleActive = (account: COAAccount) => {
-    const action = account.isActive ? "deactivate" : "activate";
     const message = account.isActive
       ? `Deactivating this account will also deactivate all its child accounts. Continue?`
       : `Are you sure you want to activate account "${account.code} - ${account.name}"?`;

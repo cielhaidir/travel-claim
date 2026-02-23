@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { Role } from "../../../../generated/prisma";
+import { Role, type PrismaClient, type Prisma } from "../../../../generated/prisma";
 import bcrypt from "bcryptjs";
 
 import {
@@ -152,7 +152,7 @@ export const userRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: any = {
+      const where: Prisma.UserWhereInput = {
         deletedAt: input?.includeDeleted ? undefined : null,
       };
 
@@ -718,7 +718,7 @@ export const userRouter = createTRPCRouter({
 
 // Helper function to check circular supervisor references
 async function checkCircularSupervisor(
-  db: any,
+  db: PrismaClient,
   userId: string,
   supervisorId: string
 ): Promise<boolean> {
@@ -727,7 +727,7 @@ async function checkCircularSupervisor(
     select: { supervisorId: true },
   });
 
-  if (!supervisor || !supervisor.supervisorId) {
+  if (!supervisor?.supervisorId) {
     return false;
   }
 

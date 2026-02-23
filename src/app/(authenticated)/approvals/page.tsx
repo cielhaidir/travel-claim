@@ -88,7 +88,7 @@ export default async function ApprovalsPage() {
               No pending approvals
             </h3>
             <p className="text-gray-600">
-              You're all caught up! Check back later for new items.
+              You&apos;re all caught up! Check back later for new items.
             </p>
           </div>
         </div>

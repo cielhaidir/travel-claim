@@ -1,16 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z, ZodError } from "zod";
+import { type NextRequest, NextResponse } from "next/server";
+import { type z, ZodError } from "zod";
 import { auth } from "@/server/auth";
-import { Role } from "../../../generated/prisma";
+import type { Role } from "../../../generated/prisma";
 
 // Standard API response format
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: {
     code: string;
     message: string;
-    details?: any;
+    details?: unknown;
   };
   meta?: {
     page?: number;
@@ -23,9 +23,9 @@ export interface ApiResponse<T = any> {
 // Error response helper
 export function errorResponse(
   message: string,
-  code: string = "INTERNAL_ERROR",
-  status: number = 500,
-  details?: any
+  code = "INTERNAL_ERROR",
+  status = 500,
+  details?: unknown
 ): NextResponse<ApiResponse> {
   return NextResponse.json(
     {
@@ -44,7 +44,7 @@ export function errorResponse(
 export function successResponse<T>(
   data: T,
   meta?: ApiResponse["meta"],
-  status: number = 200
+  status = 200
 ): NextResponse<ApiResponse<T>> {
   return NextResponse.json(
     {
@@ -71,9 +71,9 @@ export async function getAuthSession(_request: NextRequest) {
 export class ApiError extends Error {
   constructor(
     message: string,
-    public code: string = "INTERNAL_ERROR",
-    public status: number = 500,
-    public details?: any
+    public code = "INTERNAL_ERROR",
+    public status = 500,
+    public details?: unknown
   ) {
     super(message);
     this.name = "ApiError";
@@ -102,7 +102,7 @@ export async function validateBody<T>(
   schema: z.ZodSchema<T>
 ): Promise<T> {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as unknown;
     return schema.parse(body);
   } catch (error) {
     if (error instanceof ZodError) {
@@ -163,7 +163,7 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
 
   // Prisma errors
   if (error && typeof error === "object" && "code" in error) {
-    const prismaError = error as { code: string; meta?: any };
+    const prismaError = error as { code: string; meta?: Record<string, unknown> };
     
     switch (prismaError.code) {
       case "P2002":
@@ -200,11 +200,14 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
   );
 }
 
+// Route context type for Next.js API handlers
+type RouteContext = { params?: Record<string, string> };
+
 // Wrapper for API route handlers with error handling
 export function withErrorHandler(
-  handler: (request: NextRequest, context?: any) => Promise<NextResponse>
+  handler: (request: NextRequest, context?: RouteContext) => Promise<NextResponse>
 ) {
-  return async (request: NextRequest, context?: any) => {
+  return async (request: NextRequest, context?: RouteContext) => {
     try {
       return await handler(request, context);
     } catch (error) {
@@ -217,10 +220,10 @@ export function withErrorHandler(
 export function withAuth(
   handler: (
     request: NextRequest,
-    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: any }
+    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: Record<string, string> }
   ) => Promise<NextResponse>
 ) {
-  return withErrorHandler(async (request: NextRequest, routeContext?: any) => {
+  return withErrorHandler(async (request: NextRequest, routeContext?: RouteContext) => {
     const session = await getAuthSession(request);
     return handler(request, { session, params: routeContext?.params });
   });
@@ -231,7 +234,7 @@ export function withRoles(
   allowedRoles: Role[],
   handler: (
     request: NextRequest,
-    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: any }
+    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: Record<string, string> }
   ) => Promise<NextResponse>
 ) {
   return withAuth(async (request, context) => {
@@ -241,8 +244,8 @@ export function withRoles(
 }
 
 // Extract route params from context
-export function getRouteParams(context: any): Record<string, string> {
-  return context?.params || {};
+export function getRouteParams(context: RouteContext): Record<string, string> {
+  return context?.params ?? {};
 }
 
 // Pagination helpers
@@ -254,8 +257,8 @@ export interface PaginationParams {
 
 export function getPaginationParams(
   request: NextRequest,
-  defaultLimit: number = 50,
-  maxLimit: number = 100
+  defaultLimit = 50,
+  maxLimit = 100
 ): PaginationParams {
   const query = parseQuery(request);
   const page = Math.max(1, query.getNumber("page", 1) ?? 1);

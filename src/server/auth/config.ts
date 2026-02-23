@@ -1,4 +1,5 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import type { Adapter } from "next-auth/adapters";
 import { type DefaultSession, type NextAuthConfig } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import GoogleProvider from "next-auth/providers/google";
@@ -99,7 +100,7 @@ export const authConfig = {
 
         // Validate password
         const isPasswordValid = await bcrypt.compare(
-          String(credentials.password),
+          credentials.password as string,
           String(user.password),
         );
 
@@ -138,7 +139,7 @@ export const authConfig = {
       }),
     ] : []),
   ],
-  adapter: PrismaAdapter(db) as any,
+  adapter: PrismaAdapter(db) as unknown as Adapter,
   session: {
     strategy: "jwt",
   },
@@ -167,6 +168,7 @@ export const authConfig = {
 
         if (!existingUser) {
           // First-time login: create user with default EMPLOYEE role
+          const oauthProfile = profile as { extension_employeeId?: string; employeeId?: string } | null | undefined;
           const newUser = await db.user.create({
             data: {
               email: user.email,
@@ -174,7 +176,7 @@ export const authConfig = {
               image: user.image,
               emailVerified: new Date(),
               role: "EMPLOYEE",
-              employeeId: (profile as any)?.extension_employeeId ?? (profile as any)?.employeeId ?? null,
+              employeeId: oauthProfile?.extension_employeeId ?? oauthProfile?.employeeId ?? null,
             },
           });
 
@@ -199,6 +201,7 @@ export const authConfig = {
       }
     },
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async jwt({ token, user, account, profile, trigger }) {
       // Initial sign in
       if (user) {

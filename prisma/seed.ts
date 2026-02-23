@@ -19,7 +19,7 @@ async function main() {
   );
 
   // Create Chart of Accounts
-  const chartOfAccounts = await createChartOfAccounts(admin);
+  await createChartOfAccounts(admin);
   console.log("✅ Chart of Accounts created");
 
   // Create travel requests with APPROVED status
@@ -29,6 +29,7 @@ async function main() {
 //   console.log("🎉 Seeding completed successfully!");
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createDepartments() {
   // Create Sales Department
   const salesDept = await prisma.department.upsert({
@@ -77,7 +78,8 @@ async function createDepartments() {
   return { salesDept, itDept, financeDept, hrDept };
 }
 
-async function createUsers(departments: any) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function createUsers(departments: Awaited<ReturnType<typeof createDepartments>>) {
   const password = "password123"; // Default password for all test users
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -232,7 +234,9 @@ async function createUsers(departments: any) {
   };
 }
 
-async function createChartOfAccounts(adminUser: any) {
+async function createChartOfAccounts(adminUser: { id: string } | null) {
+  if (!adminUser) throw new Error("Admin user not found. Run the admin user seed first.");
+
   // Create parent expense account
   const expenseAccount = await prisma.chartOfAccount.upsert({
     where: { code: "6000" },
@@ -550,7 +554,8 @@ async function createChartOfAccounts(adminUser: any) {
   return { expenseAccount, travelExpense, mealExpense, commExpense, officeExpense, benefitsExpense, vehicleExpense };
 }
 
-async function createTravelRequests(users: any) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function createTravelRequests(users: Awaited<ReturnType<typeof createUsers>>) {
   // Create APPROVED travel requests for different users
   const approvedRequest1 = await prisma.travelRequest.create({
     data: {
