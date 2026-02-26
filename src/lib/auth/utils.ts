@@ -2,7 +2,7 @@ import { auth } from "@/server/auth";
 import type { Session } from "next-auth";
 
 // Role type definition
-export type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN";
+export type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN" | "SALES_EMPLOYEE" | "SALES_CHIEF";
 
 /**
  * Get the current session with type safety
@@ -163,7 +163,9 @@ export function getRoleLevel(role: Role): number {
   const levels: Record<Role, number> = {
     EMPLOYEE: 1,
     SUPERVISOR: 2,
+    SALES_EMPLOYEE: 2,
     MANAGER: 3,
+    SALES_CHIEF: 3,
     DIRECTOR: 4,
     FINANCE: 5,
     ADMIN: 6,

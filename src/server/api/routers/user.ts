@@ -638,6 +638,23 @@ export const userRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  // Admin reset password
+  resetPassword: adminProcedure
+    .input(z.object({ id: z.string(), newPassword: z.string().min(8) }))
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({ where: { id: input.id } });
+      if (!user) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      }
+      const hashedPassword = await bcrypt.hash(input.newPassword, 10);
+      await ctx.db.user.update({
+        where: { id: input.id },
+        data: { password: hashedPassword },
+      });
+      return { success: true };
+    }),
+
   // Soft delete user
   delete: adminProcedure
     .meta({

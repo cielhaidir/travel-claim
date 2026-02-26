@@ -9,7 +9,7 @@ import { db } from "@/server/db";
 import { env } from "@/env";
 
 // Import Role type
-type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN";
+type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN" | "SALES_EMPLOYEE" | "SALES_CHIEF";
 
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`

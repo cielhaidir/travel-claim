@@ -6,7 +6,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SidebarNav } from "@/components/navigation/SidebarNav";
 import { TopHeader } from "@/components/navigation/TopHeader";
-import { Breadcrumbs } from "@/components/navigation/Breadcrumbs";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -81,7 +80,7 @@ export function AppShell({ children, session }: AppShellProps) {
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           <div className="container mx-auto px-4 py-6 lg:px-8">
-            <Breadcrumbs currentPath={pathname} />
+            {/* <Breadcrumbs currentPath={pathname} /> */}
             <div className="mt-6">{children}</div>
           </div>
         </main>

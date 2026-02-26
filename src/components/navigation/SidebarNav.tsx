@@ -13,13 +13,25 @@ interface NavItem {
 const navigationItems: NavItem[] = [
   {
     label: "Dashboard",
-    href: "/",
+    href: "/dashboard",
     icon: "📊",
   },
   {
     label: "Business Trip Requests",
     href: "/travel",
     icon: "✈️",
+  },
+  {
+    label: "Projects",
+    href: "/projects",
+    icon: "📁",
+    roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
+  },
+  {
+    label: "Bailout Approval",
+    href: "/bailout",
+    icon: "💼",
+    roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
   },
   {
     label: "Claims",
@@ -30,24 +42,18 @@ const navigationItems: NavItem[] = [
     label: "Approvals",
     href: "/approvals",
     icon: "✅",
-    roles: ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE_MANAGER", "ADMIN"],
+    roles: ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN", "SALES_CHIEF"],
   },
   {
     label: "Chart of Accounts",
     href: "/chart-of-accounts",
     icon: "📋",
-    roles: ["FINANCE_MANAGER", "ADMIN"],
+    roles: ["FINANCE", "ADMIN"],
   },
   {
-    label: "Finance",
-    href: "/finance",
-    icon: "💳",
-    roles: ["FINANCE_MANAGER", "ADMIN"],
-  },
-  {
-    label: "Admin",
-    href: "/admin",
-    icon: "⚙️",
+    label: "User Management",
+    href: "/admin/users",
+    icon: "👥",
     roles: ["ADMIN"],
   },
   {

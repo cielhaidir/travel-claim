@@ -4,233 +4,273 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  // console.log("🌱 Starting database seeding...");
+  console.log("🌱 Starting database seeding...");
 
-  // // Create departments first
-  // const departments = await createDepartments();
-  // console.log("✅ Departments created");
+  // Create departments first
+  const departments = await createDepartments();
+  console.log("✅ Departments created");
 
-  // // Create users with different roles
-  // const users = await createUsers(departments);
-  // console.log("✅ Users created");
-
-  const admin = await prisma.user.findFirst(
-    { where: { role: "ADMIN" } }
-  );
+  // Create users with hierarchy
+  const users = await createUsers(departments);
+  console.log("✅ Users created");
 
   // Create Chart of Accounts
-  await createChartOfAccounts(admin);
+  await createChartOfAccounts(users.adminChief);
   console.log("✅ Chart of Accounts created");
 
-  // Create travel requests with APPROVED status
-//   await createTravelRequests(users);
-//   console.log("✅ Travel requests created");
-
-//   console.log("🎉 Seeding completed successfully!");
+  console.log("🎉 Seeding completed successfully!");
+  console.log("");
+  console.log("📋 Login credentials (all use: password123)");
+  console.log("   👔 Director    : director@company.com");
+  console.log("   🔑 Admin Chief : admin@company.com");
+  console.log("   🛠  Eng Chief  : engineer.chief@company.com");
+  console.log("   💼 Sales Chief : sales.chief@company.com");
+  console.log("   👤 Eng Staff 1 : engineer.staff1@company.com");
+  console.log("   👤 Eng Staff 2 : engineer.staff2@company.com");
+  console.log("   👤 Sales Staff1: sales.staff1@company.com");
+  console.log("   👤 Sales Staff2: sales.staff2@company.com");
+  console.log("   👤 Admin Staff1: admin.staff1@company.com");
+  console.log("   👤 Admin Staff2: admin.staff2@company.com");
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createDepartments() {
-  // Create Sales Department
+  // Engineering Department
+  const engineeringDept = await prisma.department.upsert({
+    where: { code: "ENG" },
+    update: { name: "Engineering", description: "Software engineering and technical operations" },
+    create: {
+      code: "ENG",
+      name: "Engineering",
+      description: "Software engineering and technical operations",
+    },
+  });
+
+  // Sales Department
   const salesDept = await prisma.department.upsert({
     where: { code: "SALES" },
-    update: {},
+    update: { name: "Sales", description: "Sales operations and customer relations" },
     create: {
       code: "SALES",
-      name: "Sales Department",
-      description: "Handles all sales operations and customer relations",
+      name: "Sales",
+      description: "Sales operations and customer relations",
     },
   });
 
-  // Create IT Department
-  const itDept = await prisma.department.upsert({
-    where: { code: "IT" },
-    update: {},
+  // Administration Department
+  const adminDept = await prisma.department.upsert({
+    where: { code: "ADMIN" },
+    update: { name: "Administration", description: "Administrative and support operations" },
     create: {
-      code: "IT",
-      name: "IT Department",
-      description: "Information Technology and systems management",
+      code: "ADMIN",
+      name: "Administration",
+      description: "Administrative and support operations",
     },
   });
 
-  // Create Finance Department
-  const financeDept = await prisma.department.upsert({
-    where: { code: "FINANCE" },
-    update: {},
-    create: {
-      code: "FINANCE",
-      name: "Finance Department",
-      description: "Financial operations and accounting",
-    },
-  });
-
-  // Create HR Department
-  const hrDept = await prisma.department.upsert({
-    where: { code: "HR" },
-    update: {},
-    create: {
-      code: "HR",
-      name: "Human Resources",
-      description: "Human resources and employee management",
-    },
-  });
-
-  return { salesDept, itDept, financeDept, hrDept };
+  return { engineeringDept, salesDept, adminDept };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createUsers(departments: Awaited<ReturnType<typeof createDepartments>>) {
-  const password = "password123"; // Default password for all test users
+  const password = "password123";
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // Admin User
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@company.com" },
-    update: {},
-    create: {
-      email: "admin@company.com",
-      name: "Admin User",
-      employeeId: "EMP001",
-      role: "ADMIN",
-      password: hashedPassword,
-      emailVerified: new Date(),
-      phoneNumber: "+628123456789",
-      departmentId: departments.itDept.id,
-    },
+  // Clear any stale employeeIds that may conflict (from a previous seed run
+  // using different emails). We null them out so the upserts below can
+  // reassign them cleanly.
+  const reservedEmployeeIds = [
+    "EMP001", "EMP002", "EMP003", "EMP004", "EMP005",
+    "EMP006", "EMP007", "EMP008", "EMP009", "EMP010",
+  ];
+  await prisma.user.updateMany({
+    where: { employeeId: { in: reservedEmployeeIds } },
+    data: { employeeId: null },
   });
-  console.log(`   📧 Admin: admin@company.com / ${password}`);
 
-  // Finance User
-  const finance = await prisma.user.upsert({
-    where: { email: "finance@company.com" },
-    update: {},
-    create: {
-      email: "finance@company.com",
-      name: "Finance Manager",
-      employeeId: "EMP002",
-      role: "FINANCE",
-      password: hashedPassword,
-      emailVerified: new Date(),
-      phoneNumber: "+628123456790",
-      departmentId: departments.financeDept.id,
-    },
-  });
-  console.log(`   📧 Finance: finance@company.com / ${password}`);
-
-  // Director User
+  // ─────────────────────────────────────────────────────────
+  // DIRECTOR (1 person — top of hierarchy, no department)
+  // ─────────────────────────────────────────────────────────
   const director = await prisma.user.upsert({
     where: { email: "director@company.com" },
-    update: {},
+    update: { name: "Budi Hartono", role: "DIRECTOR", employeeId: "EMP001" },
     create: {
       email: "director@company.com",
-      name: "John Director",
-      employeeId: "EMP003",
+      name: "Budi Hartono",
+      employeeId: "EMP001",
       role: "DIRECTOR",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456791",
-      departmentId: departments.salesDept.id,
+      phoneNumber: "+628111000001",
     },
   });
-  console.log(`   📧 Director: director@company.com / ${password}`);
+  console.log(`   👔 Director     : director@company.com / ${password}`);
 
-  // Manager User
-  const manager = await prisma.user.upsert({
-    where: { email: "manager@company.com" },
-    update: {},
+  // ─────────────────────────────────────────────────────────
+  // ADMIN GROUP — Chief + 2 Members
+  // ─────────────────────────────────────────────────────────
+  const adminChief = await prisma.user.upsert({
+    where: { email: "admin@company.com" },
+    update: { name: "Diana Kusuma", role: "ADMIN", departmentId: departments.adminDept.id, supervisorId: director.id },
     create: {
-      email: "manager@company.com",
-      name: "Jane Manager",
-      employeeId: "EMP004",
-      role: "MANAGER",
+      email: "admin@company.com",
+      name: "Diana Kusuma",
+      employeeId: "EMP002",
+      role: "ADMIN",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456792",
-      departmentId: departments.salesDept.id,
+      phoneNumber: "+628111000002",
+      departmentId: departments.adminDept.id,
       supervisorId: director.id,
     },
   });
-  console.log(`   📧 Manager: manager@company.com / ${password}`);
+  console.log(`   🔑 Admin Chief  : admin@company.com / ${password}`);
 
-  // Supervisor User
-  const supervisor = await prisma.user.upsert({
-    where: { email: "supervisor@company.com" },
-    update: {},
+  const adminStaff1 = await prisma.user.upsert({
+    where: { email: "admin.staff1@company.com" },
+    update: { supervisorId: adminChief.id },
     create: {
-      email: "supervisor@company.com",
-      name: "Bob Supervisor",
+      email: "admin.staff1@company.com",
+      name: "Budi Santoso",
+      employeeId: "EMP003",
+      role: "EMPLOYEE",
+      password: hashedPassword,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000003",
+      departmentId: departments.adminDept.id,
+      supervisorId: adminChief.id,
+    },
+  });
+  console.log(`   👤 Admin Staff 1: admin.staff1@company.com / ${password}`);
+
+  const adminStaff2 = await prisma.user.upsert({
+    where: { email: "admin.staff2@company.com" },
+    update: { supervisorId: adminChief.id },
+    create: {
+      email: "admin.staff2@company.com",
+      name: "Sari Dewi",
+      employeeId: "EMP004",
+      role: "EMPLOYEE",
+      password: hashedPassword,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000004",
+      departmentId: departments.adminDept.id,
+      supervisorId: adminChief.id,
+    },
+  });
+  console.log(`   👤 Admin Staff 2: admin.staff2@company.com / ${password}`);
+
+  // ─────────────────────────────────────────────────────────
+  // SALES GROUP — Chief + 2 Members
+  // ─────────────────────────────────────────────────────────
+  const salesChief = await prisma.user.upsert({
+    where: { email: "sales.chief@company.com" },
+    update: { supervisorId: director.id },
+    create: {
+      email: "sales.chief@company.com",
+      name: "Reza Pratama",
       employeeId: "EMP005",
       role: "SUPERVISOR",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456793",
+      phoneNumber: "+628111000005",
       departmentId: departments.salesDept.id,
-      supervisorId: manager.id,
+      supervisorId: director.id,
     },
   });
-  console.log(`   📧 Supervisor: supervisor@company.com / ${password}`);
+  console.log(`   💼 Sales Chief  : sales.chief@company.com / ${password}`);
 
-  // Employee Users
-  const employee1 = await prisma.user.upsert({
-    where: { email: "employee1@company.com" },
-    update: {},
+  const salesStaff1 = await prisma.user.upsert({
+    where: { email: "sales.staff1@company.com" },
+    update: { supervisorId: salesChief.id },
     create: {
-      email: "employee1@company.com",
-      name: "Alice Employee",
+      email: "sales.staff1@company.com",
+      name: "Andi Wijaya",
       employeeId: "EMP006",
       role: "EMPLOYEE",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456794",
+      phoneNumber: "+628111000006",
       departmentId: departments.salesDept.id,
-      supervisorId: supervisor.id,
+      supervisorId: salesChief.id,
     },
   });
-  console.log(`   📧 Employee 1: employee1@company.com / ${password}`);
+  console.log(`   👤 Sales Staff 1: sales.staff1@company.com / ${password}`);
 
-  const employee2 = await prisma.user.upsert({
-    where: { email: "employee2@company.com" },
-    update: {},
+  const salesStaff2 = await prisma.user.upsert({
+    where: { email: "sales.staff2@company.com" },
+    update: { supervisorId: salesChief.id },
     create: {
-      email: "employee2@company.com",
-      name: "Charlie Employee",
+      email: "sales.staff2@company.com",
+      name: "Rina Kusuma",
       employeeId: "EMP007",
       role: "EMPLOYEE",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456795",
-      departmentId: departments.itDept.id,
-      supervisorId: supervisor.id,
+      phoneNumber: "+628111000007",
+      departmentId: departments.salesDept.id,
+      supervisorId: salesChief.id,
     },
   });
-  console.log(`   📧 Employee 2: employee2@company.com / ${password}`);
+  console.log(`   👤 Sales Staff 2: sales.staff2@company.com / ${password}`);
 
-  const employee3 = await prisma.user.upsert({
-    where: { email: "employee3@company.com" },
-    update: {},
+  // ─────────────────────────────────────────────────────────
+  // ENGINEER GROUP — Chief + 2 Members
+  // ─────────────────────────────────────────────────────────
+  const engineerChief = await prisma.user.upsert({
+    where: { email: "engineer.chief@company.com" },
+    update: { supervisorId: director.id },
     create: {
-      email: "employee3@company.com",
-      name: "David Employee",
+      email: "engineer.chief@company.com",
+      name: "Deni Hermawan",
       employeeId: "EMP008",
+      role: "SUPERVISOR",
+      password: hashedPassword,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000008",
+      departmentId: departments.engineeringDept.id,
+      supervisorId: director.id,
+    },
+  });
+  console.log(`   🛠  Eng Chief   : engineer.chief@company.com / ${password}`);
+
+  const engineerStaff1 = await prisma.user.upsert({
+    where: { email: "engineer.staff1@company.com" },
+    update: { supervisorId: engineerChief.id },
+    create: {
+      email: "engineer.staff1@company.com",
+      name: "Tia Rahayu",
+      employeeId: "EMP009",
       role: "EMPLOYEE",
       password: hashedPassword,
       emailVerified: new Date(),
-      phoneNumber: "+628123456796",
-      departmentId: departments.hrDept.id,
-      supervisorId: supervisor.id,
+      phoneNumber: "+628111000009",
+      departmentId: departments.engineeringDept.id,
+      supervisorId: engineerChief.id,
     },
   });
-  console.log(`   📧 Employee 3: employee3@company.com / ${password}`);
+  console.log(`   👤 Eng Staff 1  : engineer.staff1@company.com / ${password}`);
+
+  const engineerStaff2 = await prisma.user.upsert({
+    where: { email: "engineer.staff2@company.com" },
+    update: { supervisorId: engineerChief.id },
+    create: {
+      email: "engineer.staff2@company.com",
+      name: "Fajar Nugroho",
+      employeeId: "EMP010",
+      role: "EMPLOYEE",
+      password: hashedPassword,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000010",
+      departmentId: departments.engineeringDept.id,
+      supervisorId: engineerChief.id,
+    },
+  });
+  console.log(`   👤 Eng Staff 2  : engineer.staff2@company.com / ${password}`);
 
   return {
-    admin,
-    finance,
     director,
-    manager,
-    supervisor,
-    employee1,
-    employee2,
-    employee3,
+    adminChief, adminStaff1, adminStaff2,
+    salesChief, salesStaff1, salesStaff2,
+    engineerChief, engineerStaff1, engineerStaff2,
   };
 }
 
@@ -560,65 +600,57 @@ async function createTravelRequests(users: Awaited<ReturnType<typeof createUsers
   const approvedRequest1 = await prisma.travelRequest.create({
     data: {
       requestNumber: "TR-2024-001",
-      requesterId: users.employee1.id,
+      requesterId: users.salesStaff1.id,
       purpose: "Client meeting and product demo in Jakarta",
       destination: "Jakarta",
       travelType: "SALES",
       startDate: new Date("2024-03-15"),
       endDate: new Date("2024-03-17"),
-      estimatedBudget: 5000000,
       status: "APPROVED",
-      projectName: "Project Alpha",
-      customerName: "PT. Tech Solutions",
-      salesPerson: "Alice Employee",
       submittedAt: new Date("2024-03-01"),
     },
   });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest1.requestNumber} for ${users.employee1.phoneNumber}`);
+  console.log(`   ✈️  Approved Travel Request: ${approvedRequest1.requestNumber} for ${users.salesStaff1.phoneNumber}`);
 
   const approvedRequest2 = await prisma.travelRequest.create({
     data: {
       requestNumber: "TR-2024-002",
-      requesterId: users.employee2.id,
+      requesterId: users.engineerStaff1.id,
       purpose: "Training session on new technology stack",
       destination: "Surabaya",
       travelType: "TRAINING",
       startDate: new Date("2024-04-10"),
       endDate: new Date("2024-04-12"),
-      estimatedBudget: 3500000,
       status: "APPROVED",
       submittedAt: new Date("2024-03-20"),
     },
   });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest2.requestNumber} for ${users.employee2.phoneNumber}`);
+  console.log(`   ✈️  Approved Travel Request: ${approvedRequest2.requestNumber} for ${users.engineerStaff1.phoneNumber}`);
 
   const approvedRequest3 = await prisma.travelRequest.create({
     data: {
       requestNumber: "TR-2024-003",
-      requesterId: users.supervisor.id,
+      requesterId: users.salesChief.id,
       purpose: "Quarterly business review meeting",
       destination: "Bandung",
       travelType: "MEETING",
       startDate: new Date("2024-05-05"),
       endDate: new Date("2024-05-07"),
-      estimatedBudget: 4000000,
       status: "APPROVED",
       submittedAt: new Date("2024-04-15"),
     },
   });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest3.requestNumber} for ${users.supervisor.phoneNumber}`);
+  console.log(`   ✈️  Approved Travel Request: ${approvedRequest3.requestNumber} for ${users.salesChief.phoneNumber}`);
 
-  // Create some non-APPROVED requests for comparison
   await prisma.travelRequest.create({
     data: {
       requestNumber: "TR-2024-004",
-      requesterId: users.employee3.id,
+      requesterId: users.engineerStaff2.id,
       purpose: "Site visit for operational assessment",
       destination: "Bali",
       travelType: "OPERATIONAL",
       startDate: new Date("2024-06-01"),
       endDate: new Date("2024-06-03"),
-      estimatedBudget: 6000000,
       status: "SUBMITTED",
       submittedAt: new Date("2024-05-15"),
     },
@@ -628,13 +660,12 @@ async function createTravelRequests(users: Awaited<ReturnType<typeof createUsers
   await prisma.travelRequest.create({
     data: {
       requestNumber: "TR-2024-005",
-      requesterId: users.employee1.id,
+      requesterId: users.salesStaff2.id,
       purpose: "Follow-up meeting with existing clients",
       destination: "Semarang",
       travelType: "SALES",
       startDate: new Date("2024-07-10"),
       endDate: new Date("2024-07-12"),
-      estimatedBudget: 3000000,
       status: "DRAFT",
     },
   });
