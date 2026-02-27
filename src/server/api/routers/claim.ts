@@ -10,6 +10,7 @@ import {
   AuditAction,
   type Prisma,
 } from "../../../../generated/prisma";
+import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 
 import {
   createTRPCRouter,
@@ -687,11 +688,11 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Create approval workflow
-      const approvals = [];
+      const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
 
       // L1: Supervisor
       if (claim.submitter.supervisorId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L1_SUPERVISOR,
           approverId: claim.submitter.supervisorId,
         });
@@ -708,12 +709,20 @@ export const claimRouter = createTRPCRouter({
         });
 
         if (financeUser) {
-          approvals.push({
+          approvalEntries.push({
             level: ApprovalLevel.L2_MANAGER,
             approverId: financeUser.id,
           });
         }
       }
+
+      // Generate a unique approvalNumber for each approval record
+      const approvalsWithNumbers = await Promise.all(
+        approvalEntries.map(async (entry) => ({
+          ...entry,
+          approvalNumber: await generateApprovalNumber(ctx.db),
+        }))
+      );
 
       // Update claim and create approvals
       const updated = await ctx.db.claim.update({
@@ -721,7 +730,7 @@ export const claimRouter = createTRPCRouter({
         data: {
           status: ClaimStatus.SUBMITTED,
           approvals: {
-            create: approvals,
+            create: approvalsWithNumbers,
           },
         },
         include: {

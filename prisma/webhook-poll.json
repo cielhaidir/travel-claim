@@ -1,0 +1,43 @@
+[
+    {
+        "headers": {
+            "host": "support-n8n.a1v3oe.easypanel.host",
+            "user-agent": "Go-http-client/1.1",
+            "transfer-encoding": "chunked",
+            "accept-encoding": "gzip",
+            "content-type": "application/json",
+            "x-forwarded-for": "182.1.195.154",
+            "x-forwarded-host": "support-n8n.a1v3oe.easypanel.host",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "23cb3bc32ecb",
+            "x-hub-signature-256": "sha256=62837fa136e6e4e735328c08236fcb579ab2e206c653e36155d8268b80d3f174",
+            "x-real-ip": "182.1.195.154"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+            "device_id": "6281519442782@s.whatsapp.net",
+            "event": "message.poll_vote",
+            "payload": {
+                "chat_id": "6282244525871@s.whatsapp.net",
+                "from": "6282244525871@s.whatsapp.net",
+                "from_name": "Said",
+                "id": "3B365C46E3AA04694E5E",
+                "is_from_me": false,
+                "poll_id": "2A11A28EBA27C8F7D399",
+                "poll_vote": {
+                    "selected_option_names": [
+                        "Approve #claim-01"
+                    ],
+                    "selected_options": [
+                        "62D1AAFC390B419FD5C16AC8D5E7C3A77DC16CA05C61AA20F183CAF1FA938D8C"
+                    ]
+                },
+                "timestamp": "2026-02-26T05:55:14Z"
+            }
+        },
+        "webhookUrl": "https://support-n8n.a1v3oe.easypanel.host/webhook/31510d7c-54f1-4e09-8f42-e4ec43173202",
+        "executionMode": "production"
+    }
+]

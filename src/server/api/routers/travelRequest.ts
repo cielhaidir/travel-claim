@@ -15,6 +15,7 @@ import {
   supervisorProcedure,
   managerProcedure,
 } from "@/server/api/trpc";
+import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 
 export const travelRequestRouter = createTRPCRouter({
   // Get all travel requests with filters
@@ -142,6 +143,156 @@ export const travelRequestRouter = createTRPCRouter({
       }
 
       return {
+        requests,
+        nextCursor,
+      };
+    }),
+
+  // Get travel requests by participant employee ID (matches requester OR participants)
+  getByParticipantEmployeeId: protectedProcedure
+    .meta({
+      openapi: {
+        method: 'GET',
+        path: '/travel-requests/by-participant/{employeeId}',
+        protect: true,
+        tags: ['Travel Requests'],
+        summary: 'Get travel requests by participant employee ID',
+        description: 'Returns all travel requests where the given employeeId is either the requester or a participant',
+      },
+      mcp: {
+        enabled: true,
+        name: "get_travel_requests_by_participant",
+        description: "Get all travel requests for a given employee ID, whether they are the requester or a participant - used for claim ",
+      },
+    })
+    .input(
+      z.object({
+        employeeId: z.string().min(1),
+        status: z.enum(TravelStatus).optional(),
+        travelType: z.enum(TravelType).optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
+        limit: z.number().min(1).max(100).optional(),
+        cursor: z.string().optional(),
+      })
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      // Resolve user by employeeId
+      const targetUser = await ctx.db.user.findUnique({
+        where: { employeeId: input.employeeId },
+        select: { id: true, name: true, email: true, employeeId: true },
+      });
+
+      if (!targetUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `No user found with employee ID: ${input.employeeId}`,
+        });
+      }
+
+      // Non-managers can only query themselves
+      const isPrivileged = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
+        ctx.session.user.role
+      );
+      if (!isPrivileged && targetUser.id !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not authorized to view travel requests for another employee",
+        });
+      }
+
+      const where: any = {
+        deletedAt: null,
+        OR: [
+          { requesterId: targetUser.id },
+          { participants: { some: { userId: targetUser.id } } },
+        ],
+      };
+
+      if (input?.status) {
+        where.status = input.status;
+      }
+
+      if (input?.travelType) {
+        where.travelType = input.travelType;
+      }
+
+      if (input?.startDate || input?.endDate) {
+        where.AND = [];
+        if (input.startDate) {
+          where.AND.push({ startDate: { gte: input.startDate } });
+        }
+        if (input.endDate) {
+          where.AND.push({ endDate: { lte: input.endDate } });
+        }
+      }
+
+      const requests = await ctx.db.travelRequest.findMany({
+        take: input?.limit ? input.limit + 1 : 51,
+        cursor: input?.cursor ? { id: input.cursor } : undefined,
+        where,
+        include: {
+          requester: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              employeeId: true,
+              department: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                },
+              },
+            },
+          },
+          approvals: {
+            include: {
+              approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+          _count: {
+            select: {
+              claims: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      let nextCursor: string | undefined = undefined;
+      const limit = input?.limit ?? 50;
+      if (requests.length > limit) {
+        const nextItem = requests.pop();
+        nextCursor = nextItem!.id;
+      }
+
+      return {
+        targetUser,
         requests,
         nextCursor,
       };
@@ -562,11 +713,11 @@ export const travelRequestRouter = createTRPCRouter({
       }
 
       // Create approval workflow
-      const approvals = [];
+      const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
 
       // L1: Supervisor
       if (request.requester.supervisorId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L1_SUPERVISOR,
           approverId: request.requester.supervisorId,
         });
@@ -574,7 +725,7 @@ export const travelRequestRouter = createTRPCRouter({
 
       // L2: Manager (department manager)
       if (request.requester.department?.managerId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L2_MANAGER,
           approverId: request.requester.department.managerId,
         });
@@ -582,11 +733,19 @@ export const travelRequestRouter = createTRPCRouter({
 
       // L3: Director (department director)
       if (request.requester.department?.directorId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L3_DIRECTOR,
           approverId: request.requester.department.directorId,
         });
       }
+
+      // Generate a unique approvalNumber for each approval record
+      const approvalsWithNumbers = await Promise.all(
+        approvalEntries.map(async (entry) => ({
+          ...entry,
+          approvalNumber: await generateApprovalNumber(ctx.db),
+        }))
+      );
 
       // Update request and create approvals
       const updated = await ctx.db.travelRequest.update({
@@ -595,7 +754,7 @@ export const travelRequestRouter = createTRPCRouter({
           status: TravelStatus.SUBMITTED,
           submittedAt: new Date(),
           approvals: {
-            create: approvals,
+            create: approvalsWithNumbers,
           },
         },
         include: {
@@ -618,6 +777,7 @@ export const travelRequestRouter = createTRPCRouter({
       });
 
       // TODO: Send notifications to approvers
+      
 
       return updated;
     }),

@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/travel-claim
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   lint:
     name: Lint & Type-check
-    runs-on: unm-eguard          # self-hosted runner label
+    runs-on: self-hosted         # self-hosted runner label
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,7 +59,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: Build Docker Image
-    runs-on: unm-eguard          # self-hosted runner label
+    runs-on: self-hosted         # self-hosted runner label
     needs: lint
     permissions:
       contents: read
@@ -73,14 +73,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Log in to GitHub Container Registry (push only on non-PR events)
-      - name: Log in to GHCR
+      # Log in to Docker Hub (push only on non-PR events)
+      - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Generate docker metadata (tags + labels)
       - name: Extract Docker metadata
@@ -121,7 +121,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Production
-    runs-on: unm-eguard          # self-hosted runner label
+    runs-on: self-hosted         # self-hosted runner label
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
@@ -130,12 +130,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Pull latest image & restart stack
         run: |
@@ -160,6 +160,5 @@ jobs:
           POSTGRES_USER:              ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD:          ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB:                ${{ secrets.POSTGRES_DB }}
-          REDIS_URL:                  ${{ secrets.REDIS_URL }}
           MCP_API_TOKEN:              ${{ secrets.MCP_API_TOKEN }}
           MCP_API_TOKEN_USER_EMAIL:   ${{ secrets.MCP_API_TOKEN_USER_EMAIL }}

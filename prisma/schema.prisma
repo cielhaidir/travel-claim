@@ -365,6 +365,9 @@ model TravelParticipant {
 model Approval {
     id              String          @id @default(cuid())
     
+    // Business approval number (e.g. APR-2026-00001)
+    approvalNumber  String          @unique @db.VarChar(50)
+    
     // Can be linked to either business trip request or claim
     travelRequestId String?
     travelRequest   TravelRequest?  @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
@@ -388,6 +391,7 @@ model Approval {
     createdAt       DateTime        @default(now())
     updatedAt       DateTime        @updatedAt
     
+    @@index([approvalNumber])
     @@index([travelRequestId, level])
     @@index([claimId, level])
     @@index([approverId, status])

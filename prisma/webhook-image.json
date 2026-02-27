@@ -1,0 +1,35 @@
+[
+  {
+    "headers": {
+      "host": "support-n8n.a1v3oe.easypanel.host",
+      "user-agent": "Go-http-client/1.1",
+      "transfer-encoding": "chunked",
+      "accept-encoding": "gzip",
+      "content-type": "application/json",
+      "x-forwarded-for": "88.222.242.205",
+      "x-forwarded-host": "support-n8n.a1v3oe.easypanel.host",
+      "x-forwarded-port": "443",
+      "x-forwarded-proto": "https",
+      "x-forwarded-server": "23cb3bc32ecb",
+      "x-hub-signature-256": "sha256=a27753907b175abc7f179095572b2f47f8d901474442e545f06f72ff331a1e07",
+      "x-real-ip": "88.222.242.205"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "device_id": "6281519442782@s.whatsapp.net",
+      "event": "message",
+      "payload": {
+        "chat_id": "6282244525871@s.whatsapp.net",
+        "from": "6282244525871@s.whatsapp.net",
+        "from_name": "Said",
+        "id": "3BB733162609B5917844",
+        "image": "statics/media/1772002797-f9aeef08-1cf1-4f6f-9f0c-b822c21766a0.jpeg",
+        "is_from_me": false,
+        "timestamp": "2026-02-25T06:59:56Z"
+      }
+    },
+    "webhookUrl": "https://support-n8n.a1v3oe.easypanel.host/webhook/31510d7c-54f1-4e09-8f42-e4ec43173202",
+    "executionMode": "production"
+  }
+]
