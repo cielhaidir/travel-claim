@@ -1219,4 +1219,404 @@ export const approvalRouter = createTRPCRouter({
 
       return updatedApproval;
     }),
+
+  // ─── ADMIN / TESTING PROCEDURES ───────────────────────────────────────────
+
+  // Get all travel approvals at a given level (admin view for testing)
+  getAllApprovalsAdmin: protectedProcedure
+    .input(
+      z.object({
+        level: z.enum(["L1_SUPERVISOR", "L2_MANAGER", "L3_DIRECTOR", "L4_SENIOR_DIRECTOR", "L5_EXECUTIVE"]).optional(),
+        status: z.nativeEnum(ApprovalStatus).optional(),
+        limit: z.number().min(1).max(100).optional(),
+      })
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only admins and managers can view all approvals",
+        });
+      }
+
+      const where: Prisma.ApprovalWhereInput = {
+        travelRequestId: { not: null },
+      };
+
+      if (input?.level) {
+        where.level = input.level as ApprovalLevel;
+      }
+      if (input?.status) {
+        where.status = input.status;
+      }
+
+      const approvals = await ctx.db.approval.findMany({
+        take: input?.limit ? input.limit + 1 : 51,
+        where,
+        include: {
+          travelRequest: {
+            include: {
+              requester: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                  department: {
+                    select: { name: true },
+                  },
+                },
+              },
+            },
+          },
+          approver: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const limit = input?.limit ?? 50;
+      let nextCursor: string | undefined = undefined;
+      if (approvals.length > limit) {
+        const nextItem = approvals.pop();
+        nextCursor = nextItem!.id;
+      }
+
+      return { approvals, nextCursor };
+    }),
+
+  // Admin action on any approval (approve / reject / revision) — bypasses approverId check
+  adminActOnApproval: protectedProcedure
+    .input(
+      z.object({
+        approvalId: z.string(),
+        action: z.enum(["approve", "reject", "revision"]),
+        comments: z.string().optional(),
+      })
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only admins and managers can act on any approval",
+        });
+      }
+
+      const approval = await ctx.db.approval.findUnique({
+        where: { id: input.approvalId },
+        include: {
+          travelRequest: {
+            include: {
+              approvals: { orderBy: { level: "asc" } },
+            },
+          },
+        },
+      });
+
+      if (!approval || !approval.travelRequest) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+      }
+
+      if (approval.status !== ApprovalStatus.PENDING) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
+      }
+
+      if (input.action === "approve") {
+        const requiresComment = false;
+        void requiresComment;
+
+        await ctx.db.approval.update({
+          where: { id: input.approvalId },
+          data: {
+            status: ApprovalStatus.APPROVED,
+            comments: input.comments,
+            approvedAt: new Date(),
+          },
+        });
+
+        // Determine new travel request status
+        const pendingApprovals = approval.travelRequest.approvals.filter(
+          (a) => a.status === ApprovalStatus.PENDING
+        );
+        let newStatus: TravelStatus;
+        if (pendingApprovals.length === 1 && pendingApprovals[0]!.id === input.approvalId) {
+          newStatus = TravelStatus.APPROVED;
+        } else {
+          const statusMap: Record<ApprovalLevel, TravelStatus> = {
+            [ApprovalLevel.L1_SUPERVISOR]: TravelStatus.APPROVED_L1,
+            [ApprovalLevel.L2_MANAGER]: TravelStatus.APPROVED_L2,
+            [ApprovalLevel.L3_DIRECTOR]: TravelStatus.APPROVED_L3,
+            [ApprovalLevel.L4_SENIOR_DIRECTOR]: TravelStatus.APPROVED_L4,
+            [ApprovalLevel.L5_EXECUTIVE]: TravelStatus.APPROVED_L5,
+          };
+          newStatus = statusMap[approval.level] ?? TravelStatus.SUBMITTED;
+        }
+
+        await ctx.db.travelRequest.update({
+          where: { id: approval.travelRequestId! },
+          data: { status: newStatus },
+        });
+
+        await ctx.db.auditLog.create({
+          data: {
+            userId: ctx.session.user.id,
+            action: AuditAction.APPROVE,
+            entityType: "TravelRequest",
+            entityId: approval.travelRequestId!,
+            metadata: { approvalId: input.approvalId, level: approval.level, adminOverride: true },
+          },
+        });
+      } else if (input.action === "reject") {
+        if (!input.comments || input.comments.length < 10) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Rejection reason required (min 10 chars)" });
+        }
+
+        await ctx.db.approval.update({
+          where: { id: input.approvalId },
+          data: {
+            status: ApprovalStatus.REJECTED,
+            rejectionReason: input.comments,
+            rejectedAt: new Date(),
+          },
+        });
+
+        await ctx.db.travelRequest.update({
+          where: { id: approval.travelRequestId! },
+          data: { status: TravelStatus.REJECTED },
+        });
+
+        await ctx.db.auditLog.create({
+          data: {
+            userId: ctx.session.user.id,
+            action: AuditAction.REJECT,
+            entityType: "TravelRequest",
+            entityId: approval.travelRequestId!,
+            metadata: { approvalId: input.approvalId, level: approval.level, adminOverride: true },
+          },
+        });
+      } else {
+        // revision
+        if (!input.comments || input.comments.length < 10) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Revision reason required (min 10 chars)" });
+        }
+
+        await ctx.db.approval.update({
+          where: { id: input.approvalId },
+          data: { status: ApprovalStatus.REVISION_REQUESTED, comments: input.comments },
+        });
+
+        // Reset all approvals to pending
+        await ctx.db.approval.updateMany({
+          where: { travelRequestId: approval.travelRequestId },
+          data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+        });
+
+        await ctx.db.travelRequest.update({
+          where: { id: approval.travelRequestId! },
+          data: { status: TravelStatus.REVISION },
+        });
+
+        await ctx.db.auditLog.create({
+          data: {
+            userId: ctx.session.user.id,
+            action: AuditAction.UPDATE,
+            entityType: "TravelRequest",
+            entityId: approval.travelRequestId!,
+            metadata: { action: "revision_requested", approvalId: input.approvalId, level: approval.level, adminOverride: true },
+          },
+        });
+      }
+
+      return { success: true };
+    }),
+
+  // Get travel requests that need director review (status = SUBMITTED, APPROVED_L1, APPROVED_L2)
+  // This is more reliable than filtering approvals, because L3 might not exist yet
+  getTravelRequestsForDirectorReview: protectedProcedure
+    .input(
+      z.object({
+        statusFilter: z.enum(["PENDING", "ALL"]).optional(),
+        limit: z.number().min(1).max(100).optional(),
+      })
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      }
+
+      // "PENDING" means: find requests where L3 approval is PENDING or doesn't exist yet
+      // "ALL" means: find all requests that have ever had an L3 approval
+      const pendingOnly = !input?.statusFilter || input.statusFilter === "PENDING";
+
+      if (pendingOnly) {
+        // Two scenarios:
+        // A) Request has L3_DIRECTOR approval with status PENDING
+        // B) Request is APPROVED_L1 or APPROVED_L2 (supervisor done) but has no L3 approval yet
+        const [withPendingL3, withoutL3] = await Promise.all([
+          // A: has pending L3
+          ctx.db.travelRequest.findMany({
+            where: {
+              deletedAt: null,
+              approvals: {
+                some: {
+                  level: ApprovalLevel.L3_DIRECTOR,
+                  status: ApprovalStatus.PENDING,
+                },
+              },
+            },
+            include: {
+              requester: {
+                select: {
+                  id: true, name: true, employeeId: true,
+                  department: { select: { name: true } },
+                },
+              },
+              approvals: {
+                where: { level: ApprovalLevel.L3_DIRECTOR },
+                include: { approver: { select: { id: true, name: true, role: true } } },
+              },
+            },
+            take: input?.limit ?? 50,
+            orderBy: { updatedAt: "desc" },
+          }),
+          // B: status APPROVED_L1 or APPROVED_L2, but NO L3 approval exists yet
+          ctx.db.travelRequest.findMany({
+            where: {
+              deletedAt: null,
+              status: { in: [TravelStatus.APPROVED_L1, TravelStatus.APPROVED_L2] },
+              approvals: { none: { level: ApprovalLevel.L3_DIRECTOR } },
+            },
+            include: {
+              requester: {
+                select: {
+                  id: true, name: true, employeeId: true,
+                  department: { select: { name: true } },
+                },
+              },
+              approvals: {
+                where: { level: ApprovalLevel.L3_DIRECTOR },
+                include: { approver: { select: { id: true, name: true, role: true } } },
+              },
+            },
+            take: input?.limit ?? 50,
+            orderBy: { updatedAt: "desc" },
+          }),
+        ]);
+
+        return { travelRequests: [...withPendingL3, ...withoutL3] };
+      } else {
+        // ALL: return any travel request that has an L3 approval
+        const travelRequests = await ctx.db.travelRequest.findMany({
+          where: {
+            deletedAt: null,
+            approvals: { some: { level: ApprovalLevel.L3_DIRECTOR } },
+          },
+          include: {
+            requester: {
+              select: {
+                id: true, name: true, employeeId: true,
+                department: { select: { name: true } },
+              },
+            },
+            approvals: {
+              where: { level: ApprovalLevel.L3_DIRECTOR },
+              include: { approver: { select: { id: true, name: true, role: true } } },
+            },
+          },
+          take: input?.limit ?? 50,
+          orderBy: { updatedAt: "desc" },
+        });
+
+        return { travelRequests };
+      }
+    }),
+
+  // Direct action on a travel request by creating an L3 approval on the fly (for requests with no L3 approval yet)
+  adminActOnTravelRequestDirect: protectedProcedure
+    .input(
+      z.object({
+        travelRequestId: z.string(),
+        action: z.enum(["approve", "reject", "revision"]),
+        comments: z.string().optional(),
+      })
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      }
+
+      const requiresComment = input.action === "reject" || input.action === "revision";
+      if (requiresComment && (!input.comments || input.comments.length < 10)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Reason required (min 10 chars)" });
+      }
+
+      const travelRequest = await ctx.db.travelRequest.findUnique({
+        where: { id: input.travelRequestId },
+      });
+
+      if (!travelRequest) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Travel request not found" });
+      }
+
+      const approvalStatus =
+        input.action === "approve" ? ApprovalStatus.APPROVED
+        : input.action === "reject" ? ApprovalStatus.REJECTED
+        : ApprovalStatus.REVISION_REQUESTED;
+
+      // Create the L3 approval record with a resolved status (create + approve in one shot)
+      await ctx.db.approval.create({
+        data: {
+          travelRequestId: input.travelRequestId,
+          approverId: ctx.session.user.id,
+          level: ApprovalLevel.L3_DIRECTOR,
+          status: approvalStatus,
+          comments: input.comments,
+          rejectionReason: input.action === "reject" ? input.comments : undefined,
+          approvedAt: input.action === "approve" ? new Date() : undefined,
+          rejectedAt: input.action === "reject" ? new Date() : undefined,
+        },
+      });
+
+      // Update travel request status
+      let newTravelStatus: TravelStatus;
+      if (input.action === "approve") {
+        newTravelStatus = TravelStatus.APPROVED;
+      } else if (input.action === "reject") {
+        newTravelStatus = TravelStatus.REJECTED;
+      } else {
+        newTravelStatus = TravelStatus.REVISION;
+        // Reset all approvals to PENDING for revision
+        await ctx.db.approval.updateMany({
+          where: { travelRequestId: input.travelRequestId, level: { not: ApprovalLevel.L3_DIRECTOR } },
+          data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+        });
+      }
+
+      await ctx.db.travelRequest.update({
+        where: { id: input.travelRequestId },
+        data: { status: newTravelStatus },
+      });
+
+      await ctx.db.auditLog.create({
+        data: {
+          userId: ctx.session.user.id,
+          action: input.action === "approve" ? AuditAction.APPROVE : AuditAction.REJECT,
+          entityType: "TravelRequest",
+          entityId: input.travelRequestId,
+          metadata: { action: input.action, level: "L3_DIRECTOR", adminDirectAct: true },
+        },
+      });
+
+      return { success: true };
+    }),
 });
+
