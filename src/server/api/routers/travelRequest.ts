@@ -768,7 +768,7 @@ export const travelRequestRouter = createTRPCRouter({
       )?.id;
 
       if (directorId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L3_DIRECTOR,
           approverId: directorId,
         });
