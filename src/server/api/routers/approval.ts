@@ -16,6 +16,8 @@ import {
   supervisorProcedure,
 } from "@/server/api/trpc";
 
+import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1573,8 +1575,10 @@ export const approvalRouter = createTRPCRouter({
         : ApprovalStatus.REVISION_REQUESTED;
 
       // Create the L3 approval record with a resolved status (create + approve in one shot)
+      const approvalNumber = await generateApprovalNumber(ctx.db);
       await ctx.db.approval.create({
         data: {
+          approvalNumber,
           travelRequestId: input.travelRequestId,
           approverId: ctx.session.user.id,
           level: ApprovalLevel.L3_DIRECTOR,
