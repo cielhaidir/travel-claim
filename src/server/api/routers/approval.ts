@@ -7,7 +7,7 @@ import {
   AuditAction,
   ApprovalLevel,
   type Prisma,
-  PrismaClient,
+  type PrismaClient,
 } from "../../../../generated/prisma";
 
 import {
@@ -15,6 +15,7 @@ import {
   protectedProcedure,
   supervisorProcedure,
 } from "@/server/api/trpc";
+import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
@@ -64,8 +65,7 @@ async function resolveApprovalBase<TInclude extends Prisma.ApprovalInclude>(
     ? { id: identifier.approvalId }
     : { approvalNumber: identifier.approvalNumber! };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const approval = await (db as any).approval.findUnique({ where, include });
+  const approval = await db.approval.findUnique({ where, include });
 
   if (!approval) {
     throw new TRPCError({
@@ -76,7 +76,7 @@ async function resolveApprovalBase<TInclude extends Prisma.ApprovalInclude>(
     });
   }
 
-  return approval as NonNullable<typeof approval>;
+  return approval;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -616,7 +616,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -628,7 +628,7 @@ export const approvalRouter = createTRPCRouter({
       });
 
       // Check if all previous level approvals are complete
-      const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level as ApprovalLevel);
+      const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level);
       const allPreviousApproved = (approval.travelRequest.approvals as Array<{ level: ApprovalLevel; status: ApprovalStatus; id: string }>)
         .filter((a) => {
           const levelIndex = Object.values(ApprovalLevel).indexOf(a.level);
@@ -660,7 +660,7 @@ export const approvalRouter = createTRPCRouter({
           [ApprovalLevel.L4_SENIOR_DIRECTOR]: TravelStatus.APPROVED_L4,
           [ApprovalLevel.L5_EXECUTIVE]: TravelStatus.APPROVED_L5,
         };
-        newStatus = statusMap[approval.level as ApprovalLevel] ?? TravelStatus.SUBMITTED;
+        newStatus = statusMap[approval.level] ?? TravelStatus.SUBMITTED;
       }
 
       await ctx.db.travelRequest.update({
@@ -752,7 +752,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -852,7 +852,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -968,7 +968,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -984,7 +984,7 @@ export const approvalRouter = createTRPCRouter({
       );
 
       const newStatus =
-        pendingApprovals.length === 0 ? ClaimStatus.APPROVED : (approval.claim.status as ClaimStatus);
+        pendingApprovals.length === 0 ? ClaimStatus.APPROVED : (approval.claim.status);
 
       await ctx.db.claim.update({
         where: { id: approval.claimId as string },
@@ -1075,7 +1075,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -1175,7 +1175,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id as string;
+      const resolvedId = approval.id;
 
       const updatedApproval = await ctx.db.approval.update({
         where: { id: resolvedId },
@@ -1579,6 +1579,7 @@ export const approvalRouter = createTRPCRouter({
           approverId: ctx.session.user.id,
           level: ApprovalLevel.L3_DIRECTOR,
           status: approvalStatus,
+          approvalNumber: await generateApprovalNumber(ctx.db),
           comments: input.comments,
           rejectionReason: input.action === "reject" ? input.comments : undefined,
           approvedAt: input.action === "approve" ? new Date() : undefined,

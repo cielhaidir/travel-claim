@@ -46,7 +46,13 @@ export default function LoginPage() {
 
       if (result?.error) {
         console.error("Login error:", result.error);
-        setError(result.error);
+        const errorMessages: Record<string, string> = {
+          CredentialsSignin: "Invalid email or password.",
+          Configuration: "Authentication is not configured correctly. Please contact your IT administrator.",
+          AccessDenied: "You do not have permission to sign in.",
+          Verification: "The verification link has expired or has already been used.",
+        };
+        setError(errorMessages[result.error] ?? "An error occurred during sign in. Please try again.");
         setIsLoading(false);
       } else if (result?.ok) {
         console.log("Login successful, redirecting...");

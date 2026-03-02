@@ -60,6 +60,57 @@ export const userRouter = createTRPCRouter({
     return user;
   }),
 
+  // Get active users (lightweight, for participant pickers - accessible to all logged-in users)
+  getActiveUsers: protectedProcedure
+    .meta({
+      openapi: {
+        method: 'GET',
+        path: '/users/active',
+        protect: true,
+        tags: ['Users'],
+        summary: 'Get list of active users for participant selection',
+      }
+    })
+    .input(
+      z.object({
+        search: z.string().optional(),
+      })
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const users = await ctx.db.user.findMany({
+        where: {
+          deletedAt: null,
+          ...(input.search
+            ? {
+                OR: [
+                  { name: { contains: input.search, mode: "insensitive" } },
+                  { email: { contains: input.search, mode: "insensitive" } },
+                  { employeeId: { contains: input.search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          employeeId: true,
+          role: true,
+          department: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: { name: "asc" },
+        take: 100,
+      });
+
+      return users;
+    }),
+
   // Get user by phone number (dedicated MCP tool)
   getByPhone: managerProcedure
     .meta({

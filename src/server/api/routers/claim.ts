@@ -337,6 +337,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive(),
         description: z.string().min(10),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -447,6 +448,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive(),
         description: z.string().min(10),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -565,6 +567,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive().optional(),
         description: z.string().min(10).optional(),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -690,30 +693,34 @@ export const claimRouter = createTRPCRouter({
       // Create approval workflow
       const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
 
-      // L1: Supervisor
-      if (claim.submitter.supervisorId) {
+      const submitterRole = claim.submitter.role;
+
+      // L1: Supervisor only for non-SALES_CHIEF
+      if (submitterRole !== "SALES_CHIEF" && claim.submitter.supervisorId) {
         approvalEntries.push({
           level: ApprovalLevel.L1_SUPERVISOR,
           approverId: claim.submitter.supervisorId,
         });
       }
 
-      // L2: Finance for high amounts (example: > 5000000)
-      if (Number(claim.amount) > 5000000) {
-        // Find finance user
-        const financeUser = await ctx.db.user.findFirst({
-          where: {
-            role: "FINANCE",
-            deletedAt: null,
-          },
-        });
+      // L3: Director from department, fallback to first DIRECTOR/ADMIN
+      const claimDirectorId =
+        claim.submitter.department?.directorId ??
+        (
+          await ctx.db.user.findFirst({
+            where: {
+              role: { in: ["DIRECTOR", "ADMIN"] },
+              deletedAt: null,
+            },
+            orderBy: { createdAt: "asc" },
+          })
+        )?.id;
 
-        if (financeUser) {
-          approvalEntries.push({
-            level: ApprovalLevel.L2_MANAGER,
-            approverId: financeUser.id,
-          });
-        }
+      if (claimDirectorId) {
+        approvalEntries.push({
+          level: ApprovalLevel.L3_DIRECTOR,
+          approverId: claimDirectorId,
+        });
       }
 
       // Generate a unique approvalNumber for each approval record

@@ -124,6 +124,14 @@ const PAGE_TABS: { key: PageTab; label: string; icon: string }[] = [
 
 export default function TravelRequestsPage() {
   const [activeTab, setActiveTab] = useState<PageTab>("pengajuan");
+  const { data: session } = useSession();
+  const userRole = session?.user?.role ?? "";
+
+  const visibleTabs = PAGE_TABS.filter((tab) => {
+    if (tab.key === "supervisor") return ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"].includes(userRole);
+    if (tab.key === "director") return ["DIRECTOR", "ADMIN", "MANAGER"].includes(userRole);
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -135,7 +143,7 @@ export default function TravelRequestsPage() {
       {/* Page-level Tabs */}
       <div className="border-b border-gray-200">
         <nav className="flex gap-0" aria-label="Tabs">
-          {PAGE_TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -166,6 +174,7 @@ export default function TravelRequestsPage() {
 function PengajuanTab() {
   const { data: session } = useSession();
   const userId = session?.user?.id;
+  const canCreateTrip = ["SALES_EMPLOYEE", "SALES_CHIEF", "ADMIN"].includes(session?.user?.role ?? "");
 
   const [statusFilter, setStatusFilter] = useState<TravelStatus | "ALL">("ALL");
   const [typeFilter, setTypeFilter] = useState<TravelType | "ALL">("ALL");
@@ -213,6 +222,7 @@ function PengajuanTab() {
       startDate: new Date(formData.startDate),
       endDate: new Date(formData.endDate),
       projectId: formData.projectId ?? undefined,
+      participantIds: formData.participantIds ?? [],
       bailouts: formData.bailouts?.filter((b) => b.description?.trim().length >= 5 && b.amount > 0).map((b) => ({
         description: b.description.trim(),
         amount: b.amount,
@@ -291,7 +301,7 @@ function PengajuanTab() {
             <option value="TRAINING">Training</option>
           </select>
         </div>
-        <Button onClick={() => setIsFormOpen(true)}>+ New Request</Button>
+        {canCreateTrip && <Button onClick={() => setIsFormOpen(true)}>+ New Request</Button>}
       </div>
 
       {/* List */}
@@ -302,7 +312,7 @@ function PengajuanTab() {
           icon="✈️"
           title="No business trip requests yet"
           description="Get started by creating your first business trip request"
-          action={{ label: "Create Request", onClick: () => setIsFormOpen(true) }}
+          action={canCreateTrip ? { label: "Create Request", onClick: () => setIsFormOpen(true) } : undefined}
         />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-white">
@@ -1102,6 +1112,26 @@ function TravelRequestDetail({
 
       {activeTab === "info" && (
         <div className="space-y-4">
+          {(request.status === "REJECTED" || request.status === "REVISION") && (
+            <div className={`rounded-lg border p-4 ${
+              request.status === "REJECTED"
+                ? "border-red-200 bg-red-50"
+                : "border-yellow-200 bg-yellow-50"
+            }`}>
+              <p className={`text-sm font-semibold ${
+                request.status === "REJECTED" ? "text-red-800" : "text-yellow-800"
+              }`}>
+                {request.status === "REJECTED" ? "❌ Permohonan Ditolak" : "↩️ Perlu Revisi"}
+              </p>
+              {request.rejectionReason && (
+                <p className={`mt-1 text-sm ${
+                  request.status === "REJECTED" ? "text-red-700" : "text-yellow-700"
+                }`}>
+                  {request.rejectionReason}
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Nomor Request" value={request.requestNumber} />
             <Field label="Jenis Perjalanan" value={TRAVEL_TYPE_LABELS[request.travelType]} />

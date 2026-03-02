@@ -7,6 +7,7 @@ import {
   ApprovalStatus,
   AuditAction,
   type Prisma,
+  type TransportMode,
 } from "../../../../generated/prisma";
 
 import {
@@ -211,7 +212,7 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
         OR: [
           { requesterId: targetUser.id },
@@ -227,14 +228,15 @@ export const travelRequestRouter = createTRPCRouter({
         where.travelType = input.travelType;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ startDate: { gte: input.startDate } });
+      if (input?.startDate ?? input?.endDate) {
+        const andConditions: Prisma.TravelRequestWhereInput[] = [];
+        if (input?.startDate) {
+          andConditions.push({ startDate: { gte: input.startDate } });
         }
-        if (input.endDate) {
-          where.AND.push({ endDate: { lte: input.endDate } });
+        if (input?.endDate) {
+          andConditions.push({ endDate: { lte: input.endDate } });
         }
+        where.AND = andConditions;
       }
 
       const requests = await ctx.db.travelRequest.findMany({
@@ -527,6 +529,15 @@ export const travelRequestRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { participantIds, bailouts, ...requestData } = input;
 
+      // Only SALES_EMPLOYEE, SALES_CHIEF, and ADMIN can create a BussTrip
+      const allowedCreatorRoles = ["SALES_EMPLOYEE", "SALES_CHIEF", "ADMIN"];
+      if (!allowedCreatorRoles.includes(ctx.session.user.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Hanya Sales Employee dan Sales Chief yang bisa mengajukan Business Trip",
+        });
+      }
+
       // Validate dates
       if (input.startDate >= input.endDate) {
         throw new TRPCError({
@@ -575,7 +586,7 @@ export const travelRequestRouter = createTRPCRouter({
                     category,
                     description,
                     amount,
-                    transportMode: transportMode as import("../../../../generated/prisma").TransportMode | undefined,
+                    transportMode: transportMode as TransportMode | undefined,
                     ...rest,
                   };
                 }),
@@ -739,26 +750,22 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      // Create approval workflow
+      // Create approval workflow based on requester's role
+      // - SALES_EMPLOYEE : L1 (Sales Chief / supervisor) → L3 (Director)
+      // - SALES_CHIEF    : directly L3 (Director) — skip L1
       const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
 
-      // L1: Supervisor
-      if (request.requester.supervisorId) {
+      const requesterRole = request.requester.role;
+
+      // L1: Supervisor — only for SALES_EMPLOYEE (not SALES_CHIEF)
+      if (requesterRole !== "SALES_CHIEF" && request.requester.supervisorId) {
         approvalEntries.push({
           level: ApprovalLevel.L1_SUPERVISOR,
           approverId: request.requester.supervisorId,
         });
       }
 
-      // L2: Manager (department manager)
-      if (request.requester.department?.managerId) {
-        approvalEntries.push({
-          level: ApprovalLevel.L2_MANAGER,
-          approverId: request.requester.department.managerId,
-        });
-      }
-
-      // L3: Director (department director, with fallback to any DIRECTOR/ADMIN)
+      // L3: Director — for all submitters (department director, fallback to first DIRECTOR/ADMIN)
       const directorId = request.requester.department?.directorId ?? (
         await ctx.db.user.findFirst({
           where: { role: { in: ["DIRECTOR", "ADMIN"] }, id: { not: request.requesterId } },
@@ -768,7 +775,7 @@ export const travelRequestRouter = createTRPCRouter({
       )?.id;
 
       if (directorId) {
-        approvals.push({
+        approvalEntries.push({
           level: ApprovalLevel.L3_DIRECTOR,
           approverId: directorId,
         });

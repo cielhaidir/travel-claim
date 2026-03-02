@@ -1,0 +1,107 @@
+﻿
+D:\AISTECH\travel-claim\fix-encoding.mjs
+  3:9  error  Parsing error: Identifier 'readFileSync' has already been declared. (3:9)
+
+D:\AISTECH\travel-claim\src\server\api\routers\approval.ts
+     3:1   warning  Imports "PrismaClient" are only used as type                                       @typescript-eslint/consistent-type-imports
+    69:9   error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+    69:26  error    Unsafe call of an `any` typed value                                                @typescript-eslint/no-unsafe-call
+    69:38  error    Unsafe member access .approval on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+    80:3   error    Unsafe return of a value of type `any`                                             @typescript-eslint/no-unsafe-return
+    80:10  error    This assertion is unnecessary since it does not change the type of the expression  @typescript-eslint/no-unnecessary-type-assertion
+   577:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   594:21  error    Unsafe member access .travelRequest on an `any` value                              @typescript-eslint/no-unsafe-member-access
+   602:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+   605:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+   612:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+   620:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+   632:79  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   633:45  error    Unsafe member access .travelRequest on an `any` value                              @typescript-eslint/no-unsafe-member-access
+   648:42  error    Unsafe member access .travelRequest on an `any` value                              @typescript-eslint/no-unsafe-member-access
+   664:40  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   668:31  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   677:30  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   680:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   680:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+   681:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   681:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   719:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   730:21  error    Unsafe member access .travelRequest on an `any` value                              @typescript-eslint/no-unsafe-member-access
+   738:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+   741:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+   748:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+   756:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+   768:31  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   777:30  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   780:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   780:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+   781:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   781:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   819:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   830:21  error    Unsafe member access .travelRequest on an `any` value                              @typescript-eslint/no-unsafe-member-access
+   838:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+   841:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+   848:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+   856:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+   868:44  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   877:31  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   886:30  error    Unsafe member access .travelRequestId on an `any` value                            @typescript-eslint/no-unsafe-member-access
+   890:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   890:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+   891:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   891:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   929:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+   946:21  error    Unsafe member access .claim on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   954:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+   957:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+   964:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+   972:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+   983:42  error    Unsafe member access .claim on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   988:74  error    Unsafe member access .claim on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+   991:31  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1000:30  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1003:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1003:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+  1004:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1004:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+  1042:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1053:21  error    Unsafe member access .claim on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+  1061:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+  1064:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+  1071:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+  1079:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+  1091:31  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1100:30  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1103:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1103:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+  1104:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1104:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+  1142:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1153:21  error    Unsafe member access .claim on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+  1161:53  error    Unsafe member access .approver on an `any` value                                   @typescript-eslint/no-unsafe-member-access
+  1164:20  error    Unsafe member access .approverId on an `any` value                                 @typescript-eslint/no-unsafe-member-access
+  1171:20  error    Unsafe member access .status on an `any` value                                     @typescript-eslint/no-unsafe-member-access
+  1179:35  error    Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+  1190:36  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1199:31  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1208:30  error    Unsafe member access .claimId on an `any` value                                    @typescript-eslint/no-unsafe-member-access
+  1212:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1212:38  error    Unsafe member access .approvalNumber on an `any` value                             @typescript-eslint/no-unsafe-member-access
+  1213:13  error    Unsafe assignment of an `any` value                                                @typescript-eslint/no-unsafe-assignment
+  1213:29  error    Unsafe member access .level on an `any` value                                      @typescript-eslint/no-unsafe-member-access
+
+D:\AISTECH\travel-claim\src\server\api\routers\travelRequest.ts
+  214:20  error    Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+  223:15  error    Unsafe member access .status on an `any` value      @typescript-eslint/no-unsafe-member-access
+  227:15  error    Unsafe member access .travelType on an `any` value  @typescript-eslint/no-unsafe-member-access
+  231:15  error    Unsafe member access .AND on an `any` value         @typescript-eslint/no-unsafe-member-access
+  233:11  error    Unsafe call of an `any` typed value                 @typescript-eslint/no-unsafe-call
+  233:17  error    Unsafe member access .AND on an `any` value         @typescript-eslint/no-unsafe-member-access
+  236:11  error    Unsafe call of an `any` typed value                 @typescript-eslint/no-unsafe-call
+  236:17  error    Unsafe member access .AND on an `any` value         @typescript-eslint/no-unsafe-member-access
+  243:9   error    Unsafe assignment of an `any` value                 @typescript-eslint/no-unsafe-assignment
+  578:53  warning  `import()` type annotations are forbidden           @typescript-eslint/consistent-type-imports
+
+Γ£û 97 problems (95 errors, 2 warnings)
+  1 error and 1 warning potentially fixable with the `--fix` option.
+

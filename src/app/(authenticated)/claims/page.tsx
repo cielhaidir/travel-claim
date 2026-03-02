@@ -148,6 +148,7 @@ export default function ClaimsPage() {
         amount: Number(formData.amount),
         description: formData.description,
         notes: formData.notes || undefined,
+        coaId: formData.coaId || undefined,
       });
     } else {
       createNonEntMutation.mutate({
@@ -159,6 +160,7 @@ export default function ClaimsPage() {
         amount: Number(formData.amount),
         description: formData.description,
         notes: formData.notes || undefined,
+        coaId: formData.coaId || undefined,
       });
     }
   };
@@ -178,6 +180,7 @@ export default function ClaimsPage() {
         amount: Number(formData.amount),
         description: formData.description,
         notes: formData.notes || undefined,
+        coaId: formData.coaId || undefined,
       });
     } else {
       updateMutation.mutate({
@@ -188,6 +191,7 @@ export default function ClaimsPage() {
         amount: Number(formData.amount),
         description: formData.description,
         notes: formData.notes || undefined,
+        coaId: formData.coaId || undefined,
       });
     }
   };
