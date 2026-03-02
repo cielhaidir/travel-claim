@@ -16,6 +16,10 @@ import {
   managerProcedure,
 } from "@/server/api/trpc";
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
+import {
+  sendWhatsappPoll,
+  buildTravelRequestApprovalPoll,
+} from "@/lib/utils/whatsapp";
 
 export const travelRequestRouter = createTRPCRouter({
   // Get all travel requests with filters
@@ -712,7 +716,16 @@ export const travelRequestRouter = createTRPCRouter({
           requester: {
             include: {
               supervisor: true,
-              department: true,
+              department: {
+                include: { chief: { include: { supervisor: { include: { supervisor: { include: { supervisor: true } } } } } } },
+              },
+            },
+          },
+          project: {
+            include: {
+              salesLead: {
+                include: { supervisor: { include: { supervisor: { include: { supervisor: true } } } } },
+              },
             },
           },
         },
@@ -739,44 +752,73 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      // Create approval workflow
-      const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
+      // ── Build dynamic approval chain per DYNAMIC_APPROVAL_HIERARCHY.md ──────
+      // Entry type includes sequence for chain ordering
+      const approvalEntries: { sequence: number; level: ApprovalLevel; approverId: string }[] = [];
+      let seq = 1;
 
-      // L1: Supervisor
-      if (request.requester.supervisorId) {
-        approvalEntries.push({
-          level: ApprovalLevel.L1_SUPERVISOR,
-          approverId: request.requester.supervisorId,
-        });
+      const requesterRole = request.requester.role;
+      const isSalesRole = requesterRole === "SALES_EMPLOYEE" || requesterRole === "SALES_CHIEF";
+      const isSalesTravel = request.travelType === "SALES" && !!request.projectId;
+
+      if (!isSalesRole && isSalesTravel && request.project?.salesLead) {
+        // Rule B: Regular employee on a sales trip → start with SALES_LEAD (unless requester IS the sales lead)
+        const salesLead = request.project.salesLead;
+        if (salesLead.id !== request.requesterId) {
+          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.SALES_LEAD, approverId: salesLead.id });
+
+          // Walk the sales lead's supervisor chain: DEPT_CHIEF → DIRECTOR → SENIOR_DIRECTOR → EXECUTIVE
+          let current: { id: string; supervisorId: string | null; supervisor?: typeof salesLead | null } | null = salesLead;
+          const levels: ApprovalLevel[] = [ApprovalLevel.DEPT_CHIEF, ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          for (const level of levels) {
+            if (!current?.supervisorId) break;
+            current = current.supervisor ?? null;
+            if (!current) break;
+            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+          }
+        } else {
+          // Requester IS the sales lead — start at DEPT_CHIEF via requester's department chief
+          const chief = request.requester.department?.chief;
+          if (chief) {
+            approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
+            let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
+            const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+            for (const level of levels) {
+              if (!current?.supervisorId) break;
+              current = current.supervisor ?? null;
+              if (!current) break;
+              approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+            }
+          }
+        }
+      } else {
+        // Rule A (SALES_EMPLOYEE / SALES_CHIEF) or Rule C (non-sales employee, non-sales travel):
+        // Chain starts at DEPT_CHIEF then walks supervisor chain upward
+        const chief = request.requester.department?.chief;
+        if (chief) {
+          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
+          let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
+          const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          for (const level of levels) {
+            if (!current?.supervisorId) break;
+            current = current.supervisor ?? null;
+            if (!current) break;
+            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+          }
+        }
       }
 
-      // L2: Manager (department manager)
-      if (request.requester.department?.managerId) {
-        approvalEntries.push({
-          level: ApprovalLevel.L2_MANAGER,
-          approverId: request.requester.department.managerId,
-        });
-      }
-
-      // L3: Director (department director, with fallback to any DIRECTOR/ADMIN)
-      const directorId = request.requester.department?.directorId ?? (
-        await ctx.db.user.findFirst({
-          where: { role: { in: ["DIRECTOR", "ADMIN"] }, id: { not: request.requesterId } },
-          select: { id: true },
-          orderBy: { createdAt: "asc" },
-        })
-      )?.id;
-
-      if (directorId) {
-        approvalEntries.push({
-          level: ApprovalLevel.L3_DIRECTOR,
-          approverId: directorId,
-        });
-      }
+      // Deduplicate by approverId (same person can't appear twice in the chain)
+      const seen = new Set<string>();
+      const deduped = approvalEntries.filter((e) => {
+        if (seen.has(e.approverId)) return false;
+        seen.add(e.approverId);
+        return true;
+      }).map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
 
       // Generate a unique approvalNumber for each approval record
       const approvalsWithNumbers = await Promise.all(
-        approvalEntries.map(async (entry) => ({
+        deduped.map(async (entry) => ({
           ...entry,
           approvalNumber: await generateApprovalNumber(ctx.db),
         }))
@@ -811,8 +853,41 @@ export const travelRequestRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notifications to approvers
-      
+      // Send poll notification only to the FIRST approver (sequence = 1).
+      // Subsequent approvers are notified sequentially as each level approves
+      // (handled in approval.approveTravelRequest).
+      void (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const first = (updated.approvals as unknown as Array<{
+          approvalNumber: string;
+          sequence: number;
+          approver: { id: string; name: string | null; email: string | null };
+        }>).find((a) => a.sequence === 1);
+
+        if (!first) return;
+
+        const approverWithPhone = await ctx.db.user.findUnique({
+          where: { id: first.approver.id },
+          select: { phoneNumber: true },
+        });
+        const phone = approverWithPhone?.phoneNumber;
+        if (!phone) return;
+
+        await sendWhatsappPoll(
+          buildTravelRequestApprovalPoll(
+            first.approvalNumber,
+            phone.replace(/^\+/, ""),
+            {
+              requestNumber: request.requestNumber,
+              requesterName: request.requester.name ?? request.requester.email ?? "Unknown",
+              destination: request.destination,
+              purpose: request.purpose,
+              startDate: request.startDate,
+              endDate: request.endDate,
+            },
+          ),
+        );
+      })();
 
       return updated;
     }),

@@ -3,682 +3,446 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  console.log("🌱 Starting database seeding...");
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  // Create departments first
-  const departments = await createDepartments();
-  console.log("✅ Departments created");
+const PASSWORD = "password123";
 
-  // Create users with hierarchy
-  const users = await createUsers(departments);
-  console.log("✅ Users created");
-
-  // Create Chart of Accounts
-  await createChartOfAccounts(users.adminChief);
-  console.log("✅ Chart of Accounts created");
-
-  console.log("🎉 Seeding completed successfully!");
-  console.log("");
-  console.log("📋 Login credentials (all use: password123)");
-  console.log("   👔 Director    : director@company.com");
-  console.log("   🔑 Admin Chief : admin@company.com");
-  console.log("   🛠  Eng Chief  : engineer.chief@company.com");
-  console.log("   💼 Sales Chief : sales.chief@company.com");
-  console.log("   👤 Eng Staff 1 : engineer.staff1@company.com");
-  console.log("   👤 Eng Staff 2 : engineer.staff2@company.com");
-  console.log("   👤 Sales Staff1: sales.staff1@company.com");
-  console.log("   👤 Sales Staff2: sales.staff2@company.com");
-  console.log("   👤 Admin Staff1: admin.staff1@company.com");
-  console.log("   👤 Admin Staff2: admin.staff2@company.com");
+async function hash(plain: string) {
+  return bcrypt.hash(plain, 10);
 }
 
-async function createDepartments() {
-  // Engineering Department
-  const engineeringDept = await prisma.department.upsert({
-    where: { code: "ENG" },
-    update: { name: "Engineering", description: "Software engineering and technical operations" },
-    create: {
-      code: "ENG",
-      name: "Engineering",
-      description: "Software engineering and technical operations",
-    },
-  });
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
-  // Sales Department
-  const salesDept = await prisma.department.upsert({
+async function main() {
+  console.log("🌱 Starting database seeding (master data only)…\n");
+
+  const pw = await hash(PASSWORD);
+
+  // ── 1. Departments (no chiefId yet — set after users are created) ───────────
+  console.log("📂 Creating departments…");
+  const deptSales = await prisma.department.upsert({
     where: { code: "SALES" },
     update: { name: "Sales", description: "Sales operations and customer relations" },
-    create: {
-      code: "SALES",
-      name: "Sales",
-      description: "Sales operations and customer relations",
-    },
+    create: { code: "SALES", name: "Sales", description: "Sales operations and customer relations" },
   });
-
-  // Administration Department
-  const adminDept = await prisma.department.upsert({
+  const deptEng = await prisma.department.upsert({
+    where: { code: "ENG" },
+    update: { name: "Engineering", description: "Software engineering and technical operations" },
+    create: { code: "ENG", name: "Engineering", description: "Software engineering and technical operations" },
+  });
+  const deptFinance = await prisma.department.upsert({
+    where: { code: "FIN" },
+    update: { name: "Finance", description: "Finance and accounting" },
+    create: { code: "FIN", name: "Finance", description: "Finance and accounting" },
+  });
+  const deptAdmin = await prisma.department.upsert({
     where: { code: "ADMIN" },
     update: { name: "Administration", description: "Administrative and support operations" },
-    create: {
-      code: "ADMIN",
-      name: "Administration",
-      description: "Administrative and support operations",
-    },
+    create: { code: "ADMIN", name: "Administration", description: "Administrative and support operations" },
   });
+  console.log("  ✅ 4 departments ready\n");
 
-  return { engineeringDept, salesDept, adminDept };
-}
-
-async function createUsers(departments: Awaited<ReturnType<typeof createDepartments>>) {
-  const password = "password123";
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  // Clear any stale employeeIds that may conflict (from a previous seed run
-  // using different emails). We null them out so the upserts below can
-  // reassign them cleanly.
-  const reservedEmployeeIds = [
-    "EMP001", "EMP002", "EMP003", "EMP004", "EMP005",
-    "EMP006", "EMP007", "EMP008", "EMP009", "EMP010",
+  // ── 2. Clear reserved employeeIds to avoid unique conflicts on re-seed ───────
+  const reservedIds = [
+    "EMP001", "EMP002", "EMP003",
+    "EMP010", "EMP011", "EMP012",
+    "EMP020", "EMP021", "EMP022",
+    "EMP030", "EMP031",
+    "EMP040", "EMP041",
   ];
   await prisma.user.updateMany({
-    where: { employeeId: { in: reservedEmployeeIds } },
+    where: { employeeId: { in: reservedIds } },
     data: { employeeId: null },
   });
 
-  // ─────────────────────────────────────────────────────────
-  // DIRECTOR (1 person — top of hierarchy, no department)
-  // ─────────────────────────────────────────────────────────
-  const director = await prisma.user.upsert({
-    where: { email: "director@company.com" },
-    update: { name: "Budi Hartono", role: "DIRECTOR", employeeId: "EMP001" },
+  // ── 3. Users ─────────────────────────────────────────────────────────────────
+  console.log("👤 Creating users…");
+
+  // ── 3a. Executive / C-level (no department, top of hierarchy) ────────────────
+  const executive = await prisma.user.upsert({
+    where: { email: "executive@company.com" },
+    update: { name: "Pak Hendra Wijaya", role: "ADMIN", employeeId: "EMP001" },
     create: {
-      email: "director@company.com",
-      name: "Budi Hartono",
+      email: "executive@company.com",
+      name: "Pak Hendra Wijaya",
       employeeId: "EMP001",
-      role: "DIRECTOR",
-      password: hashedPassword,
+      role: "ADMIN",
+      password: pw,
       emailVerified: new Date(),
       phoneNumber: "+628111000001",
     },
   });
-  console.log(`   👔 Director     : director@company.com / ${password}`);
+  console.log(`  👑 Executive/Admin : executive@company.com   (EMP001)`);
 
-  // ─────────────────────────────────────────────────────────
-  // ADMIN GROUP — Chief + 2 Members
-  // ─────────────────────────────────────────────────────────
-  const adminChief = await prisma.user.upsert({
-    where: { email: "admin@company.com" },
-    update: { name: "Diana Kusuma", role: "ADMIN", departmentId: departments.adminDept.id, supervisorId: director.id },
-    create: {
-      email: "admin@company.com",
-      name: "Diana Kusuma",
+  // ── 3b. Director (reports to executive) ──────────────────────────────────────
+  const director = await prisma.user.upsert({
+    where: { email: "director@company.com" },
+    update: {
+      name: "Ibu Ratna Sari",
+      role: "DIRECTOR",
       employeeId: "EMP002",
-      role: "ADMIN",
-      password: hashedPassword,
+      supervisorId: executive.id,
+    },
+    create: {
+      email: "director@company.com",
+      name: "Ibu Ratna Sari",
+      employeeId: "EMP002",
+      role: "DIRECTOR",
+      password: pw,
       emailVerified: new Date(),
       phoneNumber: "+628111000002",
-      departmentId: departments.adminDept.id,
+      supervisorId: executive.id,
+    },
+  });
+  console.log(`  👔 Director        : director@company.com    (EMP002) → supervisor: executive`);
+
+  // ── 3c. Finance Department ────────────────────────────────────────────────────
+  // Finance Chief (SALES_CHIEF used as "dept chief" role; role=MANAGER for finance head)
+  const financeChief = await prisma.user.upsert({
+    where: { email: "finance.chief@company.com" },
+    update: {
+      name: "Dewi Anggraeni",
+      role: "MANAGER",
+      employeeId: "EMP003",
+      departmentId: deptFinance.id,
+      supervisorId: director.id,
+    },
+    create: {
+      email: "finance.chief@company.com",
+      name: "Dewi Anggraeni",
+      employeeId: "EMP003",
+      role: "MANAGER",
+      password: pw,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000003",
+      departmentId: deptFinance.id,
       supervisorId: director.id,
     },
   });
-  console.log(`   🔑 Admin Chief  : admin@company.com / ${password}`);
+  console.log(`  🏦 Finance Chief   : finance.chief@company.com  (EMP003) → supervisor: director`);
 
-  const adminStaff1 = await prisma.user.upsert({
-    where: { email: "admin.staff1@company.com" },
-    update: { supervisorId: adminChief.id },
+  const financeStaff1 = await prisma.user.upsert({
+    where: { email: "finance.staff1@company.com" },
+    update: { supervisorId: financeChief.id, departmentId: deptFinance.id },
     create: {
-      email: "admin.staff1@company.com",
-      name: "Budi Santoso",
-      employeeId: "EMP003",
-      role: "EMPLOYEE",
-      password: hashedPassword,
+      email: "finance.staff1@company.com",
+      name: "Bambang Nugroho",
+      employeeId: "EMP010",
+      role: "FINANCE",
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000003",
-      departmentId: departments.adminDept.id,
-      supervisorId: adminChief.id,
+      phoneNumber: "+628111000010",
+      departmentId: deptFinance.id,
+      supervisorId: financeChief.id,
     },
   });
-  console.log(`   👤 Admin Staff 1: admin.staff1@company.com / ${password}`);
+  console.log(`  👤 Finance Staff 1 : finance.staff1@company.com (EMP010) → supervisor: finance.chief`);
 
-  const adminStaff2 = await prisma.user.upsert({
-    where: { email: "admin.staff2@company.com" },
-    update: { supervisorId: adminChief.id },
+  const financeStaff2 = await prisma.user.upsert({
+    where: { email: "finance.staff2@company.com" },
+    update: { supervisorId: financeChief.id, departmentId: deptFinance.id },
     create: {
-      email: "admin.staff2@company.com",
-      name: "Sari Dewi",
-      employeeId: "EMP004",
-      role: "EMPLOYEE",
-      password: hashedPassword,
+      email: "finance.staff2@company.com",
+      name: "Sri Wahyuni",
+      employeeId: "EMP011",
+      role: "FINANCE",
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000004",
-      departmentId: departments.adminDept.id,
-      supervisorId: adminChief.id,
+      phoneNumber: "+628111000011",
+      departmentId: deptFinance.id,
+      supervisorId: financeChief.id,
     },
   });
-  console.log(`   👤 Admin Staff 2: admin.staff2@company.com / ${password}`);
+  console.log(`  👤 Finance Staff 2 : finance.staff2@company.com (EMP011) → supervisor: finance.chief`);
 
-  // ─────────────────────────────────────────────────────────
-  // SALES GROUP — Chief + 2 Members
-  // ─────────────────────────────────────────────────────────
+  // ── 3d. Sales Department ──────────────────────────────────────────────────────
   const salesChief = await prisma.user.upsert({
     where: { email: "sales.chief@company.com" },
-    update: { supervisorId: director.id },
+    update: {
+      name: "Reza Pratama",
+      role: "SALES_CHIEF",
+      employeeId: "EMP020",
+      departmentId: deptSales.id,
+      supervisorId: director.id,
+    },
     create: {
       email: "sales.chief@company.com",
       name: "Reza Pratama",
-      employeeId: "EMP005",
-      role: "SUPERVISOR",
-      password: hashedPassword,
+      employeeId: "EMP020",
+      role: "SALES_CHIEF",
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000005",
-      departmentId: departments.salesDept.id,
+      phoneNumber: "+628111000020",
+      departmentId: deptSales.id,
       supervisorId: director.id,
     },
   });
-  console.log(`   💼 Sales Chief  : sales.chief@company.com / ${password}`);
+  console.log(`  💼 Sales Chief     : sales.chief@company.com    (EMP020) → supervisor: director`);
 
   const salesStaff1 = await prisma.user.upsert({
     where: { email: "sales.staff1@company.com" },
-    update: { supervisorId: salesChief.id },
+    update: { supervisorId: salesChief.id, departmentId: deptSales.id },
     create: {
       email: "sales.staff1@company.com",
       name: "Andi Wijaya",
-      employeeId: "EMP006",
-      role: "EMPLOYEE",
-      password: hashedPassword,
+      employeeId: "EMP021",
+      role: "SALES_EMPLOYEE",
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000006",
-      departmentId: departments.salesDept.id,
+      phoneNumber: "+628111000021",
+      departmentId: deptSales.id,
       supervisorId: salesChief.id,
     },
   });
-  console.log(`   👤 Sales Staff 1: sales.staff1@company.com / ${password}`);
+  console.log(`  👤 Sales Staff 1   : sales.staff1@company.com   (EMP021) → supervisor: sales.chief`);
 
   const salesStaff2 = await prisma.user.upsert({
     where: { email: "sales.staff2@company.com" },
-    update: { supervisorId: salesChief.id },
+    update: { supervisorId: salesChief.id, departmentId: deptSales.id },
     create: {
       email: "sales.staff2@company.com",
       name: "Rina Kusuma",
-      employeeId: "EMP007",
-      role: "EMPLOYEE",
-      password: hashedPassword,
+      employeeId: "EMP022",
+      role: "SALES_EMPLOYEE",
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000007",
-      departmentId: departments.salesDept.id,
+      phoneNumber: "+628111000022",
+      departmentId: deptSales.id,
       supervisorId: salesChief.id,
     },
   });
-  console.log(`   👤 Sales Staff 2: sales.staff2@company.com / ${password}`);
+  console.log(`  👤 Sales Staff 2   : sales.staff2@company.com   (EMP022) → supervisor: sales.chief`);
 
-  // ─────────────────────────────────────────────────────────
-  // ENGINEER GROUP — Chief + 2 Members
-  // ─────────────────────────────────────────────────────────
-  const engineerChief = await prisma.user.upsert({
+  // ── 3e. Engineering Department ────────────────────────────────────────────────
+  const engChief = await prisma.user.upsert({
     where: { email: "engineer.chief@company.com" },
-    update: { supervisorId: director.id },
+    update: {
+      name: "Deni Hermawan",
+      role: "SUPERVISOR",
+      employeeId: "EMP030",
+      departmentId: deptEng.id,
+      supervisorId: director.id,
+    },
     create: {
       email: "engineer.chief@company.com",
       name: "Deni Hermawan",
-      employeeId: "EMP008",
+      employeeId: "EMP030",
       role: "SUPERVISOR",
-      password: hashedPassword,
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000008",
-      departmentId: departments.engineeringDept.id,
+      phoneNumber: "+628111000030",
+      departmentId: deptEng.id,
       supervisorId: director.id,
     },
   });
-  console.log(`   🛠  Eng Chief   : engineer.chief@company.com / ${password}`);
+  console.log(`  🛠  Eng Chief      : engineer.chief@company.com  (EMP030) → supervisor: director`);
 
-  const engineerStaff1 = await prisma.user.upsert({
+  const engStaff1 = await prisma.user.upsert({
     where: { email: "engineer.staff1@company.com" },
-    update: { supervisorId: engineerChief.id },
+    update: { supervisorId: engChief.id, departmentId: deptEng.id },
     create: {
       email: "engineer.staff1@company.com",
       name: "Tia Rahayu",
-      employeeId: "EMP009",
+      employeeId: "EMP031",
       role: "EMPLOYEE",
-      password: hashedPassword,
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000009",
-      departmentId: departments.engineeringDept.id,
-      supervisorId: engineerChief.id,
+      phoneNumber: "+628111000031",
+      departmentId: deptEng.id,
+      supervisorId: engChief.id,
     },
   });
-  console.log(`   👤 Eng Staff 1  : engineer.staff1@company.com / ${password}`);
+  console.log(`  👤 Eng Staff 1     : engineer.staff1@company.com (EMP031) → supervisor: engineer.chief`);
 
-  const engineerStaff2 = await prisma.user.upsert({
+  const engStaff2 = await prisma.user.upsert({
     where: { email: "engineer.staff2@company.com" },
-    update: { supervisorId: engineerChief.id },
+    update: { supervisorId: engChief.id, departmentId: deptEng.id },
     create: {
       email: "engineer.staff2@company.com",
       name: "Fajar Nugroho",
-      employeeId: "EMP010",
+      employeeId: "EMP032",
       role: "EMPLOYEE",
-      password: hashedPassword,
+      password: pw,
       emailVerified: new Date(),
-      phoneNumber: "+628111000010",
-      departmentId: departments.engineeringDept.id,
-      supervisorId: engineerChief.id,
+      phoneNumber: "+628111000032",
+      departmentId: deptEng.id,
+      supervisorId: engChief.id,
     },
   });
-  console.log(`   👤 Eng Staff 2  : engineer.staff2@company.com / ${password}`);
+  console.log(`  👤 Eng Staff 2     : engineer.staff2@company.com (EMP032) → supervisor: engineer.chief`);
 
-  return {
-    director,
-    adminChief, adminStaff1, adminStaff2,
-    salesChief, salesStaff1, salesStaff2,
-    engineerChief, engineerStaff1, engineerStaff2,
-  };
+  // ── 3f. Administration Department ─────────────────────────────────────────────
+  const adminChief = await prisma.user.upsert({
+    where: { email: "admin@company.com" },
+    update: {
+      name: "Diana Kusuma",
+      role: "ADMIN",
+      employeeId: "EMP040",
+      departmentId: deptAdmin.id,
+      supervisorId: director.id,
+    },
+    create: {
+      email: "admin@company.com",
+      name: "Diana Kusuma",
+      employeeId: "EMP040",
+      role: "ADMIN",
+      password: pw,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000040",
+      departmentId: deptAdmin.id,
+      supervisorId: director.id,
+    },
+  });
+  console.log(`  🔑 Admin Chief     : admin@company.com            (EMP040) → supervisor: director`);
+
+  const adminStaff1 = await prisma.user.upsert({
+    where: { email: "admin.staff1@company.com" },
+    update: { supervisorId: adminChief.id, departmentId: deptAdmin.id },
+    create: {
+      email: "admin.staff1@company.com",
+      name: "Budi Santoso",
+      employeeId: "EMP041",
+      role: "EMPLOYEE",
+      password: pw,
+      emailVerified: new Date(),
+      phoneNumber: "+628111000041",
+      departmentId: deptAdmin.id,
+      supervisorId: adminChief.id,
+    },
+  });
+  console.log(`  👤 Admin Staff 1   : admin.staff1@company.com     (EMP041) → supervisor: admin`);
+
+  console.log("\n✅ All users created\n");
+
+  // ── 4. Wire Department.chiefId ────────────────────────────────────────────────
+  console.log("🔗 Wiring department chiefs…");
+  await prisma.department.update({ where: { id: deptSales.id },   data: { chiefId: salesChief.id } });
+  await prisma.department.update({ where: { id: deptEng.id },     data: { chiefId: engChief.id } });
+  await prisma.department.update({ where: { id: deptFinance.id }, data: { chiefId: financeChief.id } });
+  await prisma.department.update({ where: { id: deptAdmin.id },   data: { chiefId: adminChief.id } });
+  console.log("  ✅ Sales    dept chief → sales.chief");
+  console.log("  ✅ Eng      dept chief → engineer.chief");
+  console.log("  ✅ Finance  dept chief → finance.chief");
+  console.log("  ✅ Admin    dept chief → admin\n");
+
+  // ── 5. Chart of Accounts (master data) ───────────────────────────────────────
+  console.log("💰 Creating Chart of Accounts…");
+  await createChartOfAccounts(adminChief.id);
+  console.log("  ✅ Chart of Accounts ready\n");
+
+  // ── 6. Summary ────────────────────────────────────────────────────────────────
+  console.log("🎉 Seeding completed!\n");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  All passwords : password123");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("");
+  console.log("  Hierarchy:");
+  console.log("  executive@company.com   (ADMIN / C-Level)");
+  console.log("  └─ director@company.com  (DIRECTOR)");
+  console.log("     ├─ finance.chief@company.com   (MANAGER)  ← Finance dept chief");
+  console.log("     │  ├─ finance.staff1@company.com (FINANCE)");
+  console.log("     │  └─ finance.staff2@company.com (FINANCE)");
+  console.log("     ├─ sales.chief@company.com     (SALES_CHIEF) ← Sales dept chief");
+  console.log("     │  ├─ sales.staff1@company.com   (SALES_EMPLOYEE)");
+  console.log("     │  └─ sales.staff2@company.com   (SALES_EMPLOYEE)");
+  console.log("     ├─ engineer.chief@company.com  (SUPERVISOR) ← Eng dept chief");
+  console.log("     │  ├─ engineer.staff1@company.com (EMPLOYEE)");
+  console.log("     │  └─ engineer.staff2@company.com (EMPLOYEE)");
+  console.log("     └─ admin@company.com           (ADMIN)    ← Admin dept chief");
+  console.log("        └─ admin.staff1@company.com  (EMPLOYEE)");
+  console.log("");
+  console.log("  Approval chain examples:");
+  console.log("  sales.staff1 submits TravelRequest (SALES_EMPLOYEE, Rule A):");
+  console.log("    seq=1 DEPT_CHIEF  → sales.chief");
+  console.log("    seq=2 DIRECTOR    → director");
+  console.log("    seq=3 EXECUTIVE   → executive");
+  console.log("");
+  console.log("  engineer.staff1 submits TravelRequest (EMPLOYEE, Rule C):");
+  console.log("    seq=1 DEPT_CHIEF  → engineer.chief");
+  console.log("    seq=2 DIRECTOR    → director");
+  console.log("    seq=3 EXECUTIVE   → executive");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+  // suppress unused-variable warnings
+  void [financeStaff2, salesStaff1, salesStaff2, engStaff1, engStaff2, adminStaff1];
 }
 
-async function createChartOfAccounts(adminUser: { id: string } | null) {
-  if (!adminUser) throw new Error("Admin user not found. Run the admin user seed first.");
+// ─── Chart of Accounts ───────────────────────────────────────────────────────
 
-  // Create parent expense account
-  const expenseAccount = await prisma.chartOfAccount.upsert({
-    where: { code: "6000" },
-    update: {},
-    create: {
-      code: "6000",
-      name: "Operating Expenses",
-      accountType: "EXPENSE",
-      category: "Operating",
-      isActive: true,
-      description: "All operating expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created parent account: ${expenseAccount.code} - ${expenseAccount.name}`);
+async function createChartOfAccounts(createdById: string) {
+  const upsertCoa = (
+    code: string,
+    name: string,
+    category: string,
+    subcategory: string | null,
+    parentId: string | null,
+    description: string,
+  ) =>
+    prisma.chartOfAccount.upsert({
+      where: { code },
+      update: {},
+      create: {
+        code,
+        name,
+        accountType: "EXPENSE",
+        category,
+        subcategory: subcategory ?? undefined,
+        parentId: parentId ?? undefined,
+        isActive: true,
+        description,
+        createdById,
+        updatedById: createdById,
+      },
+    });
 
-  // Create travel & transportation expense accounts
-  const travelExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6100" },
-    update: {},
-    create: {
-      code: "6100",
-      name: "Travel & Transportation",
-      accountType: "EXPENSE",
-      category: "Travel",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "All travel and transportation related expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${travelExpense.code} - ${travelExpense.name}`);
+  // Root
+  const root = await upsertCoa("6000", "Operating Expenses", "Operating", null, null, "All operating expenses");
+  console.log(`    6000 Operating Expenses`);
 
-  // Create subcategory accounts under Travel
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6110" },
-    update: {},
-    create: {
-      code: "6110",
-      name: "Airfare",
-      accountType: "EXPENSE",
-      category: "Travel",
-      subcategory: "Transportation",
-      parentId: travelExpense.id,
-      isActive: true,
-      description: "Air travel expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
+  // Travel
+  const travel = await upsertCoa("6100", "Travel & Transportation", "Travel", null, root.id, "All travel and transportation related expenses");
+  console.log(`    6100 Travel & Transportation`);
+  await upsertCoa("6110", "Airfare",                "Travel", "Transportation", travel.id, "Air travel expenses");
+  await upsertCoa("6120", "Ground Transportation",  "Travel", "Transportation", travel.id, "Taxi, car rental, fuel, parking expenses");
+  await upsertCoa("6130", "Accommodation",          "Travel", "Lodging",         travel.id, "Hotel and lodging expenses");
 
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6120" },
-    update: {},
-    create: {
-      code: "6120",
-      name: "Ground Transportation",
-      accountType: "EXPENSE",
-      category: "Travel",
-      subcategory: "Transportation",
-      parentId: travelExpense.id,
-      isActive: true,
-      description: "Taxi, car rental, fuel, parking expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
+  // Meals & Entertainment
+  const meals = await upsertCoa("6200", "Meals & Entertainment", "Entertainment", null, root.id, "Business meals and entertainment expenses");
+  console.log(`    6200 Meals & Entertainment`);
+  await upsertCoa("6210", "Business Meals",       "Entertainment", "Meals",        meals.id, "Business-related meal expenses");
+  await upsertCoa("6220", "Client Entertainment", "Entertainment", "Hospitality",  meals.id, "Entertainment expenses for clients and prospects");
 
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6130" },
-    update: {},
-    create: {
-      code: "6130",
-      name: "Accommodation",
-      accountType: "EXPENSE",
-      category: "Travel",
-      subcategory: "Lodging",
-      parentId: travelExpense.id,
-      isActive: true,
-      description: "Hotel and lodging expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
+  // Communication
+  const comm = await upsertCoa("6300", "Communication Expenses", "Communication", null, root.id, "Phone, internet, and communication expenses");
+  console.log(`    6300 Communication Expenses`);
+  await upsertCoa("6310", "Phone & Mobile", "Communication", "Telecommunications", comm.id, "Phone and mobile billing expenses");
 
-  // Create meal & entertainment expense accounts
-  const mealExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6200" },
-    update: {},
-    create: {
-      code: "6200",
-      name: "Meals & Entertainment",
-      accountType: "EXPENSE",
-      category: "Entertainment",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Business meals and entertainment expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${mealExpense.code} - ${mealExpense.name}`);
+  // Office & Supplies
+  const office = await upsertCoa("6400", "Office & Supplies", "Office", null, root.id, "Office supplies and equipment expenses");
+  console.log(`    6400 Office & Supplies`);
+  await upsertCoa("6410", "Stationery & Supplies", "Office", "Supplies", office.id, "Office stationery and supplies");
 
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6210" },
-    update: {},
-    create: {
-      code: "6210",
-      name: "Business Meals",
-      accountType: "EXPENSE",
-      category: "Entertainment",
-      subcategory: "Meals",
-      parentId: mealExpense.id,
-      isActive: true,
-      description: "Business-related meal expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
+  // Employee Benefits
+  const benefits = await upsertCoa("6500", "Employee Benefits", "Benefits", null, root.id, "Employee benefits and welfare expenses");
+  console.log(`    6500 Employee Benefits`);
+  await upsertCoa("6510", "BPJS & Health Insurance", "Benefits", "Insurance", benefits.id, "BPJS health insurance and medical benefits");
+  await upsertCoa("6520", "Overtime Meals",           "Benefits", "Meals",     benefits.id, "Employee overtime meal allowances");
 
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6220" },
-    update: {},
-    create: {
-      code: "6220",
-      name: "Client Entertainment",
-      accountType: "EXPENSE",
-      category: "Entertainment",
-      subcategory: "Hospitality",
-      parentId: mealExpense.id,
-      isActive: true,
-      description: "Entertainment expenses for clients and prospects",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
+  // Vehicle
+  const vehicle = await upsertCoa("6600", "Vehicle Expenses", "Vehicle", null, root.id, "Vehicle-related expenses");
+  console.log(`    6600 Vehicle Expenses`);
+  await upsertCoa("6610", "Vehicle Maintenance", "Vehicle", "Maintenance", vehicle.id, "Motorcycle and vehicle maintenance and service");
 
-  // Create communication expense accounts
-  const commExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6300" },
-    update: {},
-    create: {
-      code: "6300",
-      name: "Communication Expenses",
-      accountType: "EXPENSE",
-      category: "Communication",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Phone, internet, and communication expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${commExpense.code} - ${commExpense.name}`);
-
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6310" },
-    update: {},
-    create: {
-      code: "6310",
-      name: "Phone & Mobile",
-      accountType: "EXPENSE",
-      category: "Communication",
-      subcategory: "Telecommunications",
-      parentId: commExpense.id,
-      isActive: true,
-      description: "Phone and mobile billing expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-
-  // Create office & supplies expense accounts
-  const officeExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6400" },
-    update: {},
-    create: {
-      code: "6400",
-      name: "Office & Supplies",
-      accountType: "EXPENSE",
-      category: "Office",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Office supplies and equipment expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${officeExpense.code} - ${officeExpense.name}`);
-
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6410" },
-    update: {},
-    create: {
-      code: "6410",
-      name: "Stationery & Supplies",
-      accountType: "EXPENSE",
-      category: "Office",
-      subcategory: "Supplies",
-      parentId: officeExpense.id,
-      isActive: true,
-      description: "Office stationery and supplies",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-
-  // Create employee benefits expense accounts
-  const benefitsExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6500" },
-    update: {},
-    create: {
-      code: "6500",
-      name: "Employee Benefits",
-      accountType: "EXPENSE",
-      category: "Benefits",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Employee benefits and welfare expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${benefitsExpense.code} - ${benefitsExpense.name}`);
-
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6510" },
-    update: {},
-    create: {
-      code: "6510",
-      name: "BPJS & Health Insurance",
-      accountType: "EXPENSE",
-      category: "Benefits",
-      subcategory: "Insurance",
-      parentId: benefitsExpense.id,
-      isActive: true,
-      description: "BPJS health insurance and medical benefits",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6520" },
-    update: {},
-    create: {
-      code: "6520",
-      name: "Overtime Meals",
-      accountType: "EXPENSE",
-      category: "Benefits",
-      subcategory: "Meals",
-      parentId: benefitsExpense.id,
-      isActive: true,
-      description: "Employee overtime meal allowances",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-
-  // Create vehicle & maintenance expense accounts
-  const vehicleExpense = await prisma.chartOfAccount.upsert({
-    where: { code: "6600" },
-    update: {},
-    create: {
-      code: "6600",
-      name: "Vehicle Expenses",
-      accountType: "EXPENSE",
-      category: "Vehicle",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Vehicle-related expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: ${vehicleExpense.code} - ${vehicleExpense.name}`);
-
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6610" },
-    update: {},
-    create: {
-      code: "6610",
-      name: "Vehicle Maintenance",
-      accountType: "EXPENSE",
-      category: "Vehicle",
-      subcategory: "Maintenance",
-      parentId: vehicleExpense.id,
-      isActive: true,
-      description: "Motorcycle and vehicle maintenance and service",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-
-  // Create miscellaneous expense account
-  await prisma.chartOfAccount.upsert({
-    where: { code: "6900" },
-    update: {},
-    create: {
-      code: "6900",
-      name: "Other Expenses",
-      accountType: "EXPENSE",
-      category: "Miscellaneous",
-      parentId: expenseAccount.id,
-      isActive: true,
-      description: "Other miscellaneous business expenses",
-      createdById: adminUser.id,
-      updatedById: adminUser.id,
-    },
-  });
-  console.log(`   💰 Created account: 6900 - Other Expenses`);
-
-  return { expenseAccount, travelExpense, mealExpense, commExpense, officeExpense, benefitsExpense, vehicleExpense };
+  // Misc
+  await upsertCoa("6900", "Other Expenses", "Miscellaneous", null, root.id, "Other miscellaneous business expenses");
+  console.log(`    6900 Other Expenses`);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function createTravelRequests(users: Awaited<ReturnType<typeof createUsers>>) {
-  // Create APPROVED travel requests for different users
-  const approvedRequest1 = await prisma.travelRequest.create({
-    data: {
-      requestNumber: "TR-2024-001",
-      requesterId: users.salesStaff1.id,
-      purpose: "Client meeting and product demo in Jakarta",
-      destination: "Jakarta",
-      travelType: "SALES",
-      startDate: new Date("2024-03-15"),
-      endDate: new Date("2024-03-17"),
-      status: "APPROVED",
-      submittedAt: new Date("2024-03-01"),
-    },
-  });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest1.requestNumber} for ${users.salesStaff1.phoneNumber}`);
-
-  const approvedRequest2 = await prisma.travelRequest.create({
-    data: {
-      requestNumber: "TR-2024-002",
-      requesterId: users.engineerStaff1.id,
-      purpose: "Training session on new technology stack",
-      destination: "Surabaya",
-      travelType: "TRAINING",
-      startDate: new Date("2024-04-10"),
-      endDate: new Date("2024-04-12"),
-      status: "APPROVED",
-      submittedAt: new Date("2024-03-20"),
-    },
-  });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest2.requestNumber} for ${users.engineerStaff1.phoneNumber}`);
-
-  const approvedRequest3 = await prisma.travelRequest.create({
-    data: {
-      requestNumber: "TR-2024-003",
-      requesterId: users.salesChief.id,
-      purpose: "Quarterly business review meeting",
-      destination: "Bandung",
-      travelType: "MEETING",
-      startDate: new Date("2024-05-05"),
-      endDate: new Date("2024-05-07"),
-      status: "APPROVED",
-      submittedAt: new Date("2024-04-15"),
-    },
-  });
-  console.log(`   ✈️  Approved Travel Request: ${approvedRequest3.requestNumber} for ${users.salesChief.phoneNumber}`);
-
-  await prisma.travelRequest.create({
-    data: {
-      requestNumber: "TR-2024-004",
-      requesterId: users.engineerStaff2.id,
-      purpose: "Site visit for operational assessment",
-      destination: "Bali",
-      travelType: "OPERATIONAL",
-      startDate: new Date("2024-06-01"),
-      endDate: new Date("2024-06-03"),
-      status: "SUBMITTED",
-      submittedAt: new Date("2024-05-15"),
-    },
-  });
-  console.log(`   📝 Submitted Travel Request: TR-2024-004 (not APPROVED)`);
-
-  await prisma.travelRequest.create({
-    data: {
-      requestNumber: "TR-2024-005",
-      requesterId: users.salesStaff2.id,
-      purpose: "Follow-up meeting with existing clients",
-      destination: "Semarang",
-      travelType: "SALES",
-      startDate: new Date("2024-07-10"),
-      endDate: new Date("2024-07-12"),
-      status: "DRAFT",
-    },
-  });
-  console.log(`   📄 Draft Travel Request: TR-2024-005 (not APPROVED)`);
-
-  return { approvedRequest1, approvedRequest2, approvedRequest3 };
-}
+// ─── Entry ────────────────────────────────────────────────────────────────────
 
 main()
   .catch((e) => {
-    console.error("❌ Error during seeding:", e);
+    console.error("❌ Seeding failed:", e);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .finally(() => prisma.$disconnect());

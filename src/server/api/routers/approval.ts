@@ -17,6 +17,7 @@ import {
 } from "@/server/api/trpc";
 
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
+import { sendWhatsappPoll } from "@/lib/utils/whatsapp";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
@@ -645,24 +646,26 @@ export const approvalRouter = createTRPCRouter({
         });
       }
 
-      // Check if there are more approvals pending
+      // Check if there are more approvals pending (excluding the one just approved)
       const pendingApprovals = (approval.travelRequest.approvals as Array<{ status: ApprovalStatus; id: string }>).filter(
-        (a) => a.status === ApprovalStatus.PENDING
+        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
       );
 
       // Determine new status
       let newStatus: TravelStatus;
-      if (pendingApprovals.length === 1 && pendingApprovals[0]!.id === resolvedId) {
+      if (pendingApprovals.length === 0) {
         newStatus = TravelStatus.APPROVED;
       } else {
-        const statusMap: Record<ApprovalLevel, TravelStatus> = {
-          [ApprovalLevel.L1_SUPERVISOR]: TravelStatus.APPROVED_L1,
-          [ApprovalLevel.L2_MANAGER]: TravelStatus.APPROVED_L2,
-          [ApprovalLevel.L3_DIRECTOR]: TravelStatus.APPROVED_L3,
-          [ApprovalLevel.L4_SENIOR_DIRECTOR]: TravelStatus.APPROVED_L4,
-          [ApprovalLevel.L5_EXECUTIVE]: TravelStatus.APPROVED_L5,
+        // Map the sequence number (1-based) of the just-approved step to an APPROVED_LN status
+        const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+        const seqStatusMap: Record<number, TravelStatus> = {
+          1: TravelStatus.APPROVED_L1,
+          2: TravelStatus.APPROVED_L2,
+          3: TravelStatus.APPROVED_L3,
+          4: TravelStatus.APPROVED_L4,
+          5: TravelStatus.APPROVED_L5,
         };
-        newStatus = statusMap[approval.level as ApprovalLevel] ?? TravelStatus.SUBMITTED;
+        newStatus = seqStatusMap[currentSequence] ?? TravelStatus.SUBMITTED;
       }
 
       await ctx.db.travelRequest.update({
@@ -685,7 +688,76 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to requester
+      // Sequential chain: notify next approver in chain, or requester if fully approved
+      void (async () => {
+        if (newStatus === TravelStatus.APPROVED) {
+          // All levels approved — notify the requester
+          const tr = await ctx.db.travelRequest.findUnique({
+            where: { id: approval.travelRequestId as string },
+            include: {
+              requester: { select: { phoneNumber: true, name: true } },
+            },
+          });
+          const phone = tr?.requester?.phoneNumber;
+          if (phone) {
+            await sendWhatsappPoll({
+              phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+              question:
+                `✅ *Travel Request Disetujui Penuh*\n` +
+                `Travel: ${tr!.requestNumber}\n` +
+                `Semua level approval telah selesai.\n` +
+                `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+              options: [`OK`],
+              maxAnswer: 1,
+            });
+          }
+        } else {
+          // More approvals pending — find the next one by sequence and notify its approver
+          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const nextApproval = (
+            approval.travelRequest!.approvals as Array<{
+              id: string;
+              sequence: number;
+              status: string;
+              approverId: string;
+              approvalNumber: string;
+            }>
+          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+
+          if (!nextApproval) return;
+
+          const nextApprover = await ctx.db.user.findUnique({
+            where: { id: nextApproval.approverId },
+            select: { phoneNumber: true },
+          });
+          const phone = nextApprover?.phoneNumber;
+          if (!phone) return;
+
+          const tr = await ctx.db.travelRequest.findUnique({
+            where: { id: approval.travelRequestId as string },
+            include: {
+              requester: { select: { name: true, email: true } },
+            },
+          });
+          if (!tr) return;
+
+          const { buildTravelRequestApprovalPoll } = await import("@/lib/utils/whatsapp");
+          await sendWhatsappPoll(
+            buildTravelRequestApprovalPoll(
+              nextApproval.approvalNumber,
+              phone.replace(/^\+/, ""),
+              {
+                requestNumber: tr.requestNumber,
+                requesterName: tr.requester.name ?? tr.requester.email ?? "Unknown",
+                destination: tr.destination,
+                purpose: tr.purpose,
+                startDate: tr.startDate,
+                endDate: tr.endDate,
+              },
+            ),
+          );
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -785,7 +857,28 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to requester
+      // Send poll notification to requester
+      void (async () => {
+        const tr = await ctx.db.travelRequest.findUnique({
+          where: { id: approval.travelRequestId as string },
+          include: {
+            requester: { select: { phoneNumber: true, name: true } },
+          },
+        });
+        const phone = tr?.requester?.phoneNumber;
+        if (phone) {
+          await sendWhatsappPoll({
+            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `❌ *Travel Request Ditolak*\n` +
+              `Approval: ${approval.approvalNumber as string}\n` +
+              `Alasan: ${input.rejectionReason}\n` +
+              `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${approval.approvalNumber as string}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -895,7 +988,28 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to requester
+      // Send poll notification to requester
+      void (async () => {
+        const tr = await ctx.db.travelRequest.findUnique({
+          where: { id: approval.travelRequestId as string },
+          include: {
+            requester: { select: { phoneNumber: true, name: true } },
+          },
+        });
+        const phone = tr?.requester?.phoneNumber;
+        if (phone) {
+          await sendWhatsappPoll({
+            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `🔄 *Revisi Travel Request Diminta*\n` +
+              `Approval: ${approval.approvalNumber as string}\n` +
+              `Catatan: ${input.comments}\n` +
+              `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${approval.approvalNumber as string}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -981,7 +1095,7 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      const pendingApprovals = (approval.claim.approvals as Array<{ status: ApprovalStatus; id: string }>).filter(
+      const pendingApprovals = (approval.claim.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>).filter(
         (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
       );
 
@@ -1008,7 +1122,78 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to submitter
+      // Sequential chain: notify next approver by sequence, or notify submitter if fully approved
+      void (async () => {
+        if (newStatus === ClaimStatus.APPROVED) {
+          // All levels approved — notify the submitter
+          const cl = await ctx.db.claim.findUnique({
+            where: { id: approval.claimId as string },
+            include: {
+              submitter: { select: { phoneNumber: true, name: true } },
+            },
+          });
+          const phone = cl?.submitter?.phoneNumber;
+          if (phone) {
+            await sendWhatsappPoll({
+              phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+              question:
+                `✅ *Claim Disetujui Penuh*\n` +
+                `Claim: ${cl!.claimNumber}\n` +
+                `Semua level approval telah selesai.\n` +
+                `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+              options: [`OK`],
+              maxAnswer: 1,
+            });
+          }
+        } else {
+          // More approvals pending — find the next one by sequence and notify its approver
+          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const nextApproval = (
+            approval.claim!.approvals as Array<{
+              id: string;
+              sequence: number;
+              status: string;
+              approverId: string;
+              approvalNumber: string;
+            }>
+          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+
+          if (!nextApproval) return;
+
+          const nextApprover = await ctx.db.user.findUnique({
+            where: { id: nextApproval.approverId },
+            select: { phoneNumber: true },
+          });
+          const phone = nextApprover?.phoneNumber;
+          if (!phone) return;
+
+          const cl = await ctx.db.claim.findUnique({
+            where: { id: approval.claimId as string },
+            include: {
+              submitter: { select: { name: true, email: true } },
+              travelRequest: { select: { requestNumber: true } },
+            },
+          });
+          if (!cl) return;
+
+          const { buildClaimApprovalPoll } = await import("@/lib/utils/whatsapp");
+          await sendWhatsappPoll(
+            buildClaimApprovalPoll(
+              nextApproval.approvalNumber,
+              phone.replace(/^\+/, ""),
+              {
+                claimNumber: cl.claimNumber,
+                submitterName: cl.submitter.name ?? cl.submitter.email ?? "Unknown",
+                claimType: cl.claimType as string,
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+                amount: cl.amount as any,
+                description: cl.description,
+                travelRequestNumber: cl.travelRequest?.requestNumber,
+              },
+            ),
+          );
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -1108,7 +1293,29 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to submitter
+      // Send poll notification to submitter
+      void (async () => {
+        const cl = await ctx.db.claim.findUnique({
+          where: { id: approval.claimId as string },
+          include: {
+            submitter: { select: { phoneNumber: true, name: true } },
+          },
+        });
+        const phone = cl?.submitter?.phoneNumber;
+        if (phone) {
+          await sendWhatsappPoll({
+            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `❌ *Claim Ditolak*\n` +
+              `Approval: ${approval.approvalNumber as string}\n` +
+              `Claim: ${cl.claimNumber}\n` +
+              `Alasan: ${input.rejectionReason}\n` +
+              `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${approval.approvalNumber as string}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -1217,7 +1424,29 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to submitter
+      // Send poll notification to submitter
+      void (async () => {
+        const cl = await ctx.db.claim.findUnique({
+          where: { id: approval.claimId as string },
+          include: {
+            submitter: { select: { phoneNumber: true, name: true } },
+          },
+        });
+        const phone = cl?.submitter?.phoneNumber;
+        if (phone) {
+          await sendWhatsappPoll({
+            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `🔄 *Revisi Claim Diminta*\n` +
+              `Approval: ${approval.approvalNumber as string}\n` +
+              `Claim: ${cl.claimNumber}\n` +
+              `Catatan: ${input.comments}\n` +
+              `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${approval.approvalNumber as string}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updatedApproval;
     }),
@@ -1228,7 +1457,7 @@ export const approvalRouter = createTRPCRouter({
   getAllApprovalsAdmin: protectedProcedure
     .input(
       z.object({
-        level: z.enum(["L1_SUPERVISOR", "L2_MANAGER", "L3_DIRECTOR", "L4_SENIOR_DIRECTOR", "L5_EXECUTIVE"]).optional(),
+        level: z.nativeEnum(ApprovalLevel).optional(),
         status: z.nativeEnum(ApprovalStatus).optional(),
         limit: z.number().min(1).max(100).optional(),
       })
@@ -1348,17 +1577,19 @@ export const approvalRouter = createTRPCRouter({
           (a) => a.status === ApprovalStatus.PENDING
         );
         let newStatus: TravelStatus;
-        if (pendingApprovals.length === 1 && pendingApprovals[0]!.id === input.approvalId) {
+        const isLastPending = pendingApprovals.length === 1 && pendingApprovals[0]!.id === input.approvalId;
+        if (isLastPending) {
           newStatus = TravelStatus.APPROVED;
         } else {
-          const statusMap: Record<ApprovalLevel, TravelStatus> = {
-            [ApprovalLevel.L1_SUPERVISOR]: TravelStatus.APPROVED_L1,
-            [ApprovalLevel.L2_MANAGER]: TravelStatus.APPROVED_L2,
-            [ApprovalLevel.L3_DIRECTOR]: TravelStatus.APPROVED_L3,
-            [ApprovalLevel.L4_SENIOR_DIRECTOR]: TravelStatus.APPROVED_L4,
-            [ApprovalLevel.L5_EXECUTIVE]: TravelStatus.APPROVED_L5,
+          const approvalSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const seqStatusMap: Record<number, TravelStatus> = {
+            1: TravelStatus.APPROVED_L1,
+            2: TravelStatus.APPROVED_L2,
+            3: TravelStatus.APPROVED_L3,
+            4: TravelStatus.APPROVED_L4,
+            5: TravelStatus.APPROVED_L5,
           };
-          newStatus = statusMap[approval.level] ?? TravelStatus.SUBMITTED;
+          newStatus = seqStatusMap[approvalSeq] ?? TravelStatus.SUBMITTED;
         }
 
         await ctx.db.travelRequest.update({
@@ -1459,67 +1690,17 @@ export const approvalRouter = createTRPCRouter({
       const pendingOnly = !input?.statusFilter || input.statusFilter === "PENDING";
 
       if (pendingOnly) {
-        // Two scenarios:
-        // A) Request has L3_DIRECTOR approval with status PENDING
-        // B) Request is APPROVED_L1 or APPROVED_L2 (supervisor done) but has no L3 approval yet
-        const [withPendingL3, withoutL3] = await Promise.all([
-          // A: has pending L3
-          ctx.db.travelRequest.findMany({
-            where: {
-              deletedAt: null,
-              approvals: {
-                some: {
-                  level: ApprovalLevel.L3_DIRECTOR,
-                  status: ApprovalStatus.PENDING,
-                },
-              },
-            },
-            include: {
-              requester: {
-                select: {
-                  id: true, name: true, employeeId: true,
-                  department: { select: { name: true } },
-                },
-              },
-              approvals: {
-                where: { level: ApprovalLevel.L3_DIRECTOR },
-                include: { approver: { select: { id: true, name: true, role: true } } },
-              },
-            },
-            take: input?.limit ?? 50,
-            orderBy: { updatedAt: "desc" },
-          }),
-          // B: status APPROVED_L1 or APPROVED_L2, but NO L3 approval exists yet
-          ctx.db.travelRequest.findMany({
-            where: {
-              deletedAt: null,
-              status: { in: [TravelStatus.APPROVED_L1, TravelStatus.APPROVED_L2] },
-              approvals: { none: { level: ApprovalLevel.L3_DIRECTOR } },
-            },
-            include: {
-              requester: {
-                select: {
-                  id: true, name: true, employeeId: true,
-                  department: { select: { name: true } },
-                },
-              },
-              approvals: {
-                where: { level: ApprovalLevel.L3_DIRECTOR },
-                include: { approver: { select: { id: true, name: true, role: true } } },
-              },
-            },
-            take: input?.limit ?? 50,
-            orderBy: { updatedAt: "desc" },
-          }),
-        ]);
-
-        return { travelRequests: [...withPendingL3, ...withoutL3] };
-      } else {
-        // ALL: return any travel request that has an L3 approval
+        // Find requests that have a DIRECTOR-level approval pending, or are at APPROVED_L1/L2/L3 waiting for the next step
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
             deletedAt: null,
-            approvals: { some: { level: ApprovalLevel.L3_DIRECTOR } },
+            status: { in: [TravelStatus.SUBMITTED, TravelStatus.APPROVED_L1, TravelStatus.APPROVED_L2, TravelStatus.APPROVED_L3] },
+            approvals: {
+              some: {
+                level: ApprovalLevel.DIRECTOR,
+                status: ApprovalStatus.PENDING,
+              },
+            },
           },
           include: {
             requester: {
@@ -1529,7 +1710,31 @@ export const approvalRouter = createTRPCRouter({
               },
             },
             approvals: {
-              where: { level: ApprovalLevel.L3_DIRECTOR },
+              where: { level: ApprovalLevel.DIRECTOR },
+              include: { approver: { select: { id: true, name: true, role: true } } },
+            },
+          },
+          take: input?.limit ?? 50,
+          orderBy: { updatedAt: "desc" },
+        });
+
+        return { travelRequests };
+      } else {
+        // ALL: return any travel request that has a DIRECTOR-level approval
+        const travelRequests = await ctx.db.travelRequest.findMany({
+          where: {
+            deletedAt: null,
+            approvals: { some: { level: ApprovalLevel.DIRECTOR } },
+          },
+          include: {
+            requester: {
+              select: {
+                id: true, name: true, employeeId: true,
+                department: { select: { name: true } },
+              },
+            },
+            approvals: {
+              where: { level: ApprovalLevel.DIRECTOR },
               include: { approver: { select: { id: true, name: true, role: true } } },
             },
           },
@@ -1574,14 +1779,14 @@ export const approvalRouter = createTRPCRouter({
         : input.action === "reject" ? ApprovalStatus.REJECTED
         : ApprovalStatus.REVISION_REQUESTED;
 
-      // Create the L3 approval record with a resolved status (create + approve in one shot)
+      // Create a DIRECTOR-level approval record with a resolved status (create + approve in one shot)
       const approvalNumber = await generateApprovalNumber(ctx.db);
       await ctx.db.approval.create({
         data: {
           approvalNumber,
           travelRequestId: input.travelRequestId,
           approverId: ctx.session.user.id,
-          level: ApprovalLevel.L3_DIRECTOR,
+          level: ApprovalLevel.DIRECTOR,
           status: approvalStatus,
           comments: input.comments,
           rejectionReason: input.action === "reject" ? input.comments : undefined,
@@ -1600,7 +1805,7 @@ export const approvalRouter = createTRPCRouter({
         newTravelStatus = TravelStatus.REVISION;
         // Reset all approvals to PENDING for revision
         await ctx.db.approval.updateMany({
-          where: { travelRequestId: input.travelRequestId, level: { not: ApprovalLevel.L3_DIRECTOR } },
+          where: { travelRequestId: input.travelRequestId, level: { not: ApprovalLevel.DIRECTOR } },
           data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
         });
       }
@@ -1616,7 +1821,7 @@ export const approvalRouter = createTRPCRouter({
           action: input.action === "approve" ? AuditAction.APPROVE : AuditAction.REJECT,
           entityType: "TravelRequest",
           entityId: input.travelRequestId,
-          metadata: { action: input.action, level: "L3_DIRECTOR", adminDirectAct: true },
+          metadata: { action: input.action, level: "DIRECTOR", adminDirectAct: true },
         },
       });
 

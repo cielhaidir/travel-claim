@@ -24,6 +24,11 @@ export const env = createEnv({
     MCP_API_TOKEN: z.string().optional(),
     // Email of the user to impersonate when MCP_API_TOKEN is used
     MCP_API_TOKEN_USER_EMAIL: z.string().email().optional(),
+    // WhatsApp notification gateway (WA-JS / Baileys compatible API)
+    WHATSAPP_BASE_URL: z.string().url().optional(),
+    WHATSAPP_DEVICE_ID: z.string().optional(),
+    // Basic auth credentials "username:password" — will be base64-encoded at runtime
+    WHATSAPP_BASIC_AUTH: z.string().optional(),
   },
 
   /**
@@ -49,6 +54,9 @@ export const env = createEnv({
     REDIS_URL: process.env.REDIS_URL,
     MCP_API_TOKEN: process.env.MCP_API_TOKEN,
     MCP_API_TOKEN_USER_EMAIL: process.env.MCP_API_TOKEN_USER_EMAIL,
+    WHATSAPP_BASE_URL: process.env.WHATSAPP_BASE_URL,
+    WHATSAPP_DEVICE_ID: process.env.WHATSAPP_DEVICE_ID,
+    WHATSAPP_BASIC_AUTH: process.env.WHATSAPP_BASIC_AUTH,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially
