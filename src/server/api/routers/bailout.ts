@@ -11,6 +11,7 @@ import {
   createTRPCRouter,
   protectedProcedure,
 } from "@/server/api/trpc";
+import { sendWhatsappPoll } from "@/lib/utils/whatsapp";
 
 const SALES_CHIEF_ROLES: string[] = [Role.SALES_CHIEF, Role.MANAGER, Role.DIRECTOR, Role.ADMIN];
 const DIRECTOR_ROLES: string[] = [Role.DIRECTOR, Role.ADMIN];
@@ -69,12 +70,6 @@ export const bailoutRouter = createTRPCRouter({
               status: true,
             },
           },
-          chiefApprover: {
-            select: { id: true, name: true, role: true },
-          },
-          directorApprover: {
-            select: { id: true, name: true, role: true },
-          },
         },
         orderBy: { createdAt: "desc" },
       });
@@ -108,12 +103,6 @@ export const bailoutRouter = createTRPCRouter({
               startDate: true,
               endDate: true,
             },
-          },
-          chiefApprover: {
-            select: { id: true, name: true, role: true },
-          },
-          directorApprover: {
-            select: { id: true, name: true, role: true },
           },
         },
       });
@@ -283,7 +272,38 @@ export const bailoutRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to Sales Chief
+      // Send poll notification to Sales Chief / Manager so they can act via WhatsApp
+      void (async () => {
+        const chiefUsers = await ctx.db.user.findMany({
+          where: {
+            role: { in: [Role.SALES_CHIEF, Role.MANAGER] },
+            deletedAt: null,
+            phoneNumber: { not: null },
+          },
+          select: { phoneNumber: true, name: true },
+          take: 5,
+        });
+
+        for (const chief of chiefUsers) {
+          if (!chief.phoneNumber) continue;
+          await sendWhatsappPoll({
+            phone: `${chief.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `📋 *Bailout Perlu Approval*\n` +
+              `No: ${updated.bailoutNumber}\n` +
+              `Kategori: ${updated.category}\n` +
+              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+              `Keterangan: ${updated.description}\n` +
+              `Diajukan oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [
+              `Approve ${updated.bailoutNumber}`,
+              `Decline ${updated.bailoutNumber}`,
+              `Revision ${updated.bailoutNumber}`,
+            ],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updated;
     }),
@@ -321,10 +341,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_CHIEF,
-          chiefApproverId: ctx.session.user.id,
-          chiefApprovedAt: new Date(),
-          chiefNotes: input.notes,
+          status: BailoutStatus.APPROVED_L1,
         },
       });
 
@@ -338,7 +355,38 @@ export const bailoutRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to Director
+      // Send poll notification to Director(s) so they can act via WhatsApp
+      void (async () => {
+        const directors = await ctx.db.user.findMany({
+          where: {
+            role: Role.DIRECTOR,
+            deletedAt: null,
+            phoneNumber: { not: null },
+          },
+          select: { phoneNumber: true, name: true },
+          take: 5,
+        });
+
+        for (const director of directors) {
+          if (!director.phoneNumber) continue;
+          await sendWhatsappPoll({
+            phone: `${director.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `📋 *Bailout Perlu Approval Direktur*\n` +
+              `No: ${updated.bailoutNumber}\n` +
+              `Kategori: ${updated.category}\n` +
+              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+              `Keterangan: ${updated.description}\n` +
+              `Disetujui Chief: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [
+              `Approve ${updated.bailoutNumber}`,
+              `Decline ${updated.bailoutNumber}`,
+              `Revision ${updated.bailoutNumber}`,
+            ],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updated;
     }),
@@ -366,7 +414,7 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_CHIEF) {
+      if (bailout.status !== BailoutStatus.APPROVED_L1) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Chief terlebih dahulu",
@@ -376,10 +424,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_DIRECTOR,
-          directorApproverId: ctx.session.user.id,
-          directorApprovedAt: new Date(),
-          directorNotes: input.notes,
+          status: BailoutStatus.APPROVED_L2,
         },
       });
 
@@ -393,7 +438,56 @@ export const bailoutRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to requester & finance
+      // Send notification to requester & finance that bailout is fully approved
+      void (async () => {
+        const fullBailout = await ctx.db.bailout.findUnique({
+          where: { id: input.id },
+          include: {
+            requester: { select: { phoneNumber: true, name: true } },
+          },
+        });
+
+        // Notify requester
+        const requesterPhone = fullBailout?.requester?.phoneNumber;
+        if (requesterPhone) {
+          await sendWhatsappPoll({
+            phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `✅ *Bailout Disetujui Penuh*\n` +
+              `No: ${updated.bailoutNumber}\n` +
+              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+              `Keterangan: ${updated.description}\n` +
+              `Disetujui Direktur: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${updated.bailoutNumber}`],
+            maxAnswer: 1,
+          });
+        }
+
+        // Notify Finance to disburse
+        const financeUsers = await ctx.db.user.findMany({
+          where: {
+            role: Role.FINANCE,
+            deletedAt: null,
+            phoneNumber: { not: null },
+          },
+          select: { phoneNumber: true },
+          take: 5,
+        });
+        for (const fin of financeUsers) {
+          if (!fin.phoneNumber) continue;
+          await sendWhatsappPoll({
+            phone: `${fin.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `💰 *Bailout Siap Dicairkan*\n` +
+              `No: ${updated.bailoutNumber}\n` +
+              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+              `Keterangan: ${updated.description}\n` +
+              `Disetujui Direktur: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`Proses ${updated.bailoutNumber}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updated;
     }),
@@ -423,7 +517,7 @@ export const bailoutRouter = createTRPCRouter({
 
       const rejectableStatuses: BailoutStatus[] = [
         BailoutStatus.SUBMITTED,
-        BailoutStatus.APPROVED_CHIEF,
+        BailoutStatus.APPROVED_L1,
       ];
 
       if (!rejectableStatuses.includes(bailout.status)) {
@@ -452,7 +546,29 @@ export const bailoutRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to requester
+      // Send notification to requester that bailout was rejected
+      void (async () => {
+        const fullBailout = await ctx.db.bailout.findUnique({
+          where: { id: input.id },
+          include: {
+            requester: { select: { phoneNumber: true, name: true } },
+          },
+        });
+        const phone = fullBailout?.requester?.phoneNumber;
+        if (phone) {
+          await sendWhatsappPoll({
+            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+            question:
+              `❌ *Bailout Ditolak*\n` +
+              `No: ${updated.bailoutNumber}\n` +
+              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+              `Alasan: ${input.rejectionReason}\n` +
+              `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+            options: [`OK ${updated.bailoutNumber}`],
+            maxAnswer: 1,
+          });
+        }
+      })();
 
       return updated;
     }),
@@ -484,7 +600,7 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_DIRECTOR) {
+      if (bailout.status !== BailoutStatus.APPROVED_L2) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Director sebelum dicairkan",
@@ -522,7 +638,7 @@ export const bailoutRouter = createTRPCRouter({
 
       let statusFilter: BailoutStatus;
       if (DIRECTOR_ROLES.includes(role)) {
-        statusFilter = BailoutStatus.APPROVED_CHIEF;
+        statusFilter = BailoutStatus.APPROVED_L1;
       } else if (SALES_CHIEF_ROLES.includes(role)) {
         statusFilter = BailoutStatus.SUBMITTED;
       } else {

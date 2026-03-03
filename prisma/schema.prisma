@@ -2,6 +2,7 @@
 // Database: PostgreSQL
 // Generated Prisma Client: ../generated/prisma
 
+
 generator client {
     provider = "prisma-client-js"
     output   = "../generated/prisma"
@@ -50,11 +51,11 @@ enum TravelStatus {
 }
 
 enum ApprovalLevel {
-    L1_SUPERVISOR
-    L2_MANAGER
-    L3_DIRECTOR
-    L4_SENIOR_DIRECTOR
-    L5_EXECUTIVE
+    SALES_LEAD        // L1: Sales lead on the project (only for employees on sales travel)
+    DEPT_CHIEF        // L2: Department chief / head
+    DIRECTOR          // L3: Director (supervisor of dept chief)
+    SENIOR_DIRECTOR   // L4: Senior director
+    EXECUTIVE         // L5: Executive / C-level
 }
 
 enum ApprovalStatus {
@@ -136,9 +137,14 @@ enum COAType {
 enum BailoutStatus {
     DRAFT
     SUBMITTED
-    APPROVED_CHIEF
-    APPROVED_DIRECTOR
+    APPROVED_L1
+    APPROVED_L2
+    APPROVED_L3
+    APPROVED_L4
+    APPROVED_L5
+    APPROVED
     REJECTED
+    REVISION
     DISBURSED
 }
 
@@ -205,13 +211,17 @@ model User {
     departmentId String?
     department   Department? @relation(fields: [departmentId], references: [id])
 
-    // Manager hierarchy
+    // Org hierarchy: every user points to their direct supervisor.
+    // For a regular employee their supervisor is their dept chief.
+    // For a dept chief their supervisor is the director above them.
     supervisorId  String?
     supervisor    User?   @relation("Supervision", fields: [supervisorId], references: [id])
     directReports User[]  @relation("Supervision")
 
     // Phone for WhatsApp
     phoneNumber String? @db.VarChar(20)
+
+    password  String?
 
     // Soft delete
     deletedAt DateTime?
@@ -223,19 +233,18 @@ model User {
     travelRequests       TravelRequest[]     @relation("TravelRequester")
     travelParticipations TravelParticipant[]
     claims               Claim[]
+    bailoutsRequested    Bailout[]           @relation("BailoutRequester")
     approvals            Approval[]
     notifications        Notification[]
     auditLogs            AuditLog[]
-    password             String?
+    salesProjects        Project[]           @relation("SalesLead")
+
+    // Departments this user leads as chief
+    ledDepartments Department[] @relation("DepartmentChief")
 
     // Chart of Accounts relations
     coaCreated ChartOfAccount[] @relation("COACreatedBy")
     coaUpdated ChartOfAccount[] @relation("COAUpdatedBy")
-
-    // Bailout relations
-    bailoutsRequested        Bailout[] @relation("BailoutRequester")
-    bailoutsChiefApproved    Bailout[] @relation("BailoutChiefApprover")
-    bailoutsDirectorApproved Bailout[] @relation("BailoutDirectorApprover")
 
     @@index([employeeId])
     @@index([email])
@@ -267,9 +276,10 @@ model Department {
     parent   Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
     children Department[] @relation("DepartmentHierarchy")
 
-    // Managers
-    managerId  String?
-    directorId String?
+    // The single chief / head of this department.
+    // This user's own supervisorId points to the director above them.
+    chiefId String?
+    chief   User?   @relation("DepartmentChief", fields: [chiefId], references: [id])
 
     deletedAt DateTime?
     createdAt DateTime  @default(now())
@@ -279,6 +289,7 @@ model Department {
 
     @@index([code])
     @@index([parentId])
+    @@index([chiefId])
 }
 
 // ============================================================================
@@ -334,6 +345,8 @@ model Project {
     deletedAt   DateTime?
     createdAt   DateTime  @default(now())
     updatedAt   DateTime  @updatedAt
+    salesId     String?   @db.VarChar(50) // e.g. employeeId of the sales lead
+    salesLead   User?     @relation("SalesLead", fields: [salesId], references: [employeeId])
 
     travelRequests TravelRequest[]
 
@@ -432,7 +445,7 @@ model Bailout {
     amount      Decimal @db.Decimal(15, 2)
 
     // Transport-specific fields
-    transportMode TransportMode? 
+    transportMode TransportMode?
     carrier       String?        @db.VarChar(100)
     departureFrom String?        @db.VarChar(100)
     arrivalTo     String?        @db.VarChar(100)
@@ -455,23 +468,9 @@ model Bailout {
 
     status BailoutStatus @default(DRAFT)
 
-    // Sales Chief approval
-    chiefApproverId String?
-    chiefApprover   User?     @relation("BailoutChiefApprover", fields: [chiefApproverId], references: [id])
-    chiefApprovedAt DateTime?
-    chiefNotes      String?   @db.Text
-
-    // Director approval
-    directorApproverId String?
-    directorApprover   User?     @relation("BailoutDirectorApprover", fields: [directorApproverId], references: [id])
-    directorApprovedAt DateTime?
-    directorNotes      String?   @db.Text
-
-    // Rejection
+    // Rejection / disbursement lifecycle
     rejectedAt      DateTime?
     rejectionReason String?   @db.Text
-
-    // Disbursement
     disbursedAt     DateTime?
     disbursementRef String?   @db.VarChar(100)
 
@@ -480,6 +479,9 @@ model Bailout {
     deletedAt   DateTime?
     createdAt   DateTime  @default(now())
     updatedAt   DateTime  @updatedAt
+
+    // Approval chain (generic, same as TravelRequest & Claim)
+    approvals Approval[]
 
     @@index([travelRequestId])
     @@index([requesterId, status])
@@ -490,23 +492,52 @@ model Bailout {
 // ============================================================================
 // APPROVAL SYSTEM
 // ============================================================================
+// One Approval row = one step in the chain for a TravelRequest, Bailout, or Claim.
+// The sequence field (1, 2, 3 …) defines the order within a single document.
+// The routing logic (who to notify next) lives in the application layer and uses:
+//   - User.supervisorId     — the direct supervisor chain
+//   - Department.chiefId    — the dept chief for non-sales routes
+//   - Project.salesLead     — the sales lead for employee + sales travel
+//
+// Routing rules (application layer, not enforced by DB):
+//
+// TravelRequest / Bailout / Claim
+// ─────────────────────────────────────────────────────
+// Requester role = SALES_EMPLOYEE or SALES_CHIEF
+//   → starts at DEPT_CHIEF (sales dept head)
+//   → then DIRECTOR (chief.supervisorId)
+//   → then SENIOR_DIRECTOR / EXECUTIVE if configured
+//
+// Requester role = EMPLOYEE (non-sales person)
+//   travelType = SALES (linked to a Project)
+//     → L1: Project.salesLead  (SALES_LEAD)
+//     → L2: salesLead.supervisor (DEPT_CHIEF of sales dept)
+//     → L3+: continue up the chain
+//   travelType ≠ SALES
+//     → L1: requester.department.chief  (DEPT_CHIEF)
+//     → L2+: continue up the chain
 
 model Approval {
-    id              String          @id @default(cuid())
-    
+    id             String @id @default(cuid())
+
     // Business approval number (e.g. APR-2026-00001)
-    approvalNumber  String          @unique @db.VarChar(50)
-    
-    // Can be linked to either business trip request or claim
+    approvalNumber String @unique @db.VarChar(50)
+
+    // ── Entity links (exactly one must be set) ──────────────────────────────
     travelRequestId String?
     travelRequest   TravelRequest? @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+
+    bailoutId String?
+    bailout   Bailout? @relation(fields: [bailoutId], references: [id], onDelete: Cascade)
 
     claimId String?
     claim   Claim?  @relation(fields: [claimId], references: [id], onDelete: Cascade)
 
-    // Approval details
-    level  ApprovalLevel
-    status ApprovalStatus @default(PENDING)
+    // ── Approval details ────────────────────────────────────────────────────
+    // sequence: 1 = first approver, 2 = second, etc.  Allows dynamic chains.
+    sequence Int            @default(1)
+    level    ApprovalLevel
+    status   ApprovalStatus @default(PENDING)
 
     approverId String
     approver   User   @relation(fields: [approverId], references: [id])
@@ -515,14 +546,15 @@ model Approval {
     rejectionReason String? @db.Text
 
     // Timestamps
-    approvedAt      DateTime?
-    rejectedAt      DateTime?
-    createdAt       DateTime        @default(now())
-    updatedAt       DateTime        @updatedAt
-    
+    approvedAt DateTime?
+    rejectedAt DateTime?
+    createdAt  DateTime  @default(now())
+    updatedAt  DateTime  @updatedAt
+
     @@index([approvalNumber])
-    @@index([travelRequestId, level])
-    @@index([claimId, level])
+    @@index([travelRequestId, sequence])
+    @@index([bailoutId, sequence])
+    @@index([claimId, sequence])
     @@index([approverId, status])
     @@index([status, createdAt])
 }

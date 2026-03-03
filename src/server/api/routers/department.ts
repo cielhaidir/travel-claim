@@ -188,8 +188,7 @@ export const departmentRouter = createTRPCRouter({
         code: z.string().min(1).max(20),
         description: z.string().optional(),
         parentId: z.string().optional(),
-        managerId: z.string().optional(),
-        directorId: z.string().optional(),
+        chiefId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -225,8 +224,7 @@ export const departmentRouter = createTRPCRouter({
           code: input.code,
           description: input.description,
           parentId: input.parentId,
-          managerId: input.managerId,
-          directorId: input.directorId,
+          chiefId: input.chiefId,
         },
         include: {
           parent: true,
@@ -253,8 +251,7 @@ export const departmentRouter = createTRPCRouter({
         code: z.string().min(1).max(20).optional(),
         description: z.string().optional(),
         parentId: z.string().optional().nullable(),
-        managerId: z.string().optional().nullable(),
-        directorId: z.string().optional().nullable(),
+        chiefId: z.string().optional().nullable(),
       })
     )
     .output(z.any())

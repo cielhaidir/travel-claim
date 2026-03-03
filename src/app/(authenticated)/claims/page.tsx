@@ -100,15 +100,15 @@ export default function ClaimsPage() {
   const claimsData = rawClaims as { claims: Claim[] } | undefined;
   const claims = claimsData?.claims ?? [];
 
-  // Fetch approved/locked travel requests for the dropdown
+  // Fetch locked travel requests for the dropdown
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawTR } = api.travelRequest.getAll.useQuery(
     { limit: 100 },
     { refetchOnWindowFocus: false }
   );
   const trData = rawTR as { requests: TravelRequestRef[] } | undefined;
-  const approvedTravelRequests = (trData?.requests ?? []).filter(
-    (tr) => tr.status === "APPROVED" || tr.status === "LOCKED"
+  const lockedTravelRequests = (trData?.requests ?? []).filter(
+    (tr) => tr.status === "LOCKED"
   );
 
   // Mutations
@@ -325,7 +325,7 @@ export default function ClaimsPage() {
       {/* Create Modal */}
       <Modal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} title="New Expense Claim" size="lg">
         <ClaimForm
-          travelRequests={approvedTravelRequests}
+          travelRequests={lockedTravelRequests}
           isLoading={isCreateLoading}
           onSubmit={handleCreate}
           onCancel={() => setIsFormOpen(false)}
@@ -341,7 +341,7 @@ export default function ClaimsPage() {
       >
         {editingClaim && (
           <ClaimForm
-            travelRequests={approvedTravelRequests}
+            travelRequests={lockedTravelRequests}
             initialType={editingClaim.claimType === "ENTERTAINMENT" ? "ENTERTAINMENT" : "NON_ENTERTAINMENT"}
             initialData={
               editingClaim.claimType === "ENTERTAINMENT"
@@ -417,7 +417,7 @@ export default function ClaimsPage() {
         onClose={() => setSubmittingClaim(null)}
         onConfirm={handleSubmit}
         title="Submit Claim"
-        message={`Submit claim "${submittingClaim?.claimNumber}" for approval? Once submitted, it cannot be edited unless a revision is requested.`}
+        message={`Submit claim "${submittingClaim?.claimNumber}" for approval? Once submitted, it cannot be edited unless a revision is requested. Note: at least one attachment is required — submission will fail if no attachments have been uploaded.`}
         confirmLabel="Submit"
         isLoading={submitMutation.isPending}
         variant="warning"

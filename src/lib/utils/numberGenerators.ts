@@ -80,8 +80,22 @@ export async function generateApprovalNumber(
   db: PrismaClient,
   year = new Date().getFullYear()
 ): Promise<string> {
-  const count = await db.approval.count({
-    where: { approvalNumber: { startsWith: `APR-${year}` } },
+  // Use MAX on the numeric suffix instead of COUNT so that deleted rows
+  // (e.g. approvals removed during REVISION re-submit) do not cause
+  // the counter to reset and collide with still-existing numbers.
+  const last = await db.approval.findFirst({
+    where: { approvalNumber: { startsWith: `APR-${year}-` } },
+    orderBy: { approvalNumber: "desc" },
+    select: { approvalNumber: true },
   });
-  return `APR-${year}-${String(count + 1).padStart(5, "0")}`;
+
+  let next = 1;
+  if (last) {
+    // approvalNumber format: APR-YYYY-NNNNN  →  extract last segment
+    const parts = last.approvalNumber.split("-");
+    const lastNum = parseInt(parts[parts.length - 1] ?? "0", 10);
+    if (!isNaN(lastNum)) next = lastNum + 1;
+  }
+
+  return `APR-${year}-${String(next).padStart(5, "0")}`;
 }
