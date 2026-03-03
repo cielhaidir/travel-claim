@@ -6,12 +6,13 @@ import {
   TransportMode,
   AuditAction,
   Role,
+  ApprovalStatus,
 } from "../../../../generated/prisma";
 import {
   createTRPCRouter,
   protectedProcedure,
 } from "@/server/api/trpc";
-import { sendWhatsappPoll } from "@/lib/utils/whatsapp";
+import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
 
 const SALES_CHIEF_ROLES: string[] = [Role.SALES_CHIEF, Role.MANAGER, Role.DIRECTOR, Role.ADMIN];
 const DIRECTOR_ROLES: string[] = [Role.DIRECTOR, Role.ADMIN];
@@ -463,7 +464,60 @@ export const bailoutRouter = createTRPCRouter({
           });
         }
 
-        // Notify Finance to disburse
+        // Notify Finance to disburse — with full category-specific detail
+        const fmtDate = (d: Date | null | undefined) =>
+          d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+        const fmtDateTime = (d: Date | null | undefined) =>
+          d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+        let categoryDetail = "";
+        if (updated.category === "TRANSPORT") {
+          categoryDetail =
+            `Mode          : ${updated.transportMode ?? "-"}\n` +
+            (updated.carrier ? `Maskapai      : ${updated.carrier}\n` : "") +
+            (updated.flightNumber ? `No. Penerbangan: ${updated.flightNumber}\n` : "") +
+            (updated.seatClass ? `Kelas         : ${updated.seatClass}\n` : "") +
+            (updated.bookingRef ? `Booking Ref   : ${updated.bookingRef}\n` : "") +
+            `Dari          : ${updated.departureFrom ?? "-"} → ${updated.arrivalTo ?? "-"}\n` +
+            `Berangkat     : ${fmtDateTime(updated.departureAt)}\n` +
+            `Tiba          : ${fmtDateTime(updated.arrivalAt)}\n`;
+        } else if (updated.category === "HOTEL") {
+          categoryDetail =
+            `Hotel         : ${updated.hotelName ?? "-"}\n` +
+            (updated.hotelAddress ? `Alamat        : ${updated.hotelAddress}\n` : "") +
+            (updated.roomType ? `Tipe Kamar    : ${updated.roomType}\n` : "") +
+            `Check-in      : ${fmtDate(updated.checkIn)}\n` +
+            `Check-out     : ${fmtDate(updated.checkOut)}\n`;
+        } else if (updated.category === "MEAL") {
+          categoryDetail =
+            `Tanggal       : ${fmtDate(updated.mealDate)}\n` +
+            (updated.mealLocation ? `Lokasi        : ${updated.mealLocation}\n` : "");
+        }
+
+        // Fetch requester name for the message
+        const bailoutWithRequester = await ctx.db.bailout.findUnique({
+          where: { id: input.id },
+          include: {
+            requester: { select: { name: true, email: true } },
+            travelRequest: { select: { requestNumber: true, destination: true } },
+          },
+        });
+
+        const financeMsg =
+          `💰 *Bailout Disetujui — Upload Dokumen & Proses Pencairan*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Bailout No    : ${updated.bailoutNumber}\n` +
+          `Travel Request: ${bailoutWithRequester?.travelRequest?.requestNumber ?? "-"}\n` +
+          `Tujuan        : ${bailoutWithRequester?.travelRequest?.destination ?? "-"}\n` +
+          `Pemohon       : ${bailoutWithRequester?.requester?.name ?? bailoutWithRequester?.requester?.email ?? "-"}\n` +
+          `Kategori      : ${updated.category}\n` +
+          `Jumlah        : Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
+          `Keterangan    : ${updated.description}\n` +
+          (categoryDetail ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}` : "") +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `Disetujui Direktur: ${ctx.session.user.name ?? ctx.session.user.email}\n` +
+          `Silakan upload dokumen/invoice dan proses pencairan.`;
+
         const financeUsers = await ctx.db.user.findMany({
           where: {
             role: Role.FINANCE,
@@ -475,16 +529,9 @@ export const bailoutRouter = createTRPCRouter({
         });
         for (const fin of financeUsers) {
           if (!fin.phoneNumber) continue;
-          await sendWhatsappPoll({
+          await sendWhatsappMessage({
             phone: `${fin.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
-            question:
-              `💰 *Bailout Siap Dicairkan*\n` +
-              `No: ${updated.bailoutNumber}\n` +
-              `Jumlah: Rp ${Number(updated.amount).toLocaleString("id-ID")}\n` +
-              `Keterangan: ${updated.description}\n` +
-              `Disetujui Direktur: ${ctx.session.user.name ?? ctx.session.user.email}`,
-            options: [`Proses ${updated.bailoutNumber}`],
-            maxAnswer: 1,
+            message: financeMsg,
           });
         }
       })();

@@ -4,10 +4,12 @@ import {
   ApprovalStatus,
   TravelStatus,
   ClaimStatus,
+  BailoutStatus,
   AuditAction,
   ApprovalLevel,
   type Prisma,
   type PrismaClient,
+  Role,
 } from "../../../../generated/prisma";
 
 import {
@@ -16,7 +18,7 @@ import {
   supervisorProcedure,
 } from "@/server/api/trpc";
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
-import { sendWhatsappPoll } from "@/lib/utils/whatsapp";
+import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
@@ -694,6 +696,13 @@ export const approvalRouter = createTRPCRouter({
             where: { id: approval.travelRequestId as string },
             include: {
               requester: { select: { phoneNumber: true, name: true } },
+              bailouts: {
+                where: { deletedAt: null },
+                include: {
+                  requester: { select: { name: true, email: true } },
+                  finance: { select: { phoneNumber: true, name: true } },
+                },
+              },
             },
           });
           const phone = tr?.requester?.phoneNumber;
@@ -708,6 +717,59 @@ export const approvalRouter = createTRPCRouter({
               options: [`OK`],
               maxAnswer: 1,
             });
+          }
+
+          // Notify each finance user linked to a bailout for this travel request
+          if (tr?.bailouts && tr.bailouts.length > 0) {
+            const fmtDate = (d: Date | null | undefined) =>
+              d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+            const fmtDateTime = (d: Date | null | undefined) =>
+              d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+            for (const bailout of tr.bailouts) {
+              const financePhone = bailout.finance?.phoneNumber;
+              if (!financePhone) continue;
+
+              // Build category-specific detail lines
+              let detail = "";
+              if (bailout.category === "TRANSPORT") {
+                detail =
+                  `Mode: ${bailout.transportMode ?? "-"}\n` +
+                  (bailout.carrier ? `Maskapai/Operator: ${bailout.carrier}\n` : "") +
+                  (bailout.flightNumber ? `No. Penerbangan: ${bailout.flightNumber}\n` : "") +
+                  (bailout.seatClass ? `Kelas: ${bailout.seatClass}\n` : "") +
+                  (bailout.bookingRef ? `Booking Ref: ${bailout.bookingRef}\n` : "") +
+                  `Dari: ${bailout.departureFrom ?? "-"} → ${bailout.arrivalTo ?? "-"}\n` +
+                  `Berangkat: ${fmtDateTime(bailout.departureAt)}\n` +
+                  `Tiba: ${fmtDateTime(bailout.arrivalAt)}\n`;
+              } else if (bailout.category === "HOTEL") {
+                detail =
+                  `Hotel: ${bailout.hotelName ?? "-"}\n` +
+                  (bailout.hotelAddress ? `Alamat: ${bailout.hotelAddress}\n` : "") +
+                  (bailout.roomType ? `Tipe Kamar: ${bailout.roomType}\n` : "") +
+                  `Check-in: ${fmtDate(bailout.checkIn)} — Check-out: ${fmtDate(bailout.checkOut)}\n`;
+              } else if (bailout.category === "MEAL") {
+                detail =
+                  `Tanggal: ${fmtDate(bailout.mealDate)}\n` +
+                  (bailout.mealLocation ? `Lokasi: ${bailout.mealLocation}\n` : "");
+              }
+
+              await sendWhatsappMessage({
+                phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                message:
+                  `📎 *Travel Request Disetujui — Perlu Upload Dokumen Bailout*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Travel Request : ${tr.requestNumber}\n` +
+                  `Bailout No     : ${bailout.bailoutNumber}\n` +
+                  `Pemohon        : ${bailout.requester.name ?? bailout.requester.email ?? "-"}\n` +
+                  `Kategori       : ${bailout.category}\n` +
+                  `Jumlah         : Rp ${Number(bailout.amount).toLocaleString("id-ID")}\n` +
+                  `Keterangan     : ${bailout.description}\n` +
+                  (detail ? `━━━━━━━━━━━━━━━━━━━━━━\n${detail}` : "") +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Silakan upload dokumen/invoice terkait bailout ini dan proses pencairan.`,
+              });
+            }
           }
         } else {
           // More approvals pending — find the next one by sequence and notify its approver
@@ -840,6 +902,15 @@ export const approvalRouter = createTRPCRouter({
         data: { status: TravelStatus.REJECTED },
       });
 
+      // Sync all non-deleted bailouts linked to this travel request → REJECTED
+      await ctx.db.bailout.updateMany({
+        where: {
+          travelRequestId: approval.travelRequestId as string,
+          deletedAt: null,
+        },
+        data: { status: BailoutStatus.REJECTED, rejectedAt: new Date() },
+      });
+
       await ctx.db.auditLog.create({
         data: {
           userId: ctx.session.user.id,
@@ -968,6 +1039,15 @@ export const approvalRouter = createTRPCRouter({
       await ctx.db.travelRequest.update({
         where: { id: approval.travelRequestId as string },
         data: { status: TravelStatus.REVISION },
+      });
+
+      // Sync all non-deleted bailouts linked to this travel request → REVISION
+      await ctx.db.bailout.updateMany({
+        where: {
+          travelRequestId: approval.travelRequestId as string,
+          deletedAt: null,
+        },
+        data: { status: BailoutStatus.REVISION },
       });
 
       await ctx.db.auditLog.create({
@@ -1825,5 +1905,571 @@ export const approvalRouter = createTRPCRouter({
 
       return { success: true };
     }),
+
+      // ─── APPROVE BAILOUT (via Approval chain) ─────────────────────────────────
+      /**
+       * Approve a bailout approval step.
+       * Works identically to approveTravelRequest — finds the Approval row by
+       * bailoutId + approverId, marks it APPROVED, then either advances to the
+       * next sequence or sets the Bailout to APPROVED (final) when no more
+       * PENDING steps remain.
+       */
+      approveBailout: protectedProcedure
+        .meta({
+          openapi: {
+            method: "POST",
+            path: "/bailouts/approve",
+            protect: true,
+            tags: ["Bailout"],
+            summary: "Approve a bailout approval step",
+          },
+          mcp: {
+            enabled: true,
+            name: "approve_bailout",
+            description:
+              "Approve a bailout at the current approval level. Provide approvalId (internal CUID) or approvalNumber (e.g. APR-2026-00001). Optionally include callerPhone to verify identity for WhatsApp-originated flows. Returns the updated Approval record.",
+          },
+        })
+        .input(
+          z
+            .object({
+              approvalId: z.string().optional(),
+              approvalNumber: z.string().optional(),
+              callerPhone: z.string().optional(),
+              comments: z.string().optional(),
+            })
+            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
+              message: "Either approvalId or approvalNumber must be provided",
+            })
+        )
+        .output(z.any())
+        .mutation(async ({ ctx, input }) => {
+          // ── 1. Resolve approval record ────────────────────────────────────────
+          const where = input.approvalId
+            ? { id: input.approvalId }
+            : { approvalNumber: input.approvalNumber! };
+    
+          const approval = await ctx.db.approval.findUnique({
+            where,
+            include: {
+              approver: { select: { id: true, phoneNumber: true } },
+              bailout: {
+                include: {
+                  approvals: { orderBy: { sequence: "asc" } },
+                  finance: { select: { id: true, phoneNumber: true, name: true } },
+                },
+              },
+            },
+          });
+    
+          if (!approval) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+          }
+          if (!approval.bailout) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Approval is not linked to a bailout",
+            });
+          }
+    
+          // ── 2. Phone ownership verification (WhatsApp flow) ───────────────────
+          if (input.callerPhone) {
+            const approverPhone = approval.approver.phoneNumber ?? "";
+            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
+            if (!approverPhone) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Approver has no phone number on record",
+              });
+            }
+            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Phone number does not match the approver on record",
+              });
+            }
+          }
+    
+          // ── 3. Session-based authorisation ───────────────────────────────────
+          if (approval.approverId !== ctx.session.user.id) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Not authorized to approve this bailout",
+            });
+          }
+          if (approval.status !== ApprovalStatus.PENDING) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "This approval has already been processed",
+            });
+          }
+    
+          // ── 4. Mark this step approved ────────────────────────────────────────
+          const updatedApproval = await ctx.db.approval.update({
+            where: { id: approval.id },
+            data: {
+              status: ApprovalStatus.APPROVED,
+              comments: input.comments,
+              approvedAt: new Date(),
+            },
+          });
+    
+          // ── 5. Determine new bailout status ───────────────────────────────────
+          const pendingApprovals = (
+            approval.bailout.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>
+          ).filter((a) => a.status === ApprovalStatus.PENDING && a.id !== approval.id);
+    
+          const isFullyApproved = pendingApprovals.length === 0;
+    
+          let newBailoutStatus: BailoutStatus;
+          if (isFullyApproved) {
+            newBailoutStatus = BailoutStatus.APPROVED;
+          } else {
+            const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+            const seqStatusMap: Record<number, BailoutStatus> = {
+              1: BailoutStatus.APPROVED_L1,
+              2: BailoutStatus.APPROVED_L2,
+              3: BailoutStatus.APPROVED_L3,
+              4: BailoutStatus.APPROVED_L4,
+              5: BailoutStatus.APPROVED_L5,
+            };
+            newBailoutStatus = seqStatusMap[currentSeq] ?? BailoutStatus.SUBMITTED;
+          }
+    
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: { status: newBailoutStatus },
+          });
+    
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.APPROVE,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                approvalId: approval.id,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+    
+          // ── 6. Notifications ──────────────────────────────────────────────────
+          void (async () => {
+            if (isFullyApproved) {
+              // Notify requester
+              const fullBailout = await ctx.db.bailout.findUnique({
+                where: { id: approval.bailoutId as string },
+                include: {
+                  requester: { select: { phoneNumber: true, name: true, email: true } },
+                  finance: { select: { phoneNumber: true, name: true } },
+                  travelRequest: { select: { requestNumber: true, destination: true } },
+                },
+              });
+    
+              const requesterPhone = fullBailout?.requester?.phoneNumber;
+              if (requesterPhone) {
+                await sendWhatsappPoll({
+                  phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  question:
+                    `✅ *Bailout Disetujui Penuh*\n` +
+                    `No: ${fullBailout!.bailoutNumber}\n` +
+                    `Jumlah: Rp ${Number(fullBailout!.amount).toLocaleString("id-ID")}\n` +
+                    `Semua level approval telah selesai.\n` +
+                    `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                  options: [`OK`],
+                  maxAnswer: 1,
+                });
+              }
+
+              // Build category-specific detail for finance message
+              const fmtDate = (d: Date | null | undefined) =>
+                d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+              const fmtDateTime = (d: Date | null | undefined) =>
+                d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+              let categoryDetail = "";
+              if (fullBailout) {
+                if (fullBailout.category === "TRANSPORT") {
+                  categoryDetail =
+                    `Mode          : ${fullBailout.transportMode ?? "-"}\n` +
+                    (fullBailout.carrier ? `Maskapai      : ${fullBailout.carrier}\n` : "") +
+                    (fullBailout.flightNumber ? `No. Penerbangan: ${fullBailout.flightNumber}\n` : "") +
+                    (fullBailout.seatClass ? `Kelas         : ${fullBailout.seatClass}\n` : "") +
+                    (fullBailout.bookingRef ? `Booking Ref   : ${fullBailout.bookingRef}\n` : "") +
+                    `Dari          : ${fullBailout.departureFrom ?? "-"} → ${fullBailout.arrivalTo ?? "-"}\n` +
+                    `Berangkat     : ${fmtDateTime(fullBailout.departureAt)}\n` +
+                    `Tiba          : ${fmtDateTime(fullBailout.arrivalAt)}\n`;
+                } else if (fullBailout.category === "HOTEL") {
+                  categoryDetail =
+                    `Hotel         : ${fullBailout.hotelName ?? "-"}\n` +
+                    (fullBailout.hotelAddress ? `Alamat        : ${fullBailout.hotelAddress}\n` : "") +
+                    (fullBailout.roomType ? `Tipe Kamar    : ${fullBailout.roomType}\n` : "") +
+                    `Check-in      : ${fmtDate(fullBailout.checkIn)}\n` +
+                    `Check-out     : ${fmtDate(fullBailout.checkOut)}\n`;
+                } else if (fullBailout.category === "MEAL") {
+                  categoryDetail =
+                    `Tanggal       : ${fmtDate(fullBailout.mealDate)}\n` +
+                    (fullBailout.mealLocation ? `Lokasi        : ${fullBailout.mealLocation}\n` : "");
+                }
+              }
+
+              const financeMsg = fullBailout
+                ? `💰 *Bailout Disetujui — Upload Dokumen & Proses Pencairan*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Bailout No    : ${fullBailout.bailoutNumber}\n` +
+                  `Travel Request: ${fullBailout.travelRequest?.requestNumber ?? "-"}\n` +
+                  `Tujuan        : ${fullBailout.travelRequest?.destination ?? "-"}\n` +
+                  `Pemohon       : ${fullBailout.requester.name ?? fullBailout.requester.email ?? "-"}\n` +
+                  `Kategori      : ${fullBailout.category}\n` +
+                  `Jumlah        : Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
+                  `Keterangan    : ${fullBailout.description}\n` +
+                  (categoryDetail ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}` : "") +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}\n` +
+                  `Silakan upload dokumen/invoice dan proses pencairan.`
+                : "";
+
+              // Notify finance to upload documents / disburse
+              const financePhone = fullBailout?.finance?.phoneNumber ?? approval.bailout!.finance?.phoneNumber;
+              if (financePhone && financeMsg) {
+                await sendWhatsappMessage({
+                  phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  message: financeMsg,
+                });
+              } else if (financeMsg) {
+                // Fallback: broadcast to all finance users
+                const financeUsers = await ctx.db.user.findMany({
+                  where: { role: Role.FINANCE, deletedAt: null, phoneNumber: { not: null } },
+                  select: { phoneNumber: true },
+                  take: 5,
+                });
+                for (const fin of financeUsers) {
+                  if (!fin.phoneNumber) continue;
+                  await sendWhatsappMessage({
+                    phone: `${fin.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
+                    message: financeMsg,
+                  });
+                }
+              }
+            } else {
+              // Notify next approver in sequence
+              const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const nextApproval = (
+                approval.bailout!.approvals as Array<{
+                  id: string;
+                  sequence: number;
+                  status: string;
+                  approverId: string;
+                  approvalNumber: string;
+                }>
+              ).find((a) => a.sequence === currentSeq + 1 && a.status === "PENDING");
+    
+              if (!nextApproval) return;
+    
+              const nextApprover = await ctx.db.user.findUnique({
+                where: { id: nextApproval.approverId },
+                select: { phoneNumber: true },
+              });
+              const phone = nextApprover?.phoneNumber;
+              if (!phone) return;
+    
+              const fullBailout = await ctx.db.bailout.findUnique({
+                where: { id: approval.bailoutId as string },
+                include: {
+                  requester: { select: { name: true, email: true } },
+                },
+              });
+              if (!fullBailout) return;
+    
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `📋 *Bailout Perlu Approval Anda*\n` +
+                  `No: ${nextApproval.approvalNumber}\n` +
+                  `Bailout: ${fullBailout.bailoutNumber}\n` +
+                  `Kategori: ${fullBailout.category}\n` +
+                  `Jumlah: Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
+                  `Keterangan: ${fullBailout.description}\n` +
+                  `Diajukan oleh: ${fullBailout.requester.name ?? fullBailout.requester.email ?? "Unknown"}`,
+                options: [
+                  `Approve ${nextApproval.approvalNumber}`,
+                  `Decline ${nextApproval.approvalNumber}`,
+                  `Revision ${nextApproval.approvalNumber}`,
+                ],
+                maxAnswer: 1,
+              });
+            }
+          })();
+    
+          return updatedApproval;
+        }),
+    
+      // ─── REJECT BAILOUT (via Approval chain) ──────────────────────────────────
+      rejectBailout: protectedProcedure
+        .meta({
+          openapi: {
+            method: "POST",
+            path: "/bailouts/reject",
+            protect: true,
+            tags: ["Bailout"],
+            summary: "Reject a bailout approval step",
+          },
+          mcp: {
+            enabled: true,
+            name: "reject_bailout",
+            description:
+              "Reject a bailout at the current approval level. Requires a rejectionReason (min 10 chars). Provide approvalId or approvalNumber. Optionally include callerPhone for WhatsApp-originated flows. Sets the Bailout to REJECTED and notifies the requester.",
+          },
+        })
+        .input(
+          z
+            .object({
+              approvalId: z.string().optional(),
+              approvalNumber: z.string().optional(),
+              callerPhone: z.string().optional(),
+              rejectionReason: z.string().min(10),
+            })
+            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
+              message: "Either approvalId or approvalNumber must be provided",
+            })
+        )
+        .output(z.any())
+        .mutation(async ({ ctx, input }) => {
+          const where = input.approvalId
+            ? { id: input.approvalId }
+            : { approvalNumber: input.approvalNumber! };
+    
+          const approval = await ctx.db.approval.findUnique({
+            where,
+            include: {
+              approver: { select: { id: true, phoneNumber: true } },
+              bailout: {
+                include: {
+                  requester: { select: { phoneNumber: true, name: true } },
+                },
+              },
+            },
+          });
+    
+          if (!approval) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+          }
+          if (!approval.bailout) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Approval is not linked to a bailout",
+            });
+          }
+    
+          // Phone ownership check
+          if (input.callerPhone) {
+            const approverPhone = approval.approver.phoneNumber ?? "";
+            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
+            if (!approverPhone) {
+              throw new TRPCError({ code: "FORBIDDEN", message: "Approver has no phone number on record" });
+            }
+            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
+              throw new TRPCError({ code: "FORBIDDEN", message: "Phone number does not match the approver on record" });
+            }
+          }
+    
+          if (approval.approverId !== ctx.session.user.id) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized to reject this bailout" });
+          }
+          if (approval.status !== ApprovalStatus.PENDING) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
+          }
+    
+          const updatedApproval = await ctx.db.approval.update({
+            where: { id: approval.id },
+            data: {
+              status: ApprovalStatus.REJECTED,
+              rejectionReason: input.rejectionReason,
+              rejectedAt: new Date(),
+            },
+          });
+    
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: {
+              status: BailoutStatus.REJECTED,
+              rejectedAt: new Date(),
+              rejectionReason: input.rejectionReason,
+            },
+          });
+    
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.REJECT,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                approvalId: approval.id,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                rejectionReason: input.rejectionReason,
+              },
+            },
+          });
+    
+          // Notify requester
+          void (async () => {
+            const phone = approval.bailout!.requester.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `❌ *Bailout Ditolak*\n` +
+                  `No: ${approval.bailout!.bailoutNumber}\n` +
+                  `Jumlah: Rp ${Number(approval.bailout!.amount).toLocaleString("id-ID")}\n` +
+                  `Alasan: ${input.rejectionReason}\n` +
+                  `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.bailout!.bailoutNumber}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+    
+          return updatedApproval;
+        }),
+    
+      // ─── REQUEST REVISION FOR BAILOUT (via Approval chain) ────────────────────
+      requestBailoutRevision: protectedProcedure
+        .meta({
+          openapi: {
+            method: "POST",
+            path: "/bailouts/request-revision",
+            protect: true,
+            tags: ["Bailout"],
+            summary: "Request revision for a bailout",
+          },
+          mcp: {
+            enabled: true,
+            name: "request_bailout_revision",
+            description:
+              "Request a revision for a bailout, resetting all its approval steps back to PENDING. Requires a comments field (min 10 chars). Provide approvalId or approvalNumber. Optionally include callerPhone for WhatsApp-originated flows. Sets the Bailout to REVISION and notifies the requester.",
+          },
+        })
+        .input(
+          z
+            .object({
+              approvalId: z.string().optional(),
+              approvalNumber: z.string().optional(),
+              callerPhone: z.string().optional(),
+              comments: z.string().min(10),
+            })
+            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
+              message: "Either approvalId or approvalNumber must be provided",
+            })
+        )
+        .output(z.any())
+        .mutation(async ({ ctx, input }) => {
+          const where = input.approvalId
+            ? { id: input.approvalId }
+            : { approvalNumber: input.approvalNumber! };
+    
+          const approval = await ctx.db.approval.findUnique({
+            where,
+            include: {
+              approver: { select: { id: true, phoneNumber: true } },
+              bailout: {
+                include: {
+                  requester: { select: { phoneNumber: true, name: true } },
+                },
+              },
+            },
+          });
+    
+          if (!approval) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+          }
+          if (!approval.bailout) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Approval is not linked to a bailout",
+            });
+          }
+    
+          // Phone ownership check
+          if (input.callerPhone) {
+            const approverPhone = approval.approver.phoneNumber ?? "";
+            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
+            if (!approverPhone) {
+              throw new TRPCError({ code: "FORBIDDEN", message: "Approver has no phone number on record" });
+            }
+            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
+              throw new TRPCError({ code: "FORBIDDEN", message: "Phone number does not match the approver on record" });
+            }
+          }
+    
+          if (approval.approverId !== ctx.session.user.id) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized to request revision for this bailout" });
+          }
+          if (approval.status !== ApprovalStatus.PENDING) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
+          }
+    
+          const updatedApproval = await ctx.db.approval.update({
+            where: { id: approval.id },
+            data: {
+              status: ApprovalStatus.REVISION_REQUESTED,
+              comments: input.comments,
+            },
+          });
+    
+          // Reset all approval steps for this bailout back to PENDING
+          await ctx.db.approval.updateMany({
+            where: { bailoutId: approval.bailoutId as string },
+            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          });
+    
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: { status: BailoutStatus.REVISION },
+          });
+    
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.UPDATE,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                action: "revision_requested",
+                approvalId: approval.id,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+    
+          // Notify requester
+          void (async () => {
+            const phone = approval.bailout!.requester.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `🔄 *Revisi Bailout Diminta*\n` +
+                  `No: ${approval.bailout!.bailoutNumber}\n` +
+                  `Jumlah: Rp ${Number(approval.bailout!.amount).toLocaleString("id-ID")}\n` +
+                  `Catatan: ${input.comments}\n` +
+                  `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.bailout!.bailoutNumber}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+    
+          return updatedApproval;
+        }),
+    
+
+    
 });
 

@@ -33,6 +33,101 @@ export interface SendPollResult {
   error?: string;
 }
 
+export interface SendMessageParams {
+  /** WhatsApp number including suffix, e.g. "6289685024421@s.whatsapp.net" */
+  phone: string;
+  /** Message text to send */
+  message: string;
+  /** Message ID to reply to (optional) */
+  reply_message_id?: string;
+  /** Whether this is a forwarded message (optional) */
+  is_forwarded?: boolean;
+  /** Disappearing message duration in seconds (optional) */
+  duration?: number;
+  /**
+   * List of phone numbers to mention (ghost mentions).
+   * Use "@everyone" to mention all group participants.
+   */
+  mentions?: string[];
+}
+
+export interface SendMessageResult {
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+}
+
+/**
+ * Send a WhatsApp text message.
+ *
+ * Errors are caught and returned as `{ ok: false, error }` so that a failed
+ * notification never causes the parent database transaction to roll back.
+ */
+export async function sendWhatsappMessage(
+  params: SendMessageParams,
+): Promise<SendMessageResult> {
+  const { WHATSAPP_BASE_URL, WHATSAPP_DEVICE_ID, WHATSAPP_BASIC_AUTH } = env;
+
+  // Silently skip when gateway is not configured
+  if (!WHATSAPP_BASE_URL || !WHATSAPP_DEVICE_ID || !WHATSAPP_BASIC_AUTH) {
+    log.warn("WhatsApp gateway not configured – skipping message send", {
+      phone: params.phone,
+    });
+    return { ok: true, skipped: true };
+  }
+
+  const encodedAuth = Buffer.from(WHATSAPP_BASIC_AUTH).toString("base64");
+
+  log.info("Sending WhatsApp message", {
+    phone: params.phone,
+    message: params.message,
+  });
+
+  try {
+    const res = await fetch(`${WHATSAPP_BASE_URL}/send/message`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${encodedAuth}`,
+        "Device-Id": WHATSAPP_DEVICE_ID,
+      },
+      body: JSON.stringify({
+        phone: params.phone,
+        message: params.message,
+        ...(params.reply_message_id !== undefined && {
+          reply_message_id: params.reply_message_id,
+        }),
+        ...(params.is_forwarded !== undefined && {
+          is_forwarded: params.is_forwarded,
+        }),
+        ...(params.duration !== undefined && { duration: params.duration }),
+        ...(params.mentions !== undefined && { mentions: params.mentions }),
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "(no body)");
+      const errorMsg = `WhatsApp gateway returned ${res.status}: ${body}`;
+      log.error("WhatsApp message send failed – gateway error", {
+        phone: params.phone,
+        status: res.status,
+        body,
+      });
+      return { ok: false, error: errorMsg };
+    }
+
+    log.info("WhatsApp message sent successfully", { phone: params.phone });
+    return { ok: true };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log.error("WhatsApp message send failed – network/unexpected error", {
+      phone: params.phone,
+      error: errorMsg,
+    });
+    return { ok: false, error: errorMsg };
+  }
+}
+
 /**
  * Send a WhatsApp poll notification.
  *
