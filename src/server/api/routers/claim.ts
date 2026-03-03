@@ -706,34 +706,69 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      // Create approval workflow
-      const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
+      // ── Build dynamic approval chain per DYNAMIC_APPROVAL_HIERARCHY.md ──────
+      // Entry type includes sequence for chain ordering
+      const approvalEntries: { sequence: number; level: ApprovalLevel; approverId: string }[] = [];
+      let seq = 1;
 
-      // L1: Supervisor
-      if (claim.submitter.supervisorId) {
-        approvalEntries.push({
-          level: ApprovalLevel.L1_SUPERVISOR,
-          approverId: claim.submitter.supervisorId,
-        });
-      }
+      const submitterRole = claim.submitter.role;
+      const isSalesRole = submitterRole === "SALES_EMPLOYEE" || submitterRole === "SALES_CHIEF";
+      const isSalesTravel = claim.travelRequest?.travelType === "SALES" && !!claim.travelRequest?.projectId;
 
-      // L2: Finance for high amounts (example: > 5000000)
-      if (Number(claim.amount) > 5000000) {
-        // Find finance user
-        const financeUser = await ctx.db.user.findFirst({
-          where: {
-            role: "FINANCE",
-            deletedAt: null,
-          },
-        });
+      if (!isSalesRole && isSalesTravel && claim.travelRequest?.project?.salesLead) {
+        // Rule B: Regular employee on a sales trip → start with SALES_LEAD (unless submitter IS the sales lead)
+        const salesLead = claim.travelRequest.project.salesLead;
+        if (salesLead.id !== claim.submitterId) {
+          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.SALES_LEAD, approverId: salesLead.id });
 
-        if (financeUser) {
-          approvalEntries.push({
-            level: ApprovalLevel.L2_MANAGER,
-            approverId: financeUser.id,
-          });
+          // Walk the sales lead's supervisor chain: DEPT_CHIEF → DIRECTOR → SENIOR_DIRECTOR → EXECUTIVE
+          let current: { id: string; supervisorId: string | null; supervisor?: typeof salesLead | null } | null = salesLead;
+          const levels: ApprovalLevel[] = [ApprovalLevel.DEPT_CHIEF, ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          for (const level of levels) {
+            if (!current?.supervisorId) break;
+            current = current.supervisor ?? null;
+            if (!current) break;
+            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+          }
+        } else {
+          // Submitter IS the sales lead — start at DEPT_CHIEF via submitter's department chief
+          const chief = claim.submitter.department?.chief;
+          if (chief) {
+            approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
+            let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
+            const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+            for (const level of levels) {
+              if (!current?.supervisorId) break;
+              current = current.supervisor ?? null;
+              if (!current) break;
+              approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+            }
+          }
+        }
+      } else {
+        // Rule A (SALES_EMPLOYEE / SALES_CHIEF) or Rule C (non-sales employee, non-sales travel):
+        // Chain starts at DEPT_CHIEF then walks supervisor chain upward
+        const chief = claim.submitter.department?.chief;
+        if (chief) {
+          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
+          let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
+          const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          for (const level of levels) {
+            if (!current?.supervisorId) break;
+            current = current.supervisor ?? null;
+            if (!current) break;
+            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+          }
         }
       }
+
+      // Deduplicate by approverId (same person can't appear twice in the chain)
+      const seen = new Set<string>();
+      const deduped = approvalEntries.filter((e) => {
+        if (seen.has(e.approverId)) return false;
+        seen.add(e.approverId);
+        return true;
+      }).map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
 
       // Generate a unique approvalNumber for each approval record
       const approvalsWithNumbers = await Promise.all(

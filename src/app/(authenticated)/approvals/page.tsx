@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/trpc/react";
@@ -11,7 +11,7 @@ import { Modal } from "@/components/ui/Modal";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { ApprovalStatus } from "../../../../generated/prisma";
 
-const APPROVER_ROLES = ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE_MANAGER", "ADMIN"];
+const APPROVER_ROLES = ["SUPERVISOR", "SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE_MANAGER", "ADMIN"];
 
 interface TravelRequestRef {
   id: string;
@@ -52,14 +52,19 @@ interface Approval {
 }
 
 export default function ApprovalsPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const userRole = session?.user?.role ?? "EMPLOYEE";
 
-  if (!APPROVER_ROLES.includes(userRole)) {
-    router.replace("/");
-    return null;
-  }
+  useEffect(() => {
+    if (status === "loading") return;
+    if (!APPROVER_ROLES.includes(userRole)) {
+      router.replace("/");
+    }
+  }, [userRole, status, router]);
+
+  if (status === "loading") return null;
+  if (!APPROVER_ROLES.includes(userRole)) return null;
 
   return <ApprovalsContent />;
 }

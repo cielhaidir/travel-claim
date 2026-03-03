@@ -70,12 +70,6 @@ export const bailoutRouter = createTRPCRouter({
               status: true,
             },
           },
-          chiefApprover: {
-            select: { id: true, name: true, role: true },
-          },
-          directorApprover: {
-            select: { id: true, name: true, role: true },
-          },
         },
         orderBy: { createdAt: "desc" },
       });
@@ -109,12 +103,6 @@ export const bailoutRouter = createTRPCRouter({
               startDate: true,
               endDate: true,
             },
-          },
-          chiefApprover: {
-            select: { id: true, name: true, role: true },
-          },
-          directorApprover: {
-            select: { id: true, name: true, role: true },
           },
         },
       });
@@ -353,10 +341,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_CHIEF,
-          chiefApproverId: ctx.session.user.id,
-          chiefApprovedAt: new Date(),
-          chiefNotes: input.notes,
+          status: BailoutStatus.APPROVED_L1,
         },
       });
 
@@ -429,7 +414,7 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_CHIEF) {
+      if (bailout.status !== BailoutStatus.APPROVED_L1) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Chief terlebih dahulu",
@@ -439,10 +424,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_DIRECTOR,
-          directorApproverId: ctx.session.user.id,
-          directorApprovedAt: new Date(),
-          directorNotes: input.notes,
+          status: BailoutStatus.APPROVED_L2,
         },
       });
 
@@ -535,7 +517,7 @@ export const bailoutRouter = createTRPCRouter({
 
       const rejectableStatuses: BailoutStatus[] = [
         BailoutStatus.SUBMITTED,
-        BailoutStatus.APPROVED_CHIEF,
+        BailoutStatus.APPROVED_L1,
       ];
 
       if (!rejectableStatuses.includes(bailout.status)) {
@@ -618,7 +600,7 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_DIRECTOR) {
+      if (bailout.status !== BailoutStatus.APPROVED_L2) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Director sebelum dicairkan",
@@ -656,7 +638,7 @@ export const bailoutRouter = createTRPCRouter({
 
       let statusFilter: BailoutStatus;
       if (DIRECTOR_ROLES.includes(role)) {
-        statusFilter = BailoutStatus.APPROVED_CHIEF;
+        statusFilter = BailoutStatus.APPROVED_L1;
       } else if (SALES_CHIEF_ROLES.includes(role)) {
         statusFilter = BailoutStatus.SUBMITTED;
       } else {

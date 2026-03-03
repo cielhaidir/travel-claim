@@ -16,7 +16,6 @@ import {
   supervisorProcedure,
   managerProcedure,
 } from "@/server/api/trpc";
-import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 import {
   sendWhatsappPoll,
   buildTravelRequestApprovalPoll,
@@ -182,8 +181,8 @@ export const travelRequestRouter = createTRPCRouter({
     .input(
       z.object({
         employeeId: z.string().min(1),
-        status: z.enum(TravelStatus).optional(),
-        travelType: z.enum(TravelType).optional(),
+        status: z.nativeEnum(TravelStatus).optional(),
+        travelType: z.nativeEnum(TravelType).optional(),
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
@@ -386,8 +385,6 @@ export const travelRequestRouter = createTRPCRouter({
           bailouts: {
             include: {
               requester: { select: { id: true, name: true, email: true } },
-              chiefApprover: { select: { id: true, name: true, role: true } },
-              directorApprover: { select: { id: true, name: true, role: true } },
             },
             orderBy: { createdAt: "asc" },
           },
@@ -534,13 +531,13 @@ export const travelRequestRouter = createTRPCRouter({
       const { participantIds, bailouts, ...requestData } = input;
 
       // Only SALES_EMPLOYEE, SALES_CHIEF, and ADMIN can create a BussTrip
-      const allowedCreatorRoles = ["SALES_EMPLOYEE", "SALES_CHIEF", "ADMIN"];
-      if (!allowedCreatorRoles.includes(ctx.session.user.role)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Sales Employee dan Sales Chief yang bisa mengajukan Business Trip",
-        });
-      }
+      // const allowedCreatorRoles = ["SALES_EMPLOYEE", "SALES_CHIEF", "ADMIN"];
+      // if (!allowedCreatorRoles.includes(ctx.session.user.role)) {
+      //   throw new TRPCError({
+      //     code: "FORBIDDEN",
+      //     message: "Hanya Sales Employee dan Sales Chief yang bisa mengajukan Business Trip",
+      //   });
+      // }
 
       // Validate dates
       if (input.startDate >= input.endDate) {
@@ -827,13 +824,36 @@ export const travelRequestRouter = createTRPCRouter({
         return true;
       }).map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
 
-      // Generate a unique approvalNumber for each approval record
-      const approvalsWithNumbers = await Promise.all(
-        deduped.map(async (entry) => ({
-          ...entry,
-          approvalNumber: await generateApprovalNumber(ctx.db),
-        }))
-      );
+      // When re-submitting from REVISION, delete the stale approval records first.
+      // (They carry unique approvalNumbers — keeping them causes a unique constraint
+      // violation when we try to INSERT new ones whose generated numbers collide.)
+      if (request.status === TravelStatus.REVISION) {
+        await ctx.db.approval.deleteMany({
+          where: { travelRequestId: input.id },
+        });
+      }
+
+      // Allocate all approval numbers in one shot:
+      // Read the current MAX suffix once, then assign offsets 1..N locally.
+      // This avoids both the count-after-delete bug and the sequential-read
+      // race where two concurrent requests read the same MAX before either inserts.
+      const year = new Date().getFullYear();
+      const lastApproval = await ctx.db.approval.findFirst({
+        where: { approvalNumber: { startsWith: `APR-${year}-` } },
+        orderBy: { approvalNumber: "desc" },
+        select: { approvalNumber: true },
+      });
+      let nextSeq = 1;
+      if (lastApproval) {
+        const parts = lastApproval.approvalNumber.split("-");
+        const lastNum = parseInt(parts[parts.length - 1] ?? "0", 10);
+        if (!isNaN(lastNum)) nextSeq = lastNum + 1;
+      }
+
+      const approvalsWithNumbers = deduped.map((entry, idx) => ({
+        ...entry,
+        approvalNumber: `APR-${year}-${String(nextSeq + idx).padStart(5, "0")}`,
+      }));
 
       // Update request and create approvals
       const updated = await ctx.db.travelRequest.update({

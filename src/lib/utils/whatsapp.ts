@@ -12,6 +12,9 @@
  */
 
 import { env } from "@/env";
+import { createLogger } from "@/lib/utils/logger";
+
+const log = createLogger("whatsapp");
 
 export interface SendPollParams {
   /** WhatsApp number including suffix, e.g. "6289685024421@s.whatsapp.net" */
@@ -43,10 +46,21 @@ export async function sendWhatsappPoll(
 
   // Silently skip when gateway is not configured
   if (!WHATSAPP_BASE_URL || !WHATSAPP_DEVICE_ID || !WHATSAPP_BASIC_AUTH) {
+    log.warn("WhatsApp gateway not configured – skipping poll send", {
+      phone: params.phone,
+      question: params.question,
+    });
     return { ok: true, skipped: true };
   }
 
   const encodedAuth = Buffer.from(WHATSAPP_BASIC_AUTH).toString("base64");
+
+  log.info("Sending WhatsApp poll", {
+    phone: params.phone,
+    question: params.question,
+    options: params.options,
+    maxAnswer: params.maxAnswer ?? 1,
+  });
 
   try {
     const res = await fetch(`${WHATSAPP_BASE_URL}/send/poll`, {
@@ -66,18 +80,24 @@ export async function sendWhatsappPoll(
 
     if (!res.ok) {
       const body = await res.text().catch(() => "(no body)");
-      return {
-        ok: false,
-        error: `WhatsApp gateway returned ${res.status}: ${body}`,
-      };
+      const errorMsg = `WhatsApp gateway returned ${res.status}: ${body}`;
+      log.error("WhatsApp poll send failed – gateway error", {
+        phone: params.phone,
+        status: res.status,
+        body,
+      });
+      return { ok: false, error: errorMsg };
     }
 
+    log.info("WhatsApp poll sent successfully", { phone: params.phone });
     return { ok: true };
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log.error("WhatsApp poll send failed – network/unexpected error", {
+      phone: params.phone,
+      error: errorMsg,
+    });
+    return { ok: false, error: errorMsg };
   }
 }
 

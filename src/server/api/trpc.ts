@@ -209,10 +209,10 @@ const enforceRole = (allowedRoles: Role[]) => {
 
 
 /**
- * Supervisor procedure - requires SUPERVISOR, MANAGER, DIRECTOR, or ADMIN role
+ * Supervisor procedure - requires SUPERVISOR, SALES_CHIEF, MANAGER, DIRECTOR, or ADMIN role
  */
 export const supervisorProcedure = protectedProcedure
-  .use(enforceRole(["SUPERVISOR", "MANAGER", "DIRECTOR", "ADMIN"]));
+  .use(enforceRole(["SUPERVISOR", "SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"]));
 
 /**
  * Manager procedure - requires MANAGER, DIRECTOR, or ADMIN role

@@ -16,8 +16,6 @@ import {
   supervisorProcedure,
 } from "@/server/api/trpc";
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
-
-import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 import { sendWhatsappPoll } from "@/lib/utils/whatsapp";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1788,7 +1786,6 @@ export const approvalRouter = createTRPCRouter({
           approverId: ctx.session.user.id,
           level: ApprovalLevel.DIRECTOR,
           status: approvalStatus,
-          approvalNumber: await generateApprovalNumber(ctx.db),
           comments: input.comments,
           rejectionReason: input.action === "reject" ? input.comments : undefined,
           approvedAt: input.action === "approve" ? new Date() : undefined,

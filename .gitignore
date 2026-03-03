@@ -46,3 +46,6 @@ yarn-error.log*
 .idea
 
 generated
+
+# application logs
+/logs

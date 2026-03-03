@@ -2,6 +2,7 @@
 // Database: PostgreSQL
 // Generated Prisma Client: ../generated/prisma
 
+
 generator client {
     provider = "prisma-client-js"
     output   = "../generated/prisma"
