@@ -341,6 +341,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive(),
         description: z.string().min(10),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -451,6 +452,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive(),
         description: z.string().min(10),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -569,6 +571,7 @@ export const claimRouter = createTRPCRouter({
         amount: z.number().positive().optional(),
         description: z.string().min(10).optional(),
         notes: z.string().optional(),
+        coaId: z.string().optional(),
       })
     )
     .output(z.any())
@@ -703,67 +706,34 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      // ── Build dynamic approval chain per DYNAMIC_APPROVAL_HIERARCHY.md ──────
-      // Claims follow the same routing rules as their associated travel request.
-      const approvalEntries: { sequence: number; level: ApprovalLevel; approverId: string }[] = [];
-      let seq = 1;
+      // Create approval workflow
+      const approvalEntries: { level: ApprovalLevel; approverId: string }[] = [];
 
-      const submitterRole = claim.submitter.role;
-      const isSalesRole = submitterRole === "SALES_EMPLOYEE" || submitterRole === "SALES_CHIEF";
-      const tr = claim.travelRequest;
-      const isSalesTravel = !!tr && tr.travelType === "SALES" && !!tr.projectId && !!tr.project?.salesLead;
-
-      if (!isSalesRole && isSalesTravel && tr?.project?.salesLead) {
-        // Rule B: Regular employee claiming on a sales trip → SALES_LEAD first
-        const salesLead = tr.project.salesLead;
-        if (salesLead.id !== claim.submitterId) {
-          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.SALES_LEAD, approverId: salesLead.id });
-          let current: { id: string; supervisorId: string | null; supervisor?: typeof salesLead | null } | null = salesLead;
-          const levels: ApprovalLevel[] = [ApprovalLevel.DEPT_CHIEF, ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
-          for (const level of levels) {
-            if (!current?.supervisorId) break;
-            current = current.supervisor ?? null;
-            if (!current) break;
-            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
-          }
-        } else {
-          // Submitter IS the sales lead — start at DEPT_CHIEF
-          const chief = claim.submitter.department?.chief;
-          if (chief) {
-            approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
-            let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
-            const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
-            for (const level of levels) {
-              if (!current?.supervisorId) break;
-              current = current.supervisor ?? null;
-              if (!current) break;
-              approvalEntries.push({ sequence: seq++, level, approverId: current.id });
-            }
-          }
-        }
-      } else {
-        // Rule A or C: Start at DEPT_CHIEF and walk supervisor chain
-        const chief = claim.submitter.department?.chief;
-        if (chief) {
-          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
-          let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
-          const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
-          for (const level of levels) {
-            if (!current?.supervisorId) break;
-            current = current.supervisor ?? null;
-            if (!current) break;
-            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
-          }
-        }
+      // L1: Supervisor
+      if (claim.submitter.supervisorId) {
+        approvalEntries.push({
+          level: ApprovalLevel.L1_SUPERVISOR,
+          approverId: claim.submitter.supervisorId,
+        });
       }
 
-      // Deduplicate by approverId
-      const seen = new Set<string>();
-      const deduped = approvalEntries.filter((e) => {
-        if (seen.has(e.approverId)) return false;
-        seen.add(e.approverId);
-        return true;
-      }).map((e, idx) => ({ ...e, sequence: idx + 1 }));
+      // L2: Finance for high amounts (example: > 5000000)
+      if (Number(claim.amount) > 5000000) {
+        // Find finance user
+        const financeUser = await ctx.db.user.findFirst({
+          where: {
+            role: "FINANCE",
+            deletedAt: null,
+          },
+        });
+
+        if (financeUser) {
+          approvalEntries.push({
+            level: ApprovalLevel.L2_MANAGER,
+            approverId: financeUser.id,
+          });
+        }
+      }
 
       // Generate a unique approvalNumber for each approval record
       const approvalsWithNumbers = await Promise.all(

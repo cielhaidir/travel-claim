@@ -1,7 +1,5 @@
 import { readFileSync, writeFileSync } from "fs";
 
-import { readFileSync, writeFileSync } from "fs";
-
 const path = "./src/components/features/travel/TravelRequestForm.tsx";
 
 // The file was corrupted: UTF-8 bytes were read by PowerShell as Windows-1252,

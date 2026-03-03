@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { api } from "@/trpc/react";
 import { Button } from "@/components/ui/Button";
 import type { EntertainmentType, NonEntertainmentCategory } from "../../../../generated/prisma";
 
@@ -25,6 +26,7 @@ export interface EntertainmentFormData extends ClaimFormBase {
   guestCompany: string;
   guestPosition: string;
   isGovernmentOfficial: boolean;
+  coaId?: string;
 }
 
 // ── Non-Entertainment ────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ export interface NonEntertainmentFormData extends ClaimFormBase {
   expenseDate: string;
   expenseDestination: string;
   customerName: string;
+  coaId?: string;
 }
 
 export type ClaimFormData = EntertainmentFormData | NonEntertainmentFormData;
@@ -98,6 +101,12 @@ export function ClaimForm({
   const [amount, setAmount] = useState(initialData?.amount ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
+  const [coaId, setCoaId] = useState((initialData as Partial<EntertainmentFormData> | undefined)?.coaId ?? "");
+
+  // Chart of Accounts
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const { data: rawCoas } = api.chartOfAccount.getAll.useQuery({ isActive: true });
+  const coas = (rawCoas as Array<{ id: string; code: string; name: string }> | undefined) ?? [];
 
   // Entertainment fields
   const entInitial = initialData as Partial<EntertainmentFormData> | undefined;
@@ -167,6 +176,7 @@ export function ClaimForm({
         amount,
         description,
         notes,
+        coaId: coaId || undefined,
       });
     } else {
       onSubmit({
@@ -179,6 +189,7 @@ export function ClaimForm({
         amount,
         description,
         notes,
+        coaId: coaId || undefined,
       });
     }
   };
@@ -229,6 +240,23 @@ export function ClaimForm({
           ))}
         </select>
         {errors.travelRequestId && <p className={ERROR_CLS}>{errors.travelRequestId}</p>}
+      </div>
+
+      {/* Chart of Account */}
+      <div>
+        <label className={LABEL_CLS}>Chart of Account (COA)</label>
+        <select
+          value={coaId}
+          onChange={(e) => setCoaId(e.target.value)}
+          className={FIELD_CLS}
+        >
+          <option value="">— Pilih COA (opsional) —</option>
+          {coas.map((coa) => (
+            <option key={coa.id} value={coa.id}>
+              [{coa.code}] {coa.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* ── Entertainment specific fields ── */}

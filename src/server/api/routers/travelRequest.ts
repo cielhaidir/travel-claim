@@ -7,6 +7,7 @@ import {
   ApprovalStatus,
   AuditAction,
   type Prisma,
+  type TransportMode,
 } from "../../../../generated/prisma";
 
 import {
@@ -215,7 +216,7 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
+      const where: Prisma.TravelRequestWhereInput = {
         deletedAt: null,
         OR: [
           { requesterId: targetUser.id },
@@ -231,14 +232,15 @@ export const travelRequestRouter = createTRPCRouter({
         where.travelType = input.travelType;
       }
 
-      if (input?.startDate || input?.endDate) {
-        where.AND = [];
-        if (input.startDate) {
-          where.AND.push({ startDate: { gte: input.startDate } });
+      if (input?.startDate ?? input?.endDate) {
+        const andConditions: Prisma.TravelRequestWhereInput[] = [];
+        if (input?.startDate) {
+          andConditions.push({ startDate: { gte: input.startDate } });
         }
-        if (input.endDate) {
-          where.AND.push({ endDate: { lte: input.endDate } });
+        if (input?.endDate) {
+          andConditions.push({ endDate: { lte: input.endDate } });
         }
+        where.AND = andConditions;
       }
 
       const requests = await ctx.db.travelRequest.findMany({
@@ -531,6 +533,15 @@ export const travelRequestRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { participantIds, bailouts, ...requestData } = input;
 
+      // Only SALES_EMPLOYEE, SALES_CHIEF, and ADMIN can create a BussTrip
+      const allowedCreatorRoles = ["SALES_EMPLOYEE", "SALES_CHIEF", "ADMIN"];
+      if (!allowedCreatorRoles.includes(ctx.session.user.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Hanya Sales Employee dan Sales Chief yang bisa mengajukan Business Trip",
+        });
+      }
+
       // Validate dates
       if (input.startDate >= input.endDate) {
         throw new TRPCError({
@@ -579,7 +590,7 @@ export const travelRequestRouter = createTRPCRouter({
                     category,
                     description,
                     amount,
-                    transportMode: transportMode as import("../../../../generated/prisma").TransportMode | undefined,
+                    transportMode: transportMode as TransportMode | undefined,
                     ...rest,
                   };
                 }),

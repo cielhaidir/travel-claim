@@ -91,9 +91,13 @@ async function handleMcpRequest(request: Request) {
         basePath: "/api/mcp",
         verboseLogs: process.env.NODE_ENV === "development",
         maxDuration: 60,
-        // Pass redisUrl only when the env var is present (required for SSE transport).
-        // If REDIS_URL is not set, SSE endpoints will be unavailable; use /api/mcp/mcp instead.
-        ...(process.env.REDIS_URL ? { redisUrl: process.env.REDIS_URL } : {}),
+        // When REDIS_URL is set, enable SSE transport and pass the URL.
+        // When REDIS_URL is not set, disable SSE so the handler never calls
+        // initializeRedis() (which throws "redisUrl is required"). Use the
+        // Streamable HTTP transport at /api/mcp/mcp instead.
+        ...(process.env.REDIS_URL
+          ? { redisUrl: process.env.REDIS_URL }
+          : { disableSse: true }),
       },
     },
   );

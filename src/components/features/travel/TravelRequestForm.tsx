@@ -42,6 +42,7 @@ export interface TravelRequestFormData {
   endDate: string;
   projectId?: string;
   bailouts?: BailoutItemData[];
+  participantIds?: string[];
 }
 
 // â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -54,14 +55,14 @@ const TRAVEL_TYPES: Array<{ value: TravelType; label: string }> = [
 ];
 
 const CATEGORY_OPTIONS: Array<{ value: BailoutCategory; label: string; icon: string; desc: string }> = [
-  { value: "TRANSPORT", label: "Transportasi", icon: "âœˆï¸", desc: "Tiket pesawat, kereta, bus, dll" },
+  { value: "TRANSPORT", label: "Transportasi", icon: "✈️", desc: "Tiket pesawat, kereta, bus, dll" },
   { value: "HOTEL", label: "Penginapan", icon: "🏨", desc: "Hotel, homestay, dll" },
   { value: "MEAL", label: "Uang Makan", icon: "🍽️", desc: "Makan & konsumsi perjalanan" },
   { value: "OTHER", label: "Lainnya", icon: "📦", desc: "Kebutuhan lain di luar kategori di atas" },
 ];
 
 const TRANSPORT_MODES: Array<{ value: string; label: string }> = [
-  { value: "FLIGHT", label: "âœˆï¸ Pesawat" },
+  { value: "FLIGHT", label: "✈️ Pesawat" },
   { value: "TRAIN", label: "🚂 Kereta" },
   { value: "BUS", label: "🚌 Bus" },
   { value: "CAR_RENTAL", label: "🚗 Rental Mobil" },
@@ -277,7 +278,9 @@ export function TravelRequestForm({
   });
 
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
-  const [activeTab, setActiveTab] = useState<"basic" | "bailout">("basic");
+  const [activeTab, setActiveTab] = useState<"basic" | "bailout" | "peserta">("basic");
+  const [participantIds, setParticipantIds] = useState<string[]>(initialData?.participantIds ?? []);
+  const [pesertaSearch, setPesertaSearch] = useState("");
 
   const isSales = formData.travelType === "SALES";
 
@@ -289,6 +292,11 @@ export function TravelRequestForm({
   const projects = (rawProjects as { projects: Array<{ id: string; code: string; name: string; clientName?: string | null }> } | undefined)?.projects ?? [];
 
   // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  // Fetch active users for participant picker
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const { data: rawActiveUsers } = api.user.getActiveUsers.useQuery({ search: pesertaSearch || undefined });
+  const activeUsers = (rawActiveUsers as Array<{ id: string; name: string; email: string; employeeId: string; role: string; department?: { id: string; name: string } | null }> | undefined) ?? [];
 
   const setField = (field: keyof TravelRequestFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -306,6 +314,12 @@ export function TravelRequestForm({
       ...prev,
       bailouts: prev.bailouts?.map((b, idx) => (idx === i ? { ...b, ...patch } : b)),
     }));
+
+  const toggleParticipant = (userId: string) => {
+    setParticipantIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
 
   // â”€â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -352,6 +366,7 @@ export function TravelRequestForm({
       ...formData,
       projectId: formData.projectId ?? undefined,
       bailouts: formData.bailouts?.filter((b) => b.description && b.amount > 0),
+      participantIds,
     });
   };
 
@@ -369,7 +384,7 @@ export function TravelRequestForm({
     <form onSubmit={handleSubmit} className="flex flex-col gap-0">
       {/* Tab Nav */}
       <div className="flex border-b border-gray-200 mb-4">
-        {(["basic", "bailout"] as const).map((tab) => (
+        {(["basic", "bailout", "peserta"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -382,6 +397,7 @@ export function TravelRequestForm({
           >
             {tab === "basic" && "📋 Informasi Dasar"}
             {tab === "bailout" && `💰 Dana Talangan ${bailoutCount > 0 ? `(${bailoutCount})` : "(opsional)"}`}
+            {tab === "peserta" && `👥 Peserta ${participantIds.length > 0 ? `(${participantIds.length})` : "(opsional)"}`}
           </button>
         ))}
       </div>
@@ -493,6 +509,66 @@ export function TravelRequestForm({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Tab: Peserta ─────────────────────────────────────────────────────── */}
+      {activeTab === "peserta" && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+            <p className="text-sm font-semibold text-green-800">👥 Peserta Perjalanan (Opsional)</p>
+            <p className="text-xs text-green-700 mt-1">
+              Tambahkan karyawan lain yang ikut dalam perjalanan ini.
+            </p>
+          </div>
+
+          <input
+            type="text"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Cari nama, email, atau ID karyawan..."
+            value={pesertaSearch}
+            onChange={(e) => setPesertaSearch(e.target.value)}
+          />
+
+          <div className="max-h-64 overflow-y-auto space-y-1 rounded-lg border border-gray-200">
+            {activeUsers.length === 0 && (
+              <p className="p-4 text-center text-xs text-gray-400">Tidak ada karyawan ditemukan</p>
+            )}
+            {activeUsers.map((user) => (
+              <label
+                key={user.id}
+                className={`flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors ${
+                  participantIds.includes(user.id) ? "bg-green-50" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                  checked={participantIds.includes(user.id)}
+                  onChange={() => toggleParticipant(user.id)}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{user.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{user.employeeId} · {user.department?.name ?? "—"}</p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">{user.role}</span>
+              </label>
+            ))}
+          </div>
+
+          {participantIds.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {participantIds.map((id) => {
+                const u = activeUsers.find((x) => x.id === id);
+                return u ? (
+                  <span key={id} className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs text-green-800">
+                    {u.name}
+                    <button type="button" onClick={() => toggleParticipant(id)} className="hover:text-red-600">×</button>
+                  </span>
+                ) : null;
+              })}
+            </div>
+          )}
         </div>
       )}
 

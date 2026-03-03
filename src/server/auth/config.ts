@@ -52,34 +52,75 @@ export const authConfig = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email) {
-          throw new Error("Invalid credentials: email not provided.");
-        }
+        try {
+          if (!credentials?.email || typeof credentials.email !== "string") {
+            console.error("[auth] authorize: missing or invalid email");
+            return null;
+          }
 
-        const user = await db.user.findUnique({
-          where: { email: credentials.email as string },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            password: true,
-            role: true,
-            employeeId: true,
-            departmentId: true,
-            image: true,
-          },
-        });
+          // Normalize email to lowercase and trim whitespace
+          const email = credentials.email.toLowerCase().trim();
+          console.log("[auth] authorize: looking up user:", email);
 
-        if (!user) {
-          throw new Error("No user found with the given email.");
-        }
+          const user = await db.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              password: true,
+              role: true,
+              employeeId: true,
+              departmentId: true,
+              image: true,
+            },
+          });
 
-        // In non-production environments, allow passwordless login with a specific bypass key.
-        if (
-          process.env.NODE_ENV !== "production" &&
-          credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
-        ) {
-          console.log(`Bypassing password validation for ${user.email}.`);
+          if (!user) {
+            console.error("[auth] authorize: no user found for email:", email);
+            return null;
+          }
+
+          console.log("[auth] authorize: user found, hasPassword:", !!user.password);
+
+          // In non-production environments, allow passwordless login with a specific bypass key.
+          if (
+            process.env.NODE_ENV !== "production" &&
+            credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
+          ) {
+            console.log(`[auth] authorize: bypass key accepted for ${user.email}.`);
+            return {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              employeeId: user.employeeId,
+              departmentId: user.departmentId,
+            };
+          }
+
+          if (!credentials.password || typeof credentials.password !== "string") {
+            console.error("[auth] authorize: missing or invalid password");
+            return null;
+          }
+
+          if (!user.password) {
+            console.error("[auth] authorize: user has no password set:", email);
+            return null;
+          }
+
+          // Validate password
+          const isPasswordValid = await bcrypt.compare(
+            credentials.password,
+            String(user.password),
+          );
+
+          console.log("[auth] authorize: password valid:", isPasswordValid);
+
+          if (!isPasswordValid) {
+            return null;
+          }
+
           return {
             id: user.id,
             name: user.name,
@@ -88,34 +129,10 @@ export const authConfig = {
             employeeId: user.employeeId,
             departmentId: user.departmentId,
           };
+        } catch (err) {
+          console.error("[auth] authorize: unexpected error:", err);
+          return null;
         }
-
-        if (!credentials.password) {
-          throw new Error("Invalid credentials: password not provided.");
-        }
-
-        if (!user.password) {
-          throw new Error("The user does not have a password set up.");
-        }
-
-        // Validate password
-        const isPasswordValid = await bcrypt.compare(
-          credentials.password as string,
-          String(user.password),
-        );
-
-        if (!isPasswordValid) {
-          throw new Error("Invalid password.");
-        }
-
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          employeeId: user.employeeId,
-          departmentId: user.departmentId,
-        };
       },
     }),
     // Azure AD provider (conditional)
