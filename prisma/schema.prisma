@@ -238,6 +238,7 @@ model User {
     notifications        Notification[]
     auditLogs            AuditLog[]
     salesProjects        Project[]           @relation("SalesLead")
+    financeBailouts         Bailout[]           @relation("FinanceBailouts")
 
     // Departments this user leads as chief
     ledDepartments Department[] @relation("DepartmentChief")
@@ -482,6 +483,10 @@ model Bailout {
 
     // Approval chain (generic, same as TravelRequest & Claim)
     approvals Approval[]
+
+    storageUrl String? @db.Text // For any receipt images or documents
+    financeId String? @db.VarChar(100) //
+    finance   User?   @relation("FinanceBailouts", fields: [financeId], references: [id])
 
     @@index([travelRequestId])
     @@index([requesterId, status])
