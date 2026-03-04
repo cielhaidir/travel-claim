@@ -1,7 +1,7 @@
 # 💰 Bailout (Dana Talangan) — Flow & Implementation Plan
 
-> **Last updated:** 3 Maret 2026  
-> **Status review:** Post-merge dari branch `main`  
+> **Last updated:** 4 Maret 2026  
+> **Status review:** Fase 1–3 selesai ✅ | Fase 4 pending  
 > **Reviewer:** GitHub Copilot AI
 
 ---
@@ -15,6 +15,7 @@
 5. [Temuan Masalah Pasca-Merge](#5-temuan-masalah-pasca-merge)
 6. [Progress Implementasi](#6-progress-implementasi)
 7. [Checklist Teknis](#7-checklist-teknis)
+8. [Bug Fixes Pasca-Implementasi (4 Maret 2026)](#8-bug-fixes-pasca-implementasi-4-maret-2026)
 
 ---
 
@@ -189,71 +190,72 @@ enum BailoutStatus {
 
 ## 5. Temuan Masalah Pasca-Merge
 
-Setelah merge dari branch `main`, ditemukan beberapa inkonsistensi berikut:
+Setelah merge dari branch `main`, ditemukan beberapa inkonsistensi berikut.
+**Semua masalah di bawah telah diselesaikan per 4 Maret 2026.** ✅
 
-### 🔴 KRITIS — Menyebabkan runtime error
+### 🔴 KRITIS — Menyebabkan runtime error ✅ Selesai
 
-| # | File | Masalah | Dampak |
+| # | File | Masalah | Status |
 |---|------|---------|--------|
-| 1 | `schema.prisma` | `BailoutStatus` enum masih pakai `APPROVED_L1`, `APPROVED_L2`, dll. — tapi **DB sudah pakai** `APPROVED_CHIEF`, `APPROVED_DIRECTOR` (dari migration `20260223162635`) | Prisma client generate error / query mismatch |
-| 2 | `schema.prisma` | `Bailout` model belum punya kolom `financeId` dan `storageUrl` di DB | Column not found error saat query menggunakan `finance.*` |
-| 3 | `finance.ts` | `attachFileToBailout` mengacu `BailoutStatus.APPROVED_L2` — nilai ini tidak ada di DB | TypeScript compile ok tapi runtime mismatch |
-| 4 | `bailout.ts` | `approveByChief` set status ke `APPROVED_L1`; `approveByDirector` ke `APPROVED_L2` — tapi DB tidak punya nilai itu | `prisma.bailout.update` akan gagal |
-| 5 | `bailout.ts` | `disburse` check status `APPROVED_L2` yang tidak ada di DB | Finance tidak bisa cairkan dana |
+| 1 | `schema.prisma` | `BailoutStatus` enum masih pakai `APPROVED_L1`, `APPROVED_L2` | ✅ Diganti ke `APPROVED_CHIEF`/`APPROVED_DIRECTOR` |
+| 2 | `schema.prisma` | `Bailout` model belum punya kolom `financeId` dan `storageUrl` | ✅ Migration baru dibuat dan dijalankan |
+| 3 | `finance.ts` | `attachFileToBailout` mengacu `BailoutStatus.APPROVED_L2` | ✅ Diganti ke `APPROVED_DIRECTOR` |
+| 4 | `bailout.ts` | `approveByChief`/`approveByDirector` set status ke `APPROVED_L1`/`L2` | ✅ Diganti ke `APPROVED_CHIEF`/`APPROVED_DIRECTOR` |
+| 5 | `bailout.ts` | `disburse` check status `APPROVED_L2` yang tidak ada di DB | ✅ Diganti ke `APPROVED_DIRECTOR` |
 
-### 🟡 SEDANG — Fungsionalitas belum lengkap
+### 🟡 SEDANG — Fungsionalitas belum lengkap ✅ Selesai
 
-| # | File | Masalah | Dampak |
+| # | File | Masalah | Status |
 |---|------|---------|--------|
-| 6 | `bailout.ts` | `disburse` tidak mengisi `financeId` dengan id user yang login | Tidak bisa tracking siapa yang mencairkan |
-| 7 | `bailout.ts` | `disburse` tidak bisa menerima `storageUrl` (bukti transfer) | Finance tidak bisa lampirkan bukti saat cairkan |
-| 8 | `finance.ts` | `getBailout` include `approvals` dengan `orderBy: { sequence: "asc" }` — field `sequence` ada di schema tapi perlu cek di DB | Query bisa error jika kolom tidak ada |
-| 9 | `finance.ts` | `listBailout` tidak include info `chiefApprover` / `directorApprover` | Finance tidak tahu siapa yang sudah approve |
-| 10 | `schema.prisma` | `ApprovalLevel` enum masih pakai nama lama (`SALES_LEAD`, `DEPT_CHIEF`, dll.) tapi DB sudah pakai `L1_SUPERVISOR`, dll. | Error pada approval flow |
+| 6 | `bailout.ts` | `disburse` tidak mengisi `financeId` dengan id user yang login | ✅ Ditambahkan `financeId: ctx.session.user.id` |
+| 7 | `bailout.ts` | `disburse` tidak bisa menerima `storageUrl` | ✅ Field `storageUrl` ditambahkan ke input disburse |
+| 8 | `finance.ts` | `getBailout` include `approvals` dengan `orderBy: { sequence: "asc" }` | ✅ Diperbaiki sesuai schema DB |
+| 9 | `finance.ts` | `listBailout` tidak include info approver | ✅ Include approver chain ditambahkan |
+| 10 | `schema.prisma` | `ApprovalLevel` enum pakai nama lama | ✅ Disinkronkan dengan DB |
 
-### 🔵 MINOR — UX dan fitur yang belum aktif
+### 🔵 MINOR — UX dan fitur yang belum aktif ✅ Selesai
 
-| # | File | Masalah | Dampak |
+| # | File | Masalah | Status |
 |---|------|---------|--------|
-| 11 | `SidebarNav.tsx` | Menu "Bailout Approval" di-comment out | Finance/Chief tidak bisa akses halaman `/bailout` via sidebar |
-| 12 | `bailout/page.tsx` | Menggunakan `APPROVED_CHIEF`/`APPROVED_DIRECTOR` (benar) tapi router mengembalikan `APPROVED_L1`/`L2` | Filter status di halaman tidak bekerja |
-| 13 | Tidak ada | Belum ada cara bagi SALES_EMPLOYEE untuk submit bailout dari `/travel` detail | User harus tahu ada URL tersendiri |
-| 14 | Tidak ada | Tidak ada validasi bahwa BusTrip harus `APPROVED` / `LOCKED` sebelum bailout bisa di-submit | User bisa submit bailout sebelum trip disetujui |
+| 11 | `SidebarNav.tsx` | Menu "Bailout Approval" di-comment out | ✅ Di-uncomment |
+| 12 | `bailout/page.tsx` | Status filter tidak sesuai enum | ✅ Diperbaiki sesuai `APPROVED_CHIEF`/`APPROVED_DIRECTOR` |
+| 13 | `travel/page.tsx` | Belum ada cara submit bailout dari halaman detail trip | ✅ Tombol `💰 Bailout` dan `BailoutPanel` ditambahkan |
+| 14 | Backend | Tidak ada validasi status BusTrip sebelum submit bailout | ✅ Validasi ditambahkan di `bailout.create` |
 
-### 🗑️ CLEANUP — File konflik dari sesi sebelumnya
+### 🗑️ CLEANUP — File konflik dari sesi sebelumnya ✅ Selesai
 
-| # | File | Masalah |
-|---|------|---------|
-| 15 | `prisma/migrations/20260303000000_fix_schema_drift/migration.sql` | File migration yang dibuat sebelum merge — menambahkan `chiefApproverId` dll. yang sekarang tidak dipakai dan akan konflik dengan schema saat ini |
+| # | File | Status |
+|---|------|--------|
+| 15 | `prisma/migrations/20260303000000_fix_schema_drift/migration.sql` | ✅ Dihapus |
 
 ---
 
 ## 6. Progress Implementasi
 
-### Fase 1: Perbaikan Schema & Database
-- [ ] **1.1** Hapus migration `20260303000000_fix_schema_drift` yang konflik
-- [ ] **1.2** Update `schema.prisma` — ganti `BailoutStatus` enum ke `APPROVED_CHIEF`/`APPROVED_DIRECTOR`
-- [ ] **1.3** Update `schema.prisma` — ganti `ApprovalLevel` enum ke nilai yang sesuai DB (`L1_SUPERVISOR` dll.) atau sebaliknya
-- [ ] **1.4** Buat migration baru untuk tambah kolom `financeId` dan `storageUrl` ke tabel `Bailout`
-- [ ] **1.5** Jalankan `prisma migrate deploy` dan `prisma generate`
+### Fase 1: Perbaikan Schema & Database ✅ Selesai (3 Maret 2026)
+- [x] **1.1** Hapus migration `20260303000000_fix_schema_drift` yang konflik
+- [x] **1.2** Update `schema.prisma` — ganti `BailoutStatus` enum ke `APPROVED_CHIEF`/`APPROVED_DIRECTOR`
+- [x] **1.3** Update `schema.prisma` — ganti `ApprovalLevel` enum ke nilai yang sesuai DB (`L1_SUPERVISOR` dll.)
+- [x] **1.4** Buat migration baru untuk tambah kolom `financeId` dan `storageUrl` ke tabel `Bailout`
+- [x] **1.5** Jalankan `prisma migrate deploy` dan `prisma generate`
 
-### Fase 2: Perbaikan Backend Router
+### Fase 2: Perbaikan Backend Router ✅ Selesai (3 Maret 2026)
 
-- [ ] **2.1** `bailout.ts` — ganti `APPROVED_L1` → `APPROVED_CHIEF`, `APPROVED_L2` → `APPROVED_DIRECTOR`
-- [ ] **2.2** `bailout.ts` — `disburse`: tambah `financeId: ctx.session.user.id` dan terima field `storageUrl`
-- [ ] **2.3** `bailout.ts` — `create`: tambahkan validasi BusTrip harus di-approve sebelum bailout bisa dibuat secara mandiri (post-trip)
-- [ ] **2.4** `finance.ts` — ganti `BailoutStatus.APPROVED_L2` → `BailoutStatus.APPROVED_DIRECTOR`
-- [ ] **2.5** `finance.ts` — perbaiki include di `getBailout` (hapus `sequence` jika tidak ada di DB, atau sesuaikan)
-- [ ] **2.6** `finance.ts` — tambahkan endpoint `disburse` khusus finance (atau delegasikan ke `bailout.disburse`)
-- [ ] **2.7** `finance.ts` — tambahkan `financeId` dan `storageUrl` saat `attachFileToBailout`
+- [x] **2.1** `bailout.ts` — ganti `APPROVED_L1` → `APPROVED_CHIEF`, `APPROVED_L2` → `APPROVED_DIRECTOR`
+- [x] **2.2** `bailout.ts` — `disburse`: tambah `financeId: ctx.session.user.id` dan terima field `storageUrl`
+- [x] **2.3** `bailout.ts` — `create`: tambahkan validasi BusTrip harus di-approve sebelum bailout bisa dibuat secara mandiri (post-trip)
+- [x] **2.4** `finance.ts` — ganti `BailoutStatus.APPROVED_L2` → `BailoutStatus.APPROVED_DIRECTOR`
+- [x] **2.5** `finance.ts` — perbaiki include di `getBailout` (hapus `sequence` jika tidak ada di DB)
+- [x] **2.6** `finance.ts` — tambahkan endpoint `disburse` khusus finance (delegasi ke `bailout.disburse`)
+- [x] **2.7** `finance.ts` — tambahkan `financeId` dan `storageUrl` saat `attachFileToBailout`
 
-### Fase 3: Perbaikan Frontend
+### Fase 3: Perbaikan Frontend ✅ Selesai (3 Maret 2026)
 
-- [ ] **3.1** `SidebarNav.tsx` — uncomment menu "Bailout Approval"
-- [ ] **3.2** `bailout/page.tsx` — pastikan status filter sesuai dengan enum yang benar
-- [ ] **3.3** `bailout/page.tsx` — tambahkan kolom "Finance" di tabel (siapa yang memproses)
-- [ ] **3.4** `travel/page.tsx` — tambahkan tombol "Submit Bailout" di detail view setelah BusTrip approved
-- [ ] **3.5** Finance view — tambahkan form upload bukti transfer di modal "Cairkan Dana"
+- [x] **3.1** `SidebarNav.tsx` — uncomment menu "Bailout Approval"
+- [x] **3.2** `bailout/page.tsx` — pastikan status filter sesuai dengan enum yang benar
+- [x] **3.3** `bailout/page.tsx` — tambahkan kolom "Finance" di tabel (siapa yang memproses)
+- [x] **3.4** `travel/page.tsx` — tambahkan tombol `💰 Bailout` + `BailoutPanel` di setiap baris trip
+- [x] **3.5** Finance view — tambahkan form upload bukti transfer di modal "Cairkan Dana"
 
 ### Fase 4: Fitur Tambahan (Nice to Have)
 
@@ -261,6 +263,26 @@ Setelah merge dari branch `main`, ditemukan beberapa inkonsistensi berikut:
 - [ ] **4.2** Halaman finance khusus (`/finance/bailouts`) dengan filter dan summary total
 - [ ] **4.3** Export PDF summary bailout per BusTrip
 - [ ] **4.4** Validasi: satu finance hanya bisa proses bailout yang belum ada `financeId`-nya
+
+---
+
+## 8. Bug Fixes Pasca-Implementasi (4 Maret 2026)
+
+Setelah Fase 1–3 selesai, ditemukan dan diperbaiki beberapa bug berikut:
+
+| # | Komponen | Bug | Fix |
+|---|----------|-----|-----|
+| B1 | `travel/page.tsx` | Edit modal tidak merestorasi data bailout yang sudah disimpan — field banyak yang hilang | Interface `TravelRequest.bailouts` dilengkapi semua field; `initialData` di edit modal di-mapping ulang secara lengkap |
+| B2 | `travel/page.tsx` | Edit modal tidak merestorasi data peserta (tab Peserta kosong) | Tambahkan `participantIds: editingRequest.participants.map((p) => p.userId)` ke `initialData` |
+| B3 | `TravelRequestForm.tsx` | Checkbox "Finance sama dengan di atas" selalu unchecked saat buka edit — user harus re-check manual | Inisialisasi `sameFinanceFlags` sekarang auto-detect dengan membandingkan `financeId` antar bailout yang berdekatan |
+| B4 | `TravelRequestForm.tsx` | Label di sebelah checkbox menampilkan nama user finance secara eksplisit (tidak perlu) | Hapus spans nama finance di sebelah label checkbox |
+| B5 | `travelRequest.ts` | `Unique constraint failed on bailoutNumber` saat simpan edit — terjadi karena numbering pakai `COUNT` (berbahaya setelah ada deletion) | Ganti ke `findFirst(...orderBy: bailoutNumber desc)` untuk ambil nomor tertinggi, lalu increment; berlaku di `create` dan `update` |
+| B6 | `travelRequest.ts` | `update` mutation tidak menerima field bailout — data bailout di edit tidak tersimpan ke DB | Tambahkan input Zod schema lengkap untuk bailouts di `update`; logika delete-then-recreate untuk bailout DRAFT |
+| B7 | `travelRequest.ts` | `getAll` tidak include relasi `finance` pada bailout | Ganti `bailouts: true` ke `bailouts: { include: { finance: { select: { id, name, email } } } }` |
+| B8 | `react.tsx` | Semua log tRPC dev-mode tampil merah sebagai "Console Error" di browser | Custom `logger` di `loggerLink`: pakai `console.log` untuk log biasa, `console.error` hanya untuk error nyata |
+| B9 | `approval.ts` | User role ADMIN mendapat error "This approval has already been processed" saat approve dari halaman approvals | Tambah `isAdmin` bypass di semua 6 action mutation + query `getMyApprovals` dan `getPendingCount` |
+| B10 | `travel/page.tsx` | View modal tidak menampilkan finance yang ditugaskan di tiap bailout | Tambah baris `💳 Finance:` di setiap bailout card di view modal |
+| B11 | `travel/page.tsx` | View modal menyembunyikan seksi Peserta jika kosong — tidak ada feedback "tidak ada peserta" | Seksi Peserta sekarang selalu ditampilkan; kosong = tampil pesan "Tidak ada peserta tambahan" |
 
 ---
 
@@ -272,30 +294,33 @@ Setelah merge dari branch `main`, ditemukan beberapa inkonsistensi berikut:
 [Fase 1] Schema → [Fase 2] Backend → [Fase 3] Frontend → Test → [Fase 4]
 ```
 
-### File yang Perlu Diubah
+### File yang Diubah
 
-| File | Aksi |
-|------|------|
-| `prisma/migrations/20260303000000_fix_schema_drift/migration.sql` | **HAPUS** — konflik dengan schema saat ini |
-| `prisma/schema.prisma` | Update enum `BailoutStatus` dan `ApprovalLevel` |
-| `prisma/migrations/YYYYMMDD_add_bailout_finance_fields/migration.sql` | **BUAT BARU** — tambah `financeId`, `storageUrl` ke Bailout |
-| `src/server/api/routers/bailout.ts` | Fix status enum references, tambah `financeId` di disburse |
-| `src/server/api/routers/finance.ts` | Fix `APPROVED_L2` reference, perbaiki include |
-| `src/components/navigation/SidebarNav.tsx` | Uncomment bailout menu |
-| `src/app/(authenticated)/bailout/page.tsx` | Pastikan status values konsisten |
+| File | Aksi | Status |
+|------|------|--------|
+| `prisma/migrations/20260303000000_fix_schema_drift/migration.sql` | **HAPUS** — konflik dengan schema saat ini | ✅ Selesai |
+| `prisma/schema.prisma` | Update enum `BailoutStatus` dan `ApprovalLevel` | ✅ Selesai |
+| `prisma/migrations/20260303_add_bailout_finance_fields/migration.sql` | **DIBUAT** — tambah `financeId`, `storageUrl` ke Bailout | ✅ Selesai |
+| `src/server/api/routers/bailout.ts` | Fix status enum references, tambah `financeId` di disburse | ✅ Selesai |
+| `src/server/api/routers/finance.ts` | Fix `APPROVED_L2` reference, perbaiki include | ✅ Selesai |
+| `src/components/navigation/SidebarNav.tsx` | Uncomment bailout menu | ✅ Selesai |
+| `src/app/(authenticated)/bailout/page.tsx` | Pastikan status values konsisten | ✅ Selesai |
+| `src/server/api/routers/travelRequest.ts` | Fix bailout numbering (max-based), update mutation terima bailouts, getAll include finance | ✅ Selesai (4 Mar) |
+| `src/server/api/routers/approval.ts` | ADMIN bypass di 6 action mutation + 2 query filter | ✅ Selesai (4 Mar) |
+| `src/components/features/travel/TravelRequestForm.tsx` | Auto-detect sameFinanceFlags, fix label, fix participantIds di initialData | ✅ Selesai (4 Mar) |
+| `src/app/(authenticated)/travel/page.tsx` | Fix interface, edit initialData, handleUpdate, view modal finance & peserta | ✅ Selesai (4 Mar) |
+| `src/trpc/react.tsx` | Custom loggerLink logger (console.log vs console.error) | ✅ Selesai (4 Mar) |
 
-### Pertanyaan yang Perlu Dikonfirmasi
-
-> Sebelum implementasi, perlu konfirmasi:
+### Pertanyaan yang Sudah Dikonfirmasi
 
 1. **Apakah bailout bisa dibuat SEBELUM BusTrip di-approve?**  
-   Saat ini kode membolehkan. Kalau harus setelah approve, perlu tambah validasi.
+   ✅ Validasi ditambahkan — BusTrip harus sudah APPROVED sebelum bailout bisa di-submit.
 
 2. **Apakah Finance bisa pilih siapa yang mengerjakan?**  
-   Saat ini `financeId` diisi otomatis dari user yang login saat klik "Cairkan". Kalau perlu bisa assign ke finance lain, perlu UI tambahan.
+   ✅ `financeId` diisi otomatis dari user yang login saat klik "Cairkan" (desain saat ini).
 
 3. **Apakah upload bukti transfer WAJIB saat cairkan?**  
-   Saat ini `storageUrl` opsional. Kalau wajib, perlu validasi di frontend dan backend.
+   ✅ `storageUrl` tetap opsional per kebutuhan saat ini.
 
 4. **Apakah `ApprovalLevel` untuk bailout menggunakan generic chain (via `Approval` model)?**  
-   Saat ini bailout menggunakan status langsung (bukan Approval records). Kalau mau unify dengan flow approval TravelRequest, perlu refactor besar.
+   ✅ Bailout menggunakan status langsung — tidak memakai `Approval` records (sengaja disederhanakan).
