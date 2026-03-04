@@ -36,7 +36,7 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         travelRequestId: z.string().optional(),
         status: z.nativeEnum(BailoutStatus).optional(),
-        limit: z.number().min(1).max(100).optional(),
+        limit: z.number().min(1).max(500).optional(),
         cursor: z.string().optional(),
       }),
     )
@@ -73,6 +73,9 @@ export const bailoutRouter = createTRPCRouter({
               destination: true,
               status: true,
             },
+          },
+          finance: {
+            select: { id: true, name: true, email: true },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -169,7 +172,9 @@ export const bailoutRouter = createTRPCRouter({
         // Meal
         mealDate: z.coerce.date().optional(),
         mealLocation: z.string().optional(),
-      }),
+        // Finance assignment
+        financeId: z.string().optional(),
+      })
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -369,7 +374,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_L1,
+          status: BailoutStatus.APPROVED_CHIEF,
         },
       });
 
@@ -447,7 +452,7 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_L1) {
+      if (bailout.status !== BailoutStatus.APPROVED_CHIEF) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Chief terlebih dahulu",
@@ -457,7 +462,7 @@ export const bailoutRouter = createTRPCRouter({
       const updated = await ctx.db.bailout.update({
         where: { id: input.id },
         data: {
-          status: BailoutStatus.APPROVED_L2,
+          status: BailoutStatus.APPROVED_DIRECTOR,
         },
       });
 
@@ -627,7 +632,7 @@ export const bailoutRouter = createTRPCRouter({
 
       const rejectableStatuses: BailoutStatus[] = [
         BailoutStatus.SUBMITTED,
-        BailoutStatus.APPROVED_L1,
+        BailoutStatus.APPROVED_CHIEF,
       ];
 
       if (!rejectableStatuses.includes(bailout.status)) {
@@ -689,7 +694,8 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         disbursementRef: z.string().optional(),
-      }),
+        storageUrl: z.string().url().optional(),
+      })
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -711,7 +717,7 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_L2) {
+      if (bailout.status !== BailoutStatus.APPROVED_DIRECTOR) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Director sebelum dicairkan",
@@ -724,6 +730,8 @@ export const bailoutRouter = createTRPCRouter({
           status: BailoutStatus.DISBURSED,
           disbursedAt: new Date(),
           disbursementRef: input.disbursementRef,
+          storageUrl: input.storageUrl,
+          financeId: ctx.session.user.id,
         },
       });
 
@@ -745,10 +753,11 @@ export const bailoutRouter = createTRPCRouter({
     .input(z.object({}))
     .output(z.any())
     .query(async ({ ctx }) => {
+      const role = ctx.session.user.role;
       let statusFilter: BailoutStatus;
-      if (userHasAnyRole(ctx.session.user, DIRECTOR_ROLES)) {
-        statusFilter = BailoutStatus.APPROVED_L1;
-      } else if (userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
+      if (DIRECTOR_ROLES.includes(role)) {
+        statusFilter = BailoutStatus.APPROVED_CHIEF;
+      } else if (SALES_CHIEF_ROLES.includes(role)) {
         statusFilter = BailoutStatus.SUBMITTED;
       } else {
         return { bailouts: [] };

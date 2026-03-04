@@ -32,6 +32,8 @@ export interface BailoutItemData {
   // Meal
   mealDate?: string;
   mealLocation?: string;
+  // Finance assignment
+  financeId?: string;
 }
 
 export interface TravelRequestFormData {
@@ -93,12 +95,20 @@ function BailoutItemForm({
   onChange,
   onRemove,
   errors,
+  financeUsers,
+  sameAsAbove,
+  onToggleSameAsAbove,
+  prevFinanceId,
 }: {
   item: BailoutItemData;
   index: number;
   onChange: (i: number, patch: Partial<BailoutItemData>) => void;
   onRemove: (i: number) => void;
   errors: Record<string, string | undefined>;
+  financeUsers: Array<{ id: string; name: string | null; employeeId: string | null }>;
+  sameAsAbove?: boolean;
+  onToggleSameAsAbove?: (checked: boolean) => void;
+  prevFinanceId?: string;
 }) {
   const set = (patch: Partial<BailoutItemData>) => onChange(index, patch);
   const inputCls = (key: string) =>
@@ -255,6 +265,36 @@ function BailoutItemForm({
           {errors[`b${index}_amt`] && <p className="mt-1 text-xs text-red-500">{errors[`b${index}_amt`]}</p>}
         </div>
       </div>
+
+      {/* Finance Penanggung Jawab */}
+      <div className="rounded-lg border border-gray-100 bg-white p-3 space-y-2">
+        <p className="text-xs font-semibold text-gray-600">💼 Finance Penanggung Jawab</p>
+        {index > 0 && (
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
+              checked={sameAsAbove ?? false}
+              onChange={(e) => onToggleSameAsAbove?.(e.target.checked)}
+            />
+            <span className="text-xs text-gray-500">Finance sama dengan di atas</span>
+          </label>
+        )}
+        {!sameAsAbove && (
+          <select
+            className={inputCls(`b${index}_finance`)}
+            value={item.financeId ?? ""}
+            onChange={(e) => set({ financeId: e.target.value || undefined })}
+          >
+            <option value="">— Pilih Finance (opsional) —</option>
+            {financeUsers.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name ?? "—"}{f.employeeId ? ` (${f.employeeId})` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
     </div>
   );
 }
@@ -281,6 +321,14 @@ export function TravelRequestForm({
   const [activeTab, setActiveTab] = useState<"basic" | "bailout" | "peserta">("basic");
   const [participantIds, setParticipantIds] = useState<string[]>(initialData?.participantIds ?? []);
   const [pesertaSearch, setPesertaSearch] = useState("");
+  const [sameFinanceFlags, setSameFinanceFlags] = useState<boolean[]>(() => {
+    const bailouts = initialData?.bailouts ?? [];
+    return bailouts.map((b, i) => {
+      if (i === 0) return false;
+      const prev = bailouts[i - 1];
+      return !!(b.financeId && prev?.financeId && b.financeId === prev.financeId);
+    });
+  });
 
   const isSales = formData.travelType === "SALES";
 
@@ -298,22 +346,43 @@ export function TravelRequestForm({
   const { data: rawActiveUsers } = api.user.getActiveUsers.useQuery({ search: pesertaSearch || undefined });
   const activeUsers = (rawActiveUsers as Array<{ id: string; name: string; email: string; employeeId: string; role: string; department?: { id: string; name: string } | null }> | undefined) ?? [];
 
+  // Fetch Finance users for bailout assignment (static, no search)
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const { data: rawAllUsers } = api.user.getActiveUsers.useQuery({});
+  const financeUsers = ((rawAllUsers as Array<{ id: string; name: string | null; email: string; employeeId: string | null; role: string }> | undefined) ?? [])
+    .filter((u) => u.role === "FINANCE");
+
+  // Compute effective financeId for item i (walks up the sameFinanceFlags chain)
+  const getEffectiveFinanceId = (i: number): string | undefined => {
+    if (i < 0) return undefined;
+    if (i > 0 && (sameFinanceFlags[i] ?? false)) return getEffectiveFinanceId(i - 1);
+    return formData.bailouts?.[i]?.financeId;
+  };
+
   const setField = (field: keyof TravelRequestFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
-  const addBailout = (category: BailoutCategory = "OTHER") =>
+  const addBailout = (category: BailoutCategory = "OTHER") => {
     setFormData((prev) => ({ ...prev, bailouts: [...(prev.bailouts ?? []), DEFAULT_BAILOUT(category)] }));
+    setSameFinanceFlags((prev) => [...prev, false]);
+  };
 
-  const removeBailout = (i: number) =>
+  const removeBailout = (i: number) => {
     setFormData((prev) => ({ ...prev, bailouts: prev.bailouts?.filter((_, idx) => idx !== i) }));
+    setSameFinanceFlags((prev) => prev.filter((_, idx) => idx !== i));
+  };
 
   const updateBailout = (i: number, patch: Partial<BailoutItemData>) =>
     setFormData((prev) => ({
       ...prev,
       bailouts: prev.bailouts?.map((b, idx) => (idx === i ? { ...b, ...patch } : b)),
     }));
+
+  const toggleSameFinance = (i: number, checked: boolean) => {
+    setSameFinanceFlags((prev) => prev.map((f, idx) => (idx === i ? checked : f)));
+  };
 
   const toggleParticipant = (userId: string) => {
     setParticipantIds((prev) =>
@@ -365,7 +434,9 @@ export function TravelRequestForm({
     onSubmit({
       ...formData,
       projectId: formData.projectId ?? undefined,
-      bailouts: formData.bailouts?.filter((b) => b.description && b.amount > 0),
+      bailouts: formData.bailouts
+        ?.filter((b) => b.description && b.amount > 0)
+        .map((b, i) => ({ ...b, financeId: getEffectiveFinanceId(i) })),
       participantIds,
     });
   };
@@ -493,7 +564,18 @@ export function TravelRequestForm({
           )}
 
           {formData.bailouts?.map((b, i) => (
-            <BailoutItemForm key={i} item={b} index={i} onChange={updateBailout} onRemove={removeBailout} errors={errors} />
+            <BailoutItemForm
+              key={i}
+              item={b}
+              index={i}
+              onChange={updateBailout}
+              onRemove={removeBailout}
+              errors={errors}
+              financeUsers={financeUsers}
+              sameAsAbove={sameFinanceFlags[i] ?? false}
+              onToggleSameAsAbove={(checked) => toggleSameFinance(i, checked)}
+              prevFinanceId={i > 0 ? getEffectiveFinanceId(i - 1) : undefined}
+            />
           ))}
 
           <div className="grid grid-cols-2 gap-2">

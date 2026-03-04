@@ -142,7 +142,13 @@ export const travelRequestRouter = createTRPCRouter({
               claims: true,
             },
           },
-          bailouts: true,
+          bailouts: {
+            include: {
+              finance: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
           project: {
             select: {
               id: true,
@@ -521,37 +527,33 @@ export const travelRequestRouter = createTRPCRouter({
           .transform((v) => (v === "" ? undefined : v)),
         participantIds: z.array(z.string()).optional(),
         // Bailout saat pengajuan awal (sudah berisi kategori + field spesifik)
-        bailouts: z
-          .array(
-            z.object({
-              category: z
-                .enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"])
-                .default("OTHER"),
-              description: z.string().min(10),
-              amount: z.number().positive(),
-              // Transport
-              transportMode: z.string().optional(),
-              carrier: z.string().optional(),
-              departureFrom: z.string().optional(),
-              arrivalTo: z.string().optional(),
-              departureAt: z.coerce.date().optional(),
-              arrivalAt: z.coerce.date().optional(),
-              flightNumber: z.string().optional(),
-              seatClass: z.string().optional(),
-              bookingRef: z.string().optional(),
-              // Hotel
-              hotelName: z.string().optional(),
-              hotelAddress: z.string().optional(),
-              checkIn: z.coerce.date().optional(),
-              checkOut: z.coerce.date().optional(),
-              roomType: z.string().optional(),
-              // Meal
-              mealDate: z.coerce.date().optional(),
-              mealLocation: z.string().optional(),
-            }),
-          )
-          .optional(),
-      }),
+        bailouts: z.array(z.object({
+          category: z.enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"]).default("OTHER"),
+          description: z.string().min(10),
+          amount: z.number().positive(),
+          // Transport
+          transportMode: z.string().optional(),
+          carrier: z.string().optional(),
+          departureFrom: z.string().optional(),
+          arrivalTo: z.string().optional(),
+          departureAt: z.coerce.date().optional(),
+          arrivalAt: z.coerce.date().optional(),
+          flightNumber: z.string().optional(),
+          seatClass: z.string().optional(),
+          bookingRef: z.string().optional(),
+          // Hotel
+          hotelName: z.string().optional(),
+          hotelAddress: z.string().optional(),
+          checkIn: z.coerce.date().optional(),
+          checkOut: z.coerce.date().optional(),
+          roomType: z.string().optional(),
+          // Meal
+          mealDate: z.coerce.date().optional(),
+          mealLocation: z.string().optional(),
+          // Finance assignment
+          financeId: z.string().optional(),
+        })).optional(),
+      })
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -589,10 +591,15 @@ export const travelRequestRouter = createTRPCRouter({
       });
       const requestNumber = `TR-${year}-${String(count + 1).padStart(5, "0")}`;
 
-      // Prepare bailout number counter
-      let bailoutCount = await ctx.db.bailout.count({
+      // Prepare bailout number counter — use max existing to avoid conflicts
+      const _lastBailoutCreate = await ctx.db.bailout.findFirst({
         where: { bailoutNumber: { startsWith: `BLT-${year}` } },
+        orderBy: { bailoutNumber: "desc" },
+        select: { bailoutNumber: true },
       });
+      let bailoutSeq = _lastBailoutCreate
+        ? parseInt(_lastBailoutCreate.bailoutNumber.split("-")[2] ?? "0", 10)
+        : 0;
 
       // Create request with nested bailout entries and participants
       const request = await ctx.db.travelRequest.create({
@@ -606,16 +613,10 @@ export const travelRequestRouter = createTRPCRouter({
           bailouts: bailouts
             ? {
                 create: bailouts.map((b) => {
-                  bailoutCount++;
-                  const {
-                    category,
-                    description,
-                    amount,
-                    transportMode,
-                    ...rest
-                  } = b;
+                  bailoutSeq++;
+                  const { category, description, amount, transportMode, ...rest } = b;
                   return {
-                    bailoutNumber: `BLT-${year}-${String(bailoutCount).padStart(5, "0")}`,
+                    bailoutNumber: `BLT-${year}-${String(bailoutSeq).padStart(5, "0")}`,
                     requesterId: ctx.session.user.id,
                     category,
                     description,
@@ -684,11 +685,33 @@ export const travelRequestRouter = createTRPCRouter({
           .optional()
           .transform((v) => (v === "" ? undefined : v)),
         participantIds: z.array(z.string()).optional(),
-      }),
+        bailouts: z.array(z.object({
+          category: z.enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"]).default("OTHER"),
+          description: z.string().min(10),
+          amount: z.number().positive(),
+          transportMode: z.string().optional(),
+          carrier: z.string().optional(),
+          departureFrom: z.string().optional(),
+          arrivalTo: z.string().optional(),
+          departureAt: z.coerce.date().optional(),
+          arrivalAt: z.coerce.date().optional(),
+          flightNumber: z.string().optional(),
+          seatClass: z.string().optional(),
+          bookingRef: z.string().optional(),
+          hotelName: z.string().optional(),
+          hotelAddress: z.string().optional(),
+          checkIn: z.coerce.date().optional(),
+          checkOut: z.coerce.date().optional(),
+          roomType: z.string().optional(),
+          mealDate: z.coerce.date().optional(),
+          mealLocation: z.string().optional(),
+          financeId: z.string().optional(),
+        })).optional(),
+      })
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const { id, participantIds, ...updateData } = input;
+      const { id, participantIds, bailouts, ...updateData } = input;
 
       const existing = await ctx.db.travelRequest.findUnique({
         where: { id },
@@ -739,12 +762,47 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
+      // Update bailouts if provided: delete existing DRAFT ones and recreate
+      if (bailouts !== undefined) {
+        await ctx.db.bailout.deleteMany({
+          where: { travelRequestId: id, status: "DRAFT" },
+        });
+      }
+
+      // Prepare bailout number counter — use max existing to avoid conflicts after deletion
+      const year = new Date().getFullYear();
+      const _lastBailoutUpdate = await ctx.db.bailout.findFirst({
+        where: { bailoutNumber: { startsWith: `BLT-${year}` } },
+        orderBy: { bailoutNumber: "desc" },
+        select: { bailoutNumber: true },
+      });
+      let bailoutSeq = _lastBailoutUpdate
+        ? parseInt(_lastBailoutUpdate.bailoutNumber.split("-")[2] ?? "0", 10)
+        : 0;
+
       const updated = await ctx.db.travelRequest.update({
         where: { id },
         data: {
           ...updateData,
           participants: participantIds
             ? { create: participantIds.map((userId) => ({ userId })) }
+            : undefined,
+          bailouts: bailouts
+            ? {
+                create: bailouts.map((b) => {
+                  bailoutSeq++;
+                  const { category, description, amount, transportMode, ...rest } = b;
+                  return {
+                    bailoutNumber: `BLT-${year}-${String(bailoutSeq).padStart(5, "0")}`,
+                    requesterId: ctx.session.user.id,
+                    category,
+                    description,
+                    amount,
+                    transportMode: transportMode as TransportMode | undefined,
+                    ...rest,
+                  };
+                }),
+              }
             : undefined,
         },
         include: {

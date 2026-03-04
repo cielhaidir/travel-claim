@@ -234,8 +234,9 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
+      // File may be attached at any point from APPROVED_DIRECTOR onward (ready for disbursement)
       const attachableStatuses: BailoutStatus[] = [
-        BailoutStatus.APPROVED_L2,
+        BailoutStatus.APPROVED_DIRECTOR,
         BailoutStatus.DISBURSED,
       ];
 
@@ -243,7 +244,7 @@ export const financeRouter = createTRPCRouter({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "Files can only be attached to bailouts that are fully approved (APPROVED_L2) or already disbursed (DISBURSED)",
+            "Files can only be attached to bailouts that are fully approved (APPROVED_DIRECTOR) or already disbursed (DISBURSED)",
         });
       }
 
@@ -338,11 +339,10 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      // Only fully-approved bailouts can be processed (APPROVED_L2 or DISBURSED)
+      // Only fully-approved bailouts can be processed (APPROVED_DIRECTOR or DISBURSED)
       const processableStatuses: BailoutStatus[] = [
-        BailoutStatus.APPROVED_L2,
+        BailoutStatus.APPROVED_DIRECTOR,
         BailoutStatus.DISBURSED,
-        BailoutStatus.APPROVED,
       ];
       if (!processableStatuses.includes(bailout.status)) {
         throw new TRPCError({
@@ -352,18 +352,12 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const [coa, balanceAccount] = await Promise.all([
-        ctx.db.chartOfAccount.findUnique({
-          where: { id: input.chartOfAccountId, isActive: true },
-        }),
-        ctx.db.balanceAccount.findUnique({
-          where: {
-            id: input.balanceAccountId,
-            isActive: true,
-            deletedAt: null,
-          },
-        }),
-      ]);
+      const coa = await ctx.db.chartOfAccount.findUnique({
+        where: { id: input.chartOfAccountId, isActive: true },
+      });
+      const balanceAccount = await ctx.db.balanceAccount.findUnique({
+        where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+      });
 
       if (!coa) {
         throw new TRPCError({
@@ -519,18 +513,12 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const [coa, balanceAccount] = await Promise.all([
-        ctx.db.chartOfAccount.findUnique({
-          where: { id: input.chartOfAccountId, isActive: true },
-        }),
-        ctx.db.balanceAccount.findUnique({
-          where: {
-            id: input.balanceAccountId,
-            isActive: true,
-            deletedAt: null,
-          },
-        }),
-      ]);
+      const coa = await ctx.db.chartOfAccount.findUnique({
+        where: { id: input.chartOfAccountId, isActive: true },
+      });
+      const balanceAccount = await ctx.db.balanceAccount.findUnique({
+        where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+      });
 
       if (!coa) {
         throw new TRPCError({
