@@ -27,12 +27,12 @@ const navigationItems: NavItem[] = [
     icon: "📁",
     roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
   },
-  // {
-  //   label: "Bailout Approval",
-  //   href: "/bailout",
-  //   icon: "💼",
-  //   roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
-  // },
+  {
+    label: "Bailout Approval",
+    href: "/bailout",
+    icon: "💼",
+    roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
+  },
   {
     label: "Claims",
     href: "/claims",

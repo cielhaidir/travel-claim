@@ -47,11 +47,20 @@ interface TravelRequest {
     carrier?: string | null;
     departureFrom?: string | null;
     arrivalTo?: string | null;
+    departureAt?: string | Date | null;
+    arrivalAt?: string | Date | null;
+    flightNumber?: string | null;
+    seatClass?: string | null;
+    bookingRef?: string | null;
     hotelName?: string | null;
+    hotelAddress?: string | null;
     checkIn?: string | Date | null;
     checkOut?: string | Date | null;
+    roomType?: string | null;
     mealDate?: string | Date | null;
     mealLocation?: string | null;
+    financeId?: string | null;
+    finance?: { id: string; name: string | null; email: string | null } | null;
   }>;
   participants: Array<{ userId: string; user: { id: string; name: string | null } }>;
   approvals: Array<{
@@ -173,6 +182,7 @@ function PengajuanTab() {
         roomType: b.roomType ?? undefined,
         mealDate: b.mealDate ? new Date(b.mealDate) : undefined,
         mealLocation: b.mealLocation ?? undefined,
+        financeId: b.financeId ?? undefined,
       })),
     });
   };
@@ -188,6 +198,29 @@ function PengajuanTab() {
       startDate: new Date(formData.startDate),
       endDate: new Date(formData.endDate),
       projectId: formData.projectId ?? undefined,
+      participantIds: formData.participantIds ?? [],
+      bailouts: formData.bailouts?.filter((b) => b.description?.trim().length >= 5 && b.amount > 0).map((b) => ({
+        description: b.description.trim(),
+        amount: b.amount,
+        category: b.category,
+        transportMode: b.transportMode ?? undefined,
+        carrier: b.carrier ?? undefined,
+        departureFrom: b.departureFrom ?? undefined,
+        arrivalTo: b.arrivalTo ?? undefined,
+        departureAt: b.departureAt ? new Date(b.departureAt) : undefined,
+        arrivalAt: b.arrivalAt ? new Date(b.arrivalAt) : undefined,
+        flightNumber: b.flightNumber ?? undefined,
+        seatClass: b.seatClass ?? undefined,
+        bookingRef: b.bookingRef ?? undefined,
+        hotelName: b.hotelName ?? undefined,
+        hotelAddress: b.hotelAddress ?? undefined,
+        checkIn: b.checkIn ? new Date(b.checkIn) : undefined,
+        checkOut: b.checkOut ? new Date(b.checkOut) : undefined,
+        roomType: b.roomType ?? undefined,
+        mealDate: b.mealDate ? new Date(b.mealDate) : undefined,
+        mealLocation: b.mealLocation ?? undefined,
+        financeId: b.financeId ?? undefined,
+      })),
     });
   };
 
@@ -348,6 +381,7 @@ function PengajuanTab() {
               startDate: toDateInput(editingRequest.startDate),
               endDate: toDateInput(editingRequest.endDate),
               projectId: editingRequest.project?.id ?? undefined,
+              participantIds: editingRequest.participants.map((p) => p.userId),
               bailouts: editingRequest.bailouts?.map((b) => ({
                 category: (b.category as "TRANSPORT" | "HOTEL" | "MEAL" | "OTHER") ?? "OTHER",
                 description: b.description,
@@ -356,11 +390,19 @@ function PengajuanTab() {
                 carrier: b.carrier ?? undefined,
                 departureFrom: b.departureFrom ?? undefined,
                 arrivalTo: b.arrivalTo ?? undefined,
+                departureAt: toDateInput(b.departureAt),
+                arrivalAt: toDateInput(b.arrivalAt),
+                flightNumber: b.flightNumber ?? undefined,
+                seatClass: b.seatClass ?? undefined,
+                bookingRef: b.bookingRef ?? undefined,
                 hotelName: b.hotelName ?? undefined,
+                hotelAddress: b.hotelAddress ?? undefined,
                 checkIn: toDateInput(b.checkIn),
                 checkOut: toDateInput(b.checkOut),
+                roomType: b.roomType ?? undefined,
                 mealDate: toDateInput(b.mealDate),
                 mealLocation: b.mealLocation ?? undefined,
+                financeId: b.financeId ?? undefined,
               })) ?? [],
             }}
             isLoading={updateMutation.isPending}
@@ -539,18 +581,20 @@ function TravelRequestDetail({
             <p className="text-xs font-medium text-gray-500 mb-1">Tujuan Perjalanan</p>
             <p className="text-sm text-gray-900 whitespace-pre-wrap">{request.purpose}</p>
           </div>
-          {request.participants.length > 0 && (
-            <div>
-              <p className="mb-2 text-sm font-semibold text-gray-700">Peserta</p>
+          <div>
+            <p className="mb-2 text-sm font-semibold text-gray-700">👥 Peserta (Assignee)</p>
+            {request.participants.length === 0 ? (
+              <p className="text-sm text-gray-400 italic">Tidak ada peserta tambahan</p>
+            ) : (
               <div className="flex flex-wrap gap-2">
                 {request.participants.map((p) => (
-                  <span key={p.userId} className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700">
-                    {p.user.name ?? p.userId}
+                  <span key={p.userId} className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+                    👤 {p.user.name ?? p.userId}
                   </span>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
           {request.project && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
               <p className="mb-3 text-sm font-semibold text-blue-800">📊 Informasi Project Sales</p>
@@ -608,6 +652,16 @@ function TravelRequestDetail({
                   {cat === "MEAL" && b.mealDate && (
                     <p className="text-xs text-green-700">{formatDate(b.mealDate)}{b.mealLocation ? ` — ${b.mealLocation}` : ""}</p>
                   )}
+                  <div className="border-t border-gray-200 pt-2 mt-1">
+                    {b.finance ? (
+                      <p className="text-xs text-gray-600">
+                        💳 <span className="font-medium text-gray-700">Finance:</span>{" "}
+                        <span className="text-indigo-700">{b.finance.name ?? b.finance.email ?? b.finance.id}</span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-400 italic">💳 Finance belum ditugaskan</p>
+                    )}
+                  </div>
                 </div>
               );
             })

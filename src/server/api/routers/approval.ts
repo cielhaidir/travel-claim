@@ -147,9 +147,10 @@ export const approvalRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ApprovalWhereInput = {
-        approverId: ctx.session.user.id,
-      };
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      const where: Prisma.ApprovalWhereInput = isAdmin
+        ? {} // ADMIN sees all approvals
+        : { approverId: ctx.session.user.id };
 
       if (input?.status) {
         where.status = input.status;
@@ -246,9 +247,10 @@ export const approvalRouter = createTRPCRouter({
     .input(z.object({}))
     .output(z.number())
     .query(async ({ ctx }) => {
+    const isAdmin = ctx.session.user.role === "ADMIN";
     return ctx.db.approval.count({
       where: {
-        approverId: ctx.session.user.id,
+        ...(isAdmin ? {} : { approverId: ctx.session.user.id }),
         status: ApprovalStatus.PENDING,
       },
     });
@@ -601,8 +603,9 @@ export const approvalRouter = createTRPCRouter({
       // ── 2. Phone ownership verification (incoming flow) ─────────────────────
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
-      // ── 3. Session-based authorisation (existing check – unchanged) ─────────
-      if (approval.approverId !== ctx.session.user.id) {
+      // ── 3. Session-based authorisation ─────────────────────────────────────
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to approve this request",
@@ -809,7 +812,8 @@ export const approvalRouter = createTRPCRouter({
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to reject this request",
@@ -930,7 +934,8 @@ export const approvalRouter = createTRPCRouter({
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to request revision for this request",
@@ -1067,7 +1072,8 @@ export const approvalRouter = createTRPCRouter({
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to approve this claim",
@@ -1245,7 +1251,8 @@ export const approvalRouter = createTRPCRouter({
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to reject this claim",
@@ -1367,7 +1374,8 @@ export const approvalRouter = createTRPCRouter({
       verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      if (!isAdmin && approval.approverId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to request revision for this claim",

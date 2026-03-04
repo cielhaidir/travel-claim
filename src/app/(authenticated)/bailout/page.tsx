@@ -26,6 +26,7 @@ interface Bailout {
   rejectionReason: string | null;
   travelRequest: { id: string; requestNumber: string; destination: string };
   requester: { id: string; name: string | null; employeeId: string | null };
+  finance?: { id: string; name: string | null; email: string | null } | null;
   chiefApprover?: { id: string; name: string | null } | null;
   directorApprover?: { id: string; name: string | null } | null;
 }
@@ -65,6 +66,9 @@ function ActionModal({
 }) {
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const [showDisburse, setShowDisburse] = useState(false);
+  const [disbursementRef, setDisbursementRef] = useState("");
+  const [storageUrl, setStorageUrl] = useState("");
 
   const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
   const directorRoles = ["DIRECTOR", "ADMIN"];
@@ -97,6 +101,7 @@ function ActionModal({
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div><p className="text-xs text-gray-400">Pemohon</p><p className="font-medium">{bailout.requester.name ?? "—"}</p></div>
           <div><p className="text-xs text-gray-400">Jumlah</p><p className="font-bold text-gray-900">{currency(bailout.amount)}</p></div>
+          <div><p className="text-xs text-gray-400">Finance</p><p className="font-medium text-blue-700">{bailout.finance?.name ?? <span className="text-gray-400">—</span>}</p></div>
           <div className="col-span-2"><p className="text-xs text-gray-400">Deskripsi</p><p className="text-gray-700">{bailout.description}</p></div>
         </div>
         {bailout.status === "REJECTED" && bailout.rejectionReason && (
@@ -128,6 +133,44 @@ function ActionModal({
         </div>
       )}
 
+      {/* Disburse Form */}
+      {showDisburse && (
+        <div className="space-y-2 rounded-lg border border-green-200 bg-green-50 p-3">
+          <p className="text-sm font-medium text-green-700">Konfirmasi Pencairan Dana</p>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">No. Referensi Transfer (opsional)</label>
+            <input
+              type="text"
+              className="w-full rounded border border-green-300 px-3 py-2 text-sm bg-white focus:outline-none"
+              placeholder="Contoh: TRF-20260304-001"
+              value={disbursementRef}
+              onChange={(e) => setDisbursementRef(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">URL Bukti Transfer (opsional)</label>
+            <input
+              type="url"
+              className="w-full rounded border border-green-300 px-3 py-2 text-sm bg-white focus:outline-none"
+              placeholder="https://storage.example.com/bukti-transfer.jpg"
+              value={storageUrl}
+              onChange={(e) => setStorageUrl(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowDisburse(false)} className="text-xs text-gray-500">Batal</button>
+            <Button isLoading={disburse.isPending}
+              onClick={() => disburse.mutate({
+                id: bailout.id,
+                disbursementRef: disbursementRef || undefined,
+                storageUrl: storageUrl || undefined,
+              })}>
+              ✓ Konfirmasi Cairkan
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
         <Button variant="secondary" onClick={onClose}>Tutup</Button>
@@ -147,8 +190,8 @@ function ActionModal({
             ✓ Setujui (Direktur)
           </Button>
         )}
-        {financeRoles.includes(userRole) && bailout.status === "APPROVED_DIRECTOR" && (
-          <Button isLoading={disburse.isPending} onClick={() => disburse.mutate({ id: bailout.id })}>
+        {financeRoles.includes(userRole) && bailout.status === "APPROVED_DIRECTOR" && !showDisburse && (
+          <Button isLoading={disburse.isPending} onClick={() => setShowDisburse(true)}>
             💰 Cairkan Dana
           </Button>
         )}
@@ -246,6 +289,7 @@ export default function BailoutApprovalPage() {
                 <th className="px-4 py-3">Pemohon</th>
                 <th className="px-4 py-3">Deskripsi</th>
                 <th className="px-4 py-3 text-right">Jumlah</th>
+                <th className="px-4 py-3 text-center">Finance</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-center">Tanggal</th>
                 <th className="px-4 py-3 text-right">Aksi</th>
@@ -264,6 +308,15 @@ export default function BailoutApprovalPage() {
                     <p className="text-xs text-gray-600 truncate max-w-[180px]">{b.description}</p>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-xs">{currency(b.amount)}</td>
+                  <td className="px-4 py-3 text-center">
+                    {b.finance ? (
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">
+                        {b.finance.name ?? "—"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[b.status]}`}>
                       {STATUS_LABELS[b.status]}

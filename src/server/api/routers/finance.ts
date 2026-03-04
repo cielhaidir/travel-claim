@@ -198,9 +198,9 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      // File may be attached at any point from APPROVED_L2 onward (ready for disbursement)
+      // File may be attached at any point from APPROVED_DIRECTOR onward (ready for disbursement)
       const attachableStatuses: BailoutStatus[] = [
-        BailoutStatus.APPROVED_L2,
+        BailoutStatus.APPROVED_DIRECTOR,
         BailoutStatus.DISBURSED,
       ];
 
@@ -208,7 +208,7 @@ export const financeRouter = createTRPCRouter({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "Files can only be attached to bailouts that are fully approved (APPROVED_L2) or already disbursed (DISBURSED)",
+            "Files can only be attached to bailouts that are fully approved (APPROVED_DIRECTOR) or already disbursed (DISBURSED)",
         });
       }
 
