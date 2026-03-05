@@ -119,26 +119,1175 @@ function verifyCallerPhone(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared Prisma include for full approval detail (used by get actions)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const fullApprovalInclude = {
+  travelRequest: {
+    include: {
+      requester: {
+        include: {
+          department: true,
+          supervisor: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+      },
+      participants: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+      approvals: {
+        include: {
+          approver: { select: { id: true, name: true, role: true } },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
+  },
+  claim: {
+    include: {
+      submitter: { include: { department: true } },
+      travelRequest: {
+        include: {
+          requester: { select: { id: true, name: true, email: true } },
+        },
+      },
+      attachments: true,
+      approvals: {
+        include: {
+          approver: { select: { id: true, name: true, role: true } },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
+  },
+  approver: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      phoneNumber: true,
+    },
+  },
+} satisfies Prisma.ApprovalInclude;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Router
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const approvalRouter = createTRPCRouter({
-  // Get all approvals for current user
-  getMyApprovals: supervisorProcedure
+  // ───────────────────────────────────────────────────────────────────────────
+  // UNIFIED MCP TOOL
+  // Single entry-point for all approval actions consumed by the MCP / WhatsApp
+  // agent. The `action` field is the discriminator.
+  //
+  //   action: "list"          → list my approvals (paginated)
+  //   action: "pending_count" → count my pending approvals
+  //   action: "get"           → fetch one approval by id or approvalNumber
+  //   action: "approve"       → approve (TravelRequest, Claim, or Bailout)
+  //   action: "reject"        → reject  (TravelRequest, Claim, or Bailout)
+  //   action: "revision"      → request revision (TravelRequest, Claim, or Bailout)
+  //
+  // Entity type is auto-detected from the linked record; the caller does NOT
+  // need to declare it separately.
+  // ───────────────────────────────────────────────────────────────────────────
+  actOnApproval: supervisorProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/approvals/my',
+        method: "POST",
+        path: "/approvals/act",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Get my approvals',
+        tags: ["Approvals"],
+        summary: "Unified approval action tool",
       },
       mcp: {
         enabled: true,
-        name: "list_my_approvals",
-        description: "List all pending and historical approvals assigned to the current supervisor/manager",
+        name: "act_on_approval",
+        description: [
+          "Unified approval action tool. Use the `action` field to choose what to do:",
+          "",
+          "• **list**          — List all pending and historical approvals assigned to you.",
+          "  Optional filters: `status`, `entityType` ('TravelRequest' | 'Claim'), `limit`, `cursor`.",
+          "",
+          "• **pending_count** — Get the number of approvals waiting for your action.",
+          "",
+          "• **get**           — Fetch full detail for one approval.",
+          "  Provide `approvalId` (CUID) OR `approvalNumber` (e.g. 'APR-2026-00001').",
+          "  For incoming WhatsApp flows also supply `phone` to verify caller identity.",
+          "",
+          "• **approve**       — Approve the approval step (TravelRequest, Claim, or Bailout — auto-detected).",
+          "  Provide `approvalId` or `approvalNumber`. Optional: `comments`, `callerPhone`.",
+          "",
+          "• **reject**        — Reject the approval step.",
+          "  Provide `approvalId` or `approvalNumber` + `rejectionReason` (min 10 chars). Optional: `callerPhone`.",
+          "",
+          "• **revision**      — Request a revision, resetting all approval steps to PENDING.",
+          "  Provide `approvalId` or `approvalNumber` + `comments` (min 10 chars). Optional: `callerPhone`.",
+        ].join("\n"),
       },
     })
+    .input(
+      z.object({
+        // ── Discriminator ──────────────────────────────────────────────────
+        action: z.enum(["list", "pending_count", "get", "approve", "reject", "revision"]),
+
+        // ── Identifier (required for get / approve / reject / revision) ───
+        approvalId: z.string().optional(),
+        approvalNumber: z.string().optional(),
+
+        // ── get: phone-based identity check for WhatsApp flows ────────────
+        phone: z.string().optional(),
+
+        // ── approve / revision: optional free-text comment ────────────────
+        comments: z.string().optional(),
+
+        // ── reject / revision (when used as rejection): mandatory reason ──
+        rejectionReason: z.string().optional(),
+
+        // ── WhatsApp caller identity for approve / reject / revision ──────
+        callerPhone: z.string().optional(),
+
+        // ── list: optional filters ────────────────────────────────────────
+        status: z.nativeEnum(ApprovalStatus).optional(),
+        entityType: z.enum(["TravelRequest", "Claim"]).optional(),
+        limit: z.number().min(1).max(100).optional(),
+        cursor: z.string().optional(),
+      })
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: list
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "list") {
+        const where: Prisma.ApprovalWhereInput = {
+          approverId: ctx.session.user.id,
+        };
+
+        if (input.status) where.status = input.status;
+        if (input.entityType === "TravelRequest") {
+          where.travelRequestId = { not: null };
+        } else if (input.entityType === "Claim") {
+          where.claimId = { not: null };
+        }
+
+        const approvals = await ctx.db.approval.findMany({
+          take: input.limit ? input.limit + 1 : 51,
+          cursor: input.cursor ? { id: input.cursor } : undefined,
+          where,
+          include: {
+            travelRequest: {
+              include: {
+                requester: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    employeeId: true,
+                    department: { select: { name: true } },
+                  },
+                },
+              },
+            },
+            claim: {
+              include: {
+                submitter: {
+                  select: { id: true, name: true, email: true, employeeId: true },
+                },
+                travelRequest: {
+                  select: { requestNumber: true, destination: true },
+                },
+              },
+            },
+            approver: {
+              select: { id: true, name: true, role: true },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        let nextCursor: string | undefined = undefined;
+        const limit = input.limit ?? 50;
+        if (approvals.length > limit) {
+          const nextItem = approvals.pop();
+          nextCursor = nextItem!.id;
+        }
+
+        return { approvals, nextCursor };
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: pending_count
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "pending_count") {
+        return ctx.db.approval.count({
+          where: {
+            approverId: ctx.session.user.id,
+            status: ApprovalStatus.PENDING,
+          },
+        });
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: get
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "get") {
+        if (input.approvalNumber && !input.approvalId) {
+          // Lookup by approvalNumber with optional phone verification (WhatsApp flow)
+          const found = await ctx.db.approval.findUnique({
+            where: { approvalNumber: input.approvalNumber },
+            include: fullApprovalInclude,
+          });
+
+          if (!found) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: `Approval with approvalNumber "${input.approvalNumber}" not found`,
+            });
+          }
+
+          // Phone-based identity check when phone is supplied
+          if (input.phone) {
+            const approverPhone = (found.approver as { phoneNumber?: string | null } | null)?.phoneNumber ?? "";
+            if (!approverPhone) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "The approver for this approval has no phone number registered",
+              });
+            }
+            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
+            if (normalize(input.phone) !== normalize(approverPhone)) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "The supplied phone number does not match the approver on record",
+              });
+            }
+          }
+
+          return found;
+        } else {
+          // Lookup by id (or approvalNumber fallback) — session-based access check
+          const id = input.approvalId;
+          if (!id && !input.approvalNumber) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Provide approvalId or approvalNumber for action=get",
+            });
+          }
+
+          const where: Prisma.ApprovalWhereUniqueInput = id
+            ? { id }
+            : { approvalNumber: input.approvalNumber! };
+
+          const found = await ctx.db.approval.findUnique({
+            where,
+            include: fullApprovalInclude,
+          });
+
+          if (!found) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+          }
+
+          // Session-based access check
+          const isApprover = found.approverId === ctx.session.user.id;
+          const isRequester =
+            (found.travelRequest as { requesterId?: string } | null)?.requesterId === ctx.session.user.id ||
+            (found.claim as { submitterId?: string } | null)?.submitterId === ctx.session.user.id;
+          const canView = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
+            ctx.session.user.role,
+          );
+
+          if (!isApprover && !isRequester && !canView) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Not authorized to view this approval",
+            });
+          }
+
+          return found;
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTIONS: approve / reject / revision
+      // All three share identifier resolution + phone check + auth guard.
+      // ══════════════════════════════════════════════════════════════════════
+
+      if (!input.approvalId && !input.approvalNumber) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Either approvalId or approvalNumber must be provided",
+        });
+      }
+
+      // ── Resolve base record with all linked entities ───────────────────────
+      const approval = await resolveApprovalBase(
+        ctx.db,
+        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
+        {
+          approver: { select: { id: true, phoneNumber: true } },
+          travelRequest: {
+            include: {
+              approvals: { orderBy: { level: "asc" } },
+            },
+          },
+          claim: {
+            include: {
+              approvals: { orderBy: { level: "asc" } },
+            },
+          },
+          bailout: {
+            include: {
+              approvals: { orderBy: { sequence: "asc" } },
+              finance: { select: { id: true, phoneNumber: true, name: true } },
+            },
+          },
+        },
+      );
+
+      // ── Detect entity type ─────────────────────────────────────────────────
+      const entityType: "TravelRequest" | "Claim" | "Bailout" =
+        approval.travelRequest
+          ? "TravelRequest"
+          : approval.claim
+          ? "Claim"
+          : approval.bailout
+          ? "Bailout"
+          : (() => {
+              throw new TRPCError({
+                code: "NOT_FOUND",
+                message: "Approval is not linked to any known entity",
+              });
+            })();
+
+      // ── Phone ownership verification (WhatsApp flow) ───────────────────────
+      verifyCallerPhone(
+        input.callerPhone,
+        (approval.approver as { phoneNumber?: string | null }).phoneNumber,
+      );
+
+      // ── Session-based authorisation ────────────────────────────────────────
+      if (approval.approverId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not authorized to act on this approval",
+        });
+      }
+
+      if (approval.status !== ApprovalStatus.PENDING) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This approval has already been processed",
+        });
+      }
+
+      const resolvedId = approval.id;
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: approve
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "approve") {
+        const updatedApproval = await ctx.db.approval.update({
+          where: { id: resolvedId },
+          data: {
+            status: ApprovalStatus.APPROVED,
+            comments: input.comments,
+            approvedAt: new Date(),
+          },
+        });
+
+        // ── TravelRequest approval chain ─────────────────────────────────────
+        if (entityType === "TravelRequest") {
+          const tr = approval.travelRequest!;
+          const allApprovals = tr.approvals as Array<{ level: ApprovalLevel; status: ApprovalStatus; id: string; sequence?: number }>;
+
+          const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level);
+          const allPreviousApproved = allApprovals
+            .filter((a) => Object.values(ApprovalLevel).indexOf(a.level) < currentLevelIndex)
+            .every((a) => a.status === ApprovalStatus.APPROVED);
+
+          if (!allPreviousApproved) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Previous level approvals must be completed first",
+            });
+          }
+
+          const pendingApprovals = allApprovals.filter(
+            (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId,
+          );
+
+          let newStatus: TravelStatus;
+          if (pendingApprovals.length === 0) {
+            newStatus = TravelStatus.APPROVED;
+          } else {
+            const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+            const seqStatusMap: Record<number, TravelStatus> = {
+              1: TravelStatus.APPROVED_L1,
+              2: TravelStatus.APPROVED_L2,
+              3: TravelStatus.APPROVED_L3,
+              4: TravelStatus.APPROVED_L4,
+              5: TravelStatus.APPROVED_L5,
+            };
+            newStatus = seqStatusMap[currentSequence] ?? TravelStatus.SUBMITTED;
+          }
+
+          await ctx.db.travelRequest.update({
+            where: { id: approval.travelRequestId as string },
+            data: { status: newStatus },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.APPROVE,
+              entityType: "TravelRequest",
+              entityId: approval.travelRequestId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          // Notifications
+          void (async () => {
+            if (newStatus === TravelStatus.APPROVED) {
+              const fullTr = await ctx.db.travelRequest.findUnique({
+                where: { id: approval.travelRequestId as string },
+                include: {
+                  requester: { select: { phoneNumber: true, name: true } },
+                  bailouts: {
+                    where: { deletedAt: null },
+                    include: {
+                      requester: { select: { name: true, email: true } },
+                      finance: { select: { phoneNumber: true, name: true } },
+                    },
+                  },
+                },
+              });
+              const phone = fullTr?.requester?.phoneNumber;
+              if (phone) {
+                await sendWhatsappPoll({
+                  phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  question:
+                    `✅ *Travel Request Disetujui Penuh*\n` +
+                    `Travel: ${fullTr!.requestNumber}\n` +
+                    `Semua level approval telah selesai.\n` +
+                    `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                  options: [`OK`],
+                  maxAnswer: 1,
+                });
+              }
+
+              if (fullTr?.bailouts && fullTr.bailouts.length > 0) {
+                const fmtDate = (d: Date | null | undefined) =>
+                  d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+                const fmtDateTime = (d: Date | null | undefined) =>
+                  d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+                for (const bailout of fullTr.bailouts) {
+                  const financePhone = bailout.finance?.phoneNumber;
+                  if (!financePhone) continue;
+
+                  let detail = "";
+                  if (bailout.category === "TRANSPORT") {
+                    detail =
+                      `Mode: ${bailout.transportMode ?? "-"}\n` +
+                      (bailout.carrier ? `Maskapai/Operator: ${bailout.carrier}\n` : "") +
+                      (bailout.flightNumber ? `No. Penerbangan: ${bailout.flightNumber}\n` : "") +
+                      (bailout.seatClass ? `Kelas: ${bailout.seatClass}\n` : "") +
+                      (bailout.bookingRef ? `Booking Ref: ${bailout.bookingRef}\n` : "") +
+                      `Dari: ${bailout.departureFrom ?? "-"} → ${bailout.arrivalTo ?? "-"}\n` +
+                      `Berangkat: ${fmtDateTime(bailout.departureAt)}\n` +
+                      `Tiba: ${fmtDateTime(bailout.arrivalAt)}\n`;
+                  } else if (bailout.category === "HOTEL") {
+                    detail =
+                      `Hotel: ${bailout.hotelName ?? "-"}\n` +
+                      (bailout.hotelAddress ? `Alamat: ${bailout.hotelAddress}\n` : "") +
+                      (bailout.roomType ? `Tipe Kamar: ${bailout.roomType}\n` : "") +
+                      `Check-in: ${fmtDate(bailout.checkIn)} — Check-out: ${fmtDate(bailout.checkOut)}\n`;
+                  } else if (bailout.category === "MEAL") {
+                    detail =
+                      `Tanggal: ${fmtDate(bailout.mealDate)}\n` +
+                      (bailout.mealLocation ? `Lokasi: ${bailout.mealLocation}\n` : "");
+                  }
+
+                  await sendWhatsappMessage({
+                    phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                    message:
+                      `📎 *Travel Request Disetujui — Perlu Upload Dokumen Bailout*\n` +
+                      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                      `Travel Request : ${fullTr.requestNumber}\n` +
+                      `Bailout No     : ${bailout.bailoutNumber}\n` +
+                      `Pemohon        : ${bailout.requester.name ?? bailout.requester.email ?? "-"}\n` +
+                      `Kategori       : ${bailout.category}\n` +
+                      `Jumlah         : Rp ${Number(bailout.amount).toLocaleString("id-ID")}\n` +
+                      `Keterangan     : ${bailout.description}\n` +
+                      (detail ? `━━━━━━━━━━━━━━━━━━━━━━\n${detail}` : "") +
+                      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                      `Silakan upload dokumen/invoice terkait bailout ini dan proses pencairan.`,
+                  });
+                }
+              }
+            } else {
+              const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const nextApprovalRow = (
+                tr.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
+              ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+
+              if (!nextApprovalRow) return;
+
+              const nextApprover = await ctx.db.user.findUnique({
+                where: { id: nextApprovalRow.approverId },
+                select: { phoneNumber: true },
+              });
+              const phone = nextApprover?.phoneNumber;
+              if (!phone) return;
+
+              const fullTr = await ctx.db.travelRequest.findUnique({
+                where: { id: approval.travelRequestId as string },
+                include: { requester: { select: { name: true, email: true } } },
+              });
+              if (!fullTr) return;
+
+              const { buildTravelRequestApprovalPoll } = await import("@/lib/utils/whatsapp");
+              await sendWhatsappPoll(
+                buildTravelRequestApprovalPoll(
+                  nextApprovalRow.approvalNumber,
+                  phone.replace(/^\+/, ""),
+                  {
+                    requestNumber: fullTr.requestNumber,
+                    requesterName: fullTr.requester.name ?? fullTr.requester.email ?? "Unknown",
+                    destination: fullTr.destination,
+                    purpose: fullTr.purpose,
+                    startDate: fullTr.startDate,
+                    endDate: fullTr.endDate,
+                  },
+                ),
+              );
+            }
+          })();
+        }
+
+        // ── Claim approval chain ─────────────────────────────────────────────
+        else if (entityType === "Claim") {
+          const cl = approval.claim!;
+          const pendingApprovals = (cl.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>).filter(
+            (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId,
+          );
+
+          const newStatus =
+            pendingApprovals.length === 0 ? ClaimStatus.APPROVED : cl.status;
+
+          await ctx.db.claim.update({
+            where: { id: approval.claimId as string },
+            data: { status: newStatus },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.APPROVE,
+              entityType: "Claim",
+              entityId: approval.claimId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          void (async () => {
+            if (newStatus === ClaimStatus.APPROVED) {
+              const fullCl = await ctx.db.claim.findUnique({
+                where: { id: approval.claimId as string },
+                include: { submitter: { select: { phoneNumber: true, name: true } } },
+              });
+              const phone = fullCl?.submitter?.phoneNumber;
+              if (phone) {
+                await sendWhatsappPoll({
+                  phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  question:
+                    `✅ *Claim Disetujui Penuh*\n` +
+                    `Claim: ${fullCl!.claimNumber}\n` +
+                    `Semua level approval telah selesai.\n` +
+                    `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                  options: [`OK`],
+                  maxAnswer: 1,
+                });
+              }
+            } else {
+              const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const nextApprovalRow = (
+                cl.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
+              ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+
+              if (!nextApprovalRow) return;
+
+              const nextApprover = await ctx.db.user.findUnique({
+                where: { id: nextApprovalRow.approverId },
+                select: { phoneNumber: true },
+              });
+              const phone = nextApprover?.phoneNumber;
+              if (!phone) return;
+
+              const fullCl = await ctx.db.claim.findUnique({
+                where: { id: approval.claimId as string },
+                include: {
+                  submitter: { select: { name: true, email: true } },
+                  travelRequest: { select: { requestNumber: true } },
+                },
+              });
+              if (!fullCl) return;
+
+              const { buildClaimApprovalPoll } = await import("@/lib/utils/whatsapp");
+              await sendWhatsappPoll(
+                buildClaimApprovalPoll(
+                  nextApprovalRow.approvalNumber,
+                  phone.replace(/^\+/, ""),
+                  {
+                    claimNumber: fullCl.claimNumber,
+                    submitterName: fullCl.submitter.name ?? fullCl.submitter.email ?? "Unknown",
+                    claimType: fullCl.claimType as string,
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+                    amount: fullCl.amount as any,
+                    description: fullCl.description,
+                    travelRequestNumber: fullCl.travelRequest?.requestNumber,
+                  },
+                ),
+              );
+            }
+          })();
+        }
+
+        // ── Bailout approval chain ───────────────────────────────────────────
+        else {
+          const bailout = approval.bailout!;
+          const pendingApprovals = (
+            bailout.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>
+          ).filter((a) => a.status === ApprovalStatus.PENDING && a.id !== approval.id);
+
+          const isFullyApproved = pendingApprovals.length === 0;
+
+          let newBailoutStatus: BailoutStatus;
+          if (isFullyApproved) {
+            newBailoutStatus = BailoutStatus.APPROVED;
+          } else {
+            const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+            const seqStatusMap: Record<number, BailoutStatus> = {
+              1: BailoutStatus.APPROVED_L1,
+              2: BailoutStatus.APPROVED_L2,
+              3: BailoutStatus.APPROVED_L3,
+              4: BailoutStatus.APPROVED_L4,
+              5: BailoutStatus.APPROVED_L5,
+            };
+            newBailoutStatus = seqStatusMap[currentSeq] ?? BailoutStatus.SUBMITTED;
+          }
+
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: { status: newBailoutStatus },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.APPROVE,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          void (async () => {
+            if (isFullyApproved) {
+              const fullBailout = await ctx.db.bailout.findUnique({
+                where: { id: approval.bailoutId as string },
+                include: {
+                  requester: { select: { phoneNumber: true, name: true, email: true } },
+                  finance: { select: { phoneNumber: true, name: true } },
+                  travelRequest: { select: { requestNumber: true, destination: true } },
+                },
+              });
+
+              const requesterPhone = fullBailout?.requester?.phoneNumber;
+              if (requesterPhone) {
+                await sendWhatsappPoll({
+                  phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  question:
+                    `✅ *Bailout Disetujui Penuh*\n` +
+                    `No: ${fullBailout!.bailoutNumber}\n` +
+                    `Jumlah: Rp ${Number(fullBailout!.amount).toLocaleString("id-ID")}\n` +
+                    `Semua level approval telah selesai.\n` +
+                    `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                  options: [`OK`],
+                  maxAnswer: 1,
+                });
+              }
+
+              const fmtDate = (d: Date | null | undefined) =>
+                d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+              const fmtDateTime = (d: Date | null | undefined) =>
+                d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+
+              let categoryDetail = "";
+              if (fullBailout) {
+                if (fullBailout.category === "TRANSPORT") {
+                  categoryDetail =
+                    `Mode          : ${fullBailout.transportMode ?? "-"}\n` +
+                    (fullBailout.carrier ? `Maskapai      : ${fullBailout.carrier}\n` : "") +
+                    (fullBailout.flightNumber ? `No. Penerbangan: ${fullBailout.flightNumber}\n` : "") +
+                    (fullBailout.seatClass ? `Kelas         : ${fullBailout.seatClass}\n` : "") +
+                    (fullBailout.bookingRef ? `Booking Ref   : ${fullBailout.bookingRef}\n` : "") +
+                    `Dari          : ${fullBailout.departureFrom ?? "-"} → ${fullBailout.arrivalTo ?? "-"}\n` +
+                    `Berangkat     : ${fmtDateTime(fullBailout.departureAt)}\n` +
+                    `Tiba          : ${fmtDateTime(fullBailout.arrivalAt)}\n`;
+                } else if (fullBailout.category === "HOTEL") {
+                  categoryDetail =
+                    `Hotel         : ${fullBailout.hotelName ?? "-"}\n` +
+                    (fullBailout.hotelAddress ? `Alamat        : ${fullBailout.hotelAddress}\n` : "") +
+                    (fullBailout.roomType ? `Tipe Kamar    : ${fullBailout.roomType}\n` : "") +
+                    `Check-in      : ${fmtDate(fullBailout.checkIn)}\n` +
+                    `Check-out     : ${fmtDate(fullBailout.checkOut)}\n`;
+                } else if (fullBailout.category === "MEAL") {
+                  categoryDetail =
+                    `Tanggal       : ${fmtDate(fullBailout.mealDate)}\n` +
+                    (fullBailout.mealLocation ? `Lokasi        : ${fullBailout.mealLocation}\n` : "");
+                }
+              }
+
+              const financeMsg = fullBailout
+                ? `💰 *Bailout Disetujui — Upload Dokumen & Proses Pencairan*\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Bailout No    : ${fullBailout.bailoutNumber}\n` +
+                  `Travel Request: ${fullBailout.travelRequest?.requestNumber ?? "-"}\n` +
+                  `Tujuan        : ${fullBailout.travelRequest?.destination ?? "-"}\n` +
+                  `Pemohon       : ${fullBailout.requester.name ?? fullBailout.requester.email ?? "-"}\n` +
+                  `Kategori      : ${fullBailout.category}\n` +
+                  `Jumlah        : Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
+                  `Keterangan    : ${fullBailout.description}\n` +
+                  (categoryDetail ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}` : "") +
+                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}\n` +
+                  `Silakan upload dokumen/invoice dan proses pencairan.`
+                : "";
+
+              const financePhone = fullBailout?.finance?.phoneNumber ?? bailout.finance?.phoneNumber;
+              if (financePhone && financeMsg) {
+                await sendWhatsappMessage({
+                  phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                  message: financeMsg,
+                });
+              } else if (financeMsg) {
+                const financeUsers = await ctx.db.user.findMany({
+                  where: { role: Role.FINANCE, deletedAt: null, phoneNumber: { not: null } },
+                  select: { phoneNumber: true },
+                  take: 5,
+                });
+                for (const fin of financeUsers) {
+                  if (!fin.phoneNumber) continue;
+                  await sendWhatsappMessage({
+                    phone: `${fin.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
+                    message: financeMsg,
+                  });
+                }
+              }
+            } else {
+              const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const nextApprovalRow = (
+                bailout.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
+              ).find((a) => a.sequence === currentSeq + 1 && a.status === "PENDING");
+
+              if (!nextApprovalRow) return;
+
+              const nextApprover = await ctx.db.user.findUnique({
+                where: { id: nextApprovalRow.approverId },
+                select: { phoneNumber: true },
+              });
+              const phone = nextApprover?.phoneNumber;
+              if (!phone) return;
+
+              const fullBailout = await ctx.db.bailout.findUnique({
+                where: { id: approval.bailoutId as string },
+                include: { requester: { select: { name: true, email: true } } },
+              });
+              if (!fullBailout) return;
+
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `📋 *Bailout Perlu Approval Anda*\n` +
+                  `No: ${nextApprovalRow.approvalNumber}\n` +
+                  `Bailout: ${fullBailout.bailoutNumber}\n` +
+                  `Kategori: ${fullBailout.category}\n` +
+                  `Jumlah: Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
+                  `Keterangan: ${fullBailout.description}\n` +
+                  `Diajukan oleh: ${fullBailout.requester.name ?? fullBailout.requester.email ?? "Unknown"}`,
+                options: [
+                  `Approve ${nextApprovalRow.approvalNumber}`,
+                  `Decline ${nextApprovalRow.approvalNumber}`,
+                  `Revision ${nextApprovalRow.approvalNumber}`,
+                ],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        }
+
+        return updatedApproval;
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: reject
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "reject") {
+        if (!input.rejectionReason || input.rejectionReason.length < 10) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "rejectionReason is required and must be at least 10 characters",
+          });
+        }
+
+        const updatedApproval = await ctx.db.approval.update({
+          where: { id: resolvedId },
+          data: {
+            status: ApprovalStatus.REJECTED,
+            rejectionReason: input.rejectionReason,
+            rejectedAt: new Date(),
+          },
+        });
+
+        if (entityType === "TravelRequest") {
+          await ctx.db.travelRequest.update({
+            where: { id: approval.travelRequestId as string },
+            data: { status: TravelStatus.REJECTED },
+          });
+
+          await ctx.db.bailout.updateMany({
+            where: { travelRequestId: approval.travelRequestId as string, deletedAt: null },
+            data: { status: BailoutStatus.REJECTED, rejectedAt: new Date() },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.REJECT,
+              entityType: "TravelRequest",
+              entityId: approval.travelRequestId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                rejectionReason: input.rejectionReason,
+              },
+            },
+          });
+
+          void (async () => {
+            const tr = await ctx.db.travelRequest.findUnique({
+              where: { id: approval.travelRequestId as string },
+              include: { requester: { select: { phoneNumber: true, name: true } } },
+            });
+            const phone = tr?.requester?.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `❌ *Travel Request Ditolak*\n` +
+                  `Approval: ${approval.approvalNumber as string}\n` +
+                  `Alasan: ${input.rejectionReason}\n` +
+                  `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.approvalNumber as string}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        } else if (entityType === "Claim") {
+          await ctx.db.claim.update({
+            where: { id: approval.claimId as string },
+            data: { status: ClaimStatus.REJECTED },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.REJECT,
+              entityType: "Claim",
+              entityId: approval.claimId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                rejectionReason: input.rejectionReason,
+              },
+            },
+          });
+
+          void (async () => {
+            const cl = await ctx.db.claim.findUnique({
+              where: { id: approval.claimId as string },
+              include: { submitter: { select: { phoneNumber: true, name: true } } },
+            });
+            const phone = cl?.submitter?.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `❌ *Claim Ditolak*\n` +
+                  `Approval: ${approval.approvalNumber as string}\n` +
+                  `Claim: ${cl.claimNumber}\n` +
+                  `Alasan: ${input.rejectionReason}\n` +
+                  `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.approvalNumber as string}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        } else {
+          // Bailout
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: {
+              status: BailoutStatus.REJECTED,
+              rejectedAt: new Date(),
+              rejectionReason: input.rejectionReason,
+            },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.REJECT,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                rejectionReason: input.rejectionReason,
+              },
+            },
+          });
+
+          void (async () => {
+            const bailout = approval.bailout!;
+            const phone = (bailout.approvals as unknown as { requester?: { phoneNumber?: string | null } }[]) &&
+              (await ctx.db.bailout.findUnique({
+                where: { id: approval.bailoutId as string },
+                include: { requester: { select: { phoneNumber: true, name: true } } },
+              }));
+            const requesterPhone = (phone as { requester?: { phoneNumber?: string | null } } | null)
+              ?.requester?.phoneNumber;
+            if (requesterPhone) {
+              await sendWhatsappPoll({
+                phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `❌ *Bailout Ditolak*\n` +
+                  `No: ${(bailout as unknown as { bailoutNumber: string }).bailoutNumber}\n` +
+                  `Jumlah: Rp ${Number((bailout as unknown as { amount: number }).amount).toLocaleString("id-ID")}\n` +
+                  `Alasan: ${input.rejectionReason}\n` +
+                  `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${(bailout as unknown as { bailoutNumber: string }).bailoutNumber}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        }
+
+        return updatedApproval;
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ACTION: revision
+      // ══════════════════════════════════════════════════════════════════════
+      if (input.action === "revision") {
+        if (!input.comments || input.comments.length < 10) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "comments is required and must be at least 10 characters for revision",
+          });
+        }
+
+        const updatedApproval = await ctx.db.approval.update({
+          where: { id: resolvedId },
+          data: {
+            status: ApprovalStatus.REVISION_REQUESTED,
+            comments: input.comments,
+          },
+        });
+
+        if (entityType === "TravelRequest") {
+          await ctx.db.approval.updateMany({
+            where: { travelRequestId: approval.travelRequestId as string },
+            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          });
+
+          await ctx.db.travelRequest.update({
+            where: { id: approval.travelRequestId as string },
+            data: { status: TravelStatus.REVISION },
+          });
+
+          await ctx.db.bailout.updateMany({
+            where: { travelRequestId: approval.travelRequestId as string, deletedAt: null },
+            data: { status: BailoutStatus.REVISION },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.UPDATE,
+              entityType: "TravelRequest",
+              entityId: approval.travelRequestId as string,
+              metadata: {
+                action: "revision_requested",
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          void (async () => {
+            const tr = await ctx.db.travelRequest.findUnique({
+              where: { id: approval.travelRequestId as string },
+              include: { requester: { select: { phoneNumber: true, name: true } } },
+            });
+            const phone = tr?.requester?.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `🔄 *Revisi Travel Request Diminta*\n` +
+                  `Approval: ${approval.approvalNumber as string}\n` +
+                  `Catatan: ${input.comments}\n` +
+                  `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.approvalNumber as string}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        } else if (entityType === "Claim") {
+          await ctx.db.approval.updateMany({
+            where: { claimId: approval.claimId as string },
+            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          });
+
+          await ctx.db.claim.update({
+            where: { id: approval.claimId as string },
+            data: { status: ClaimStatus.REVISION },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.UPDATE,
+              entityType: "Claim",
+              entityId: approval.claimId as string,
+              metadata: {
+                action: "revision_requested",
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          void (async () => {
+            const cl = await ctx.db.claim.findUnique({
+              where: { id: approval.claimId as string },
+              include: { submitter: { select: { phoneNumber: true, name: true } } },
+            });
+            const phone = cl?.submitter?.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `🔄 *Revisi Claim Diminta*\n` +
+                  `Approval: ${approval.approvalNumber as string}\n` +
+                  `Claim: ${cl.claimNumber}\n` +
+                  `Catatan: ${input.comments}\n` +
+                  `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${approval.approvalNumber as string}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        } else {
+          // Bailout
+          await ctx.db.approval.updateMany({
+            where: { bailoutId: approval.bailoutId as string },
+            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          });
+
+          await ctx.db.bailout.update({
+            where: { id: approval.bailoutId as string },
+            data: { status: BailoutStatus.REVISION },
+          });
+
+          await ctx.db.auditLog.create({
+            data: {
+              userId: ctx.session.user.id,
+              action: AuditAction.UPDATE,
+              entityType: "Bailout",
+              entityId: approval.bailoutId as string,
+              metadata: {
+                action: "revision_requested",
+                approvalId: resolvedId,
+                approvalNumber: approval.approvalNumber,
+                level: approval.level,
+                comments: input.comments,
+              },
+            },
+          });
+
+          void (async () => {
+            const fullBailout = await ctx.db.bailout.findUnique({
+              where: { id: approval.bailoutId as string },
+              include: { requester: { select: { phoneNumber: true, name: true } } },
+            });
+            const phone = fullBailout?.requester?.phoneNumber;
+            if (phone) {
+              await sendWhatsappPoll({
+                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
+                question:
+                  `🔄 *Revisi Bailout Diminta*\n` +
+                  `No: ${fullBailout!.bailoutNumber}\n` +
+                  `Jumlah: Rp ${Number(fullBailout!.amount).toLocaleString("id-ID")}\n` +
+                  `Catatan: ${input.comments}\n` +
+                  `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
+                options: [`OK ${fullBailout!.bailoutNumber}`],
+                maxAnswer: 1,
+              });
+            }
+          })();
+        }
+
+        return updatedApproval;
+      }
+
+      // Should never reach here given the discriminated enum
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown action" });
+    }),
+
+  // ─── UI QUERY PROCEDURES (non-MCP, used by the web frontend) ─────────────
+
+  // List approvals assigned to the current user (used by approvals page)
+  getMyApprovals: supervisorProcedure
     .input(
       z.object({
         status: z.nativeEnum(ApprovalStatus).optional(),
@@ -153,10 +1302,7 @@ export const approvalRouter = createTRPCRouter({
         approverId: ctx.session.user.id,
       };
 
-      if (input?.status) {
-        where.status = input.status;
-      }
-
+      if (input?.status) where.status = input.status;
       if (input?.entityType === "TravelRequest") {
         where.travelRequestId = { not: null };
       } else if (input?.entityType === "Claim") {
@@ -176,11 +1322,7 @@ export const approvalRouter = createTRPCRouter({
                   name: true,
                   email: true,
                   employeeId: true,
-                  department: {
-                    select: {
-                      name: true,
-                    },
-                  },
+                  department: { select: { name: true } },
                 },
               },
             },
@@ -188,32 +1330,18 @@ export const approvalRouter = createTRPCRouter({
           claim: {
             include: {
               submitter: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
-                  employeeId: true,
-                },
+                select: { id: true, name: true, email: true, employeeId: true },
               },
               travelRequest: {
-                select: {
-                  requestNumber: true,
-                  destination: true,
-                },
+                select: { requestNumber: true, destination: true },
               },
             },
           },
           approver: {
-            select: {
-              id: true,
-              name: true,
-              role: true,
-            },
+            select: { id: true, name: true, role: true },
           },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
+        orderBy: { createdAt: "desc" },
       });
 
       let nextCursor: string | undefined = undefined;
@@ -223,1310 +1351,20 @@ export const approvalRouter = createTRPCRouter({
         nextCursor = nextItem!.id;
       }
 
-      return {
-        approvals,
-        nextCursor,
-      };
+      return { approvals, nextCursor };
     }),
 
-  // Get pending approvals count
+  // Count pending approvals for the current user (used by badge / header)
   getPendingCount: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'GET',
-        path: '/approvals/pending-count',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Get pending approvals count',
-      },
-      mcp: {
-        enabled: true,
-        name: "get_pending_approvals_count",
-        description: "Get the number of pending approvals waiting for the current user's action",
-      },
-    })
     .input(z.object({}))
     .output(z.number())
     .query(async ({ ctx }) => {
-    return ctx.db.approval.count({
-      where: {
-        approverId: ctx.session.user.id,
-        status: ApprovalStatus.PENDING,
-      },
-    });
-  }),
-
-  // Get approval by ID
-  getById: protectedProcedure
-    .meta({
-      openapi: {
-        method: 'GET',
-        path: '/approvals/{id}',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Get approval by ID',
-      },
-      mcp: {
-        enabled: true,
-        name: "get_approval_by_id",
-        description: "Get detailed information about a specific approval by its ID",
-      },
-    })
-    .input(z.object({ id: z.string() }))
-    .output(z.any())
-    .query(async ({ ctx, input }) => {
-      const approval = await ctx.db.approval.findUnique({
-        where: { id: input.id },
-        include: {
-          travelRequest: {
-            include: {
-              requester: {
-                include: {
-                  department: true,
-                  supervisor: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              participants: {
-                include: {
-                  user: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              approvals: {
-                include: {
-                  approver: {
-                    select: {
-                      id: true,
-                      name: true,
-                      role: true,
-                    },
-                  },
-                },
-                orderBy: {
-                  createdAt: "asc",
-                },
-              },
-            },
-          },
-          claim: {
-            include: {
-              submitter: {
-                include: {
-                  department: true,
-                },
-              },
-              travelRequest: {
-                include: {
-                  requester: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              attachments: true,
-              approvals: {
-                include: {
-                  approver: {
-                    select: {
-                      id: true,
-                      name: true,
-                      role: true,
-                    },
-                  },
-                },
-                orderBy: {
-                  createdAt: "asc",
-                },
-              },
-            },
-          },
-          approver: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              role: true,
-            },
-          },
-        },
-      });
-
-      if (!approval) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found",
-        });
-      }
-
-      // Check access rights
-      const isApprover = approval.approverId === ctx.session.user.id;
-      const isRequester =
-        approval.travelRequest?.requesterId === ctx.session.user.id ||
-        approval.claim?.submitterId === ctx.session.user.id;
-      const canView = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
-        ctx.session.user.role
-      );
-
-      if (!isApprover && !isRequester && !canView) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to view this approval",
-        });
-      }
-
-      return approval;
-    }),
-
-  // Get approval by approval number
-  getByApprovalNumber: protectedProcedure
-    .meta({
-      openapi: {
-        method: 'GET',
-        path: '/approvals/by-number/{approvalNumber}',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Get approval by approval number',
-      },
-      mcp: {
-        enabled: true,
-        name: "get_approval_by_approval_number",
-        description: "Fetch detailed information about a specific approval using its human-readable business key (e.g. APR-2026-00001). Returns the same full detail as get_approval_by_id including linked travel request or claim, approver, and approval chain.",
-      },
-    })
-    .input(
-      z.object({
-        approvalNumber: z.string(),
-        // Phone is used to verify the caller is the approver — no session identity assumed
-        phone: z.string(),
-      })
-    )
-    .output(z.any())
-    .query(async ({ ctx, input }) => {
-      const approval = await ctx.db.approval.findUnique({
-        where: { approvalNumber: input.approvalNumber },
-        include: {
-          travelRequest: {
-            include: {
-              requester: {
-                include: {
-                  department: true,
-                  supervisor: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              participants: {
-                include: {
-                  user: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              approvals: {
-                include: {
-                  approver: {
-                    select: {
-                      id: true,
-                      name: true,
-                      role: true,
-                    },
-                  },
-                },
-                orderBy: {
-                  createdAt: "asc",
-                },
-              },
-            },
-          },
-          claim: {
-            include: {
-              submitter: {
-                include: {
-                  department: true,
-                },
-              },
-              travelRequest: {
-                include: {
-                  requester: {
-                    select: {
-                      id: true,
-                      name: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-              attachments: true,
-              approvals: {
-                include: {
-                  approver: {
-                    select: {
-                      id: true,
-                      name: true,
-                      role: true,
-                    },
-                  },
-                },
-                orderBy: {
-                  createdAt: "asc",
-                },
-              },
-            },
-          },
-          approver: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              role: true,
-              // include phone so we can validate identity without relying on session
-              phoneNumber: true,
-            },
-          },
-        },
-      });
-
-      if (!approval) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Approval with approvalNumber "${input.approvalNumber}" not found`,
-        });
-      }
-
-      // Phone-based identity check: the caller must supply the approver's registered phone.
-      // We do NOT fall back to session identity here because this endpoint is designed
-      // for incoming agent/WhatsApp flows where the caller is identified purely by phone.
-      const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
-      const approverPhone = approval.approver?.phoneNumber ?? "";
-
-      if (!approverPhone) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "The approver for this approval has no phone number registered",
-        });
-      }
-
-      if (normalize(input.phone) !== normalize(approverPhone)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "The supplied phone number does not match the approver on record",
-        });
-      }
-
-      return approval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Approve travel request
-  // ───────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Approve a travel-request approval.
-   *
-   * Input (all mutations below share the same identifier shape):
-   *   - `approvalId`     – internal CUID (original field, still accepted)
-   *   - `approvalNumber` – business key, e.g. "APR-2026-00001" (new)
-   *   - `callerPhone`    – optional; when present MUST match approver.phoneNumber
-   *   - `comments`       – optional free-text comment
-   *
-   * At least one of `approvalId` / `approvalNumber` is required.
-   */
-  approveTravelRequest: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/approve-travel-request',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Approve travel request',
-      },
-      mcp: {
-        enabled: true,
-        name: "approve_travel_request",
-        description: "Approve a travel request approval at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        comments: z.string().optional(),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          travelRequest: {
-            include: {
-              approvals: {
-                orderBy: { level: "asc" },
-              },
-            },
-          },
-        },
-      );
-
-      if (!approval.travelRequest) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a travel request",
-        });
-      }
-
-      // ── 2. Phone ownership verification (incoming flow) ─────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation (existing check – unchanged) ─────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to approve this request",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.APPROVED,
-          comments: input.comments,
-          approvedAt: new Date(),
-        },
-      });
-
-      // Check if all previous level approvals are complete
-      const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level);
-      const allPreviousApproved = (approval.travelRequest.approvals as Array<{ level: ApprovalLevel; status: ApprovalStatus; id: string }>)
-        .filter((a) => {
-          const levelIndex = Object.values(ApprovalLevel).indexOf(a.level);
-          return levelIndex < currentLevelIndex;
-        })
-        .every((a) => a.status === ApprovalStatus.APPROVED);
-
-      if (!allPreviousApproved) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Previous level approvals must be completed first",
-        });
-      }
-
-      // Check if there are more approvals pending (excluding the one just approved)
-      const pendingApprovals = (approval.travelRequest.approvals as Array<{ status: ApprovalStatus; id: string }>).filter(
-        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
-      );
-
-      // Determine new status
-      let newStatus: TravelStatus;
-      if (pendingApprovals.length === 0) {
-        newStatus = TravelStatus.APPROVED;
-      } else {
-        // Map the sequence number (1-based) of the just-approved step to an APPROVED_LN status
-        const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
-        const seqStatusMap: Record<number, TravelStatus> = {
-          1: TravelStatus.APPROVED_L1,
-          2: TravelStatus.APPROVED_L2,
-          3: TravelStatus.APPROVED_L3,
-          4: TravelStatus.APPROVED_L4,
-          5: TravelStatus.APPROVED_L5,
-        };
-        newStatus = seqStatusMap[currentSequence] ?? TravelStatus.SUBMITTED;
-      }
-
-      await ctx.db.travelRequest.update({
-        where: { id: approval.travelRequestId as string },
-        data: { status: newStatus },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.APPROVE,
-          entityType: "TravelRequest",
-          entityId: approval.travelRequestId as string,
-          metadata: {
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            comments: input.comments,
-          },
-        },
-      });
-
-      // Sequential chain: notify next approver in chain, or requester if fully approved
-      void (async () => {
-        if (newStatus === TravelStatus.APPROVED) {
-          // All levels approved — notify the requester
-          const tr = await ctx.db.travelRequest.findUnique({
-            where: { id: approval.travelRequestId as string },
-            include: {
-              requester: { select: { phoneNumber: true, name: true } },
-              bailouts: {
-                where: { deletedAt: null },
-                include: {
-                  requester: { select: { name: true, email: true } },
-                  finance: { select: { phoneNumber: true, name: true } },
-                },
-              },
-            },
-          });
-          const phone = tr?.requester?.phoneNumber;
-          if (phone) {
-            await sendWhatsappPoll({
-              phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-              question:
-                `✅ *Travel Request Disetujui Penuh*\n` +
-                `Travel: ${tr!.requestNumber}\n` +
-                `Semua level approval telah selesai.\n` +
-                `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-              options: [`OK`],
-              maxAnswer: 1,
-            });
-          }
-
-          // Notify each finance user linked to a bailout for this travel request
-          if (tr?.bailouts && tr.bailouts.length > 0) {
-            const fmtDate = (d: Date | null | undefined) =>
-              d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
-            const fmtDateTime = (d: Date | null | undefined) =>
-              d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-
-            for (const bailout of tr.bailouts) {
-              const financePhone = bailout.finance?.phoneNumber;
-              if (!financePhone) continue;
-
-              // Build category-specific detail lines
-              let detail = "";
-              if (bailout.category === "TRANSPORT") {
-                detail =
-                  `Mode: ${bailout.transportMode ?? "-"}\n` +
-                  (bailout.carrier ? `Maskapai/Operator: ${bailout.carrier}\n` : "") +
-                  (bailout.flightNumber ? `No. Penerbangan: ${bailout.flightNumber}\n` : "") +
-                  (bailout.seatClass ? `Kelas: ${bailout.seatClass}\n` : "") +
-                  (bailout.bookingRef ? `Booking Ref: ${bailout.bookingRef}\n` : "") +
-                  `Dari: ${bailout.departureFrom ?? "-"} → ${bailout.arrivalTo ?? "-"}\n` +
-                  `Berangkat: ${fmtDateTime(bailout.departureAt)}\n` +
-                  `Tiba: ${fmtDateTime(bailout.arrivalAt)}\n`;
-              } else if (bailout.category === "HOTEL") {
-                detail =
-                  `Hotel: ${bailout.hotelName ?? "-"}\n` +
-                  (bailout.hotelAddress ? `Alamat: ${bailout.hotelAddress}\n` : "") +
-                  (bailout.roomType ? `Tipe Kamar: ${bailout.roomType}\n` : "") +
-                  `Check-in: ${fmtDate(bailout.checkIn)} — Check-out: ${fmtDate(bailout.checkOut)}\n`;
-              } else if (bailout.category === "MEAL") {
-                detail =
-                  `Tanggal: ${fmtDate(bailout.mealDate)}\n` +
-                  (bailout.mealLocation ? `Lokasi: ${bailout.mealLocation}\n` : "");
-              }
-
-              await sendWhatsappMessage({
-                phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
-                message:
-                  `📎 *Travel Request Disetujui — Perlu Upload Dokumen Bailout*\n` +
-                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `Travel Request : ${tr.requestNumber}\n` +
-                  `Bailout No     : ${bailout.bailoutNumber}\n` +
-                  `Pemohon        : ${bailout.requester.name ?? bailout.requester.email ?? "-"}\n` +
-                  `Kategori       : ${bailout.category}\n` +
-                  `Jumlah         : Rp ${Number(bailout.amount).toLocaleString("id-ID")}\n` +
-                  `Keterangan     : ${bailout.description}\n` +
-                  (detail ? `━━━━━━━━━━━━━━━━━━━━━━\n${detail}` : "") +
-                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `Silakan upload dokumen/invoice terkait bailout ini dan proses pencairan.`,
-              });
-            }
-          }
-        } else {
-          // More approvals pending — find the next one by sequence and notify its approver
-          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
-          const nextApproval = (
-            approval.travelRequest!.approvals as Array<{
-              id: string;
-              sequence: number;
-              status: string;
-              approverId: string;
-              approvalNumber: string;
-            }>
-          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
-
-          if (!nextApproval) return;
-
-          const nextApprover = await ctx.db.user.findUnique({
-            where: { id: nextApproval.approverId },
-            select: { phoneNumber: true },
-          });
-          const phone = nextApprover?.phoneNumber;
-          if (!phone) return;
-
-          const tr = await ctx.db.travelRequest.findUnique({
-            where: { id: approval.travelRequestId as string },
-            include: {
-              requester: { select: { name: true, email: true } },
-            },
-          });
-          if (!tr) return;
-
-          const { buildTravelRequestApprovalPoll } = await import("@/lib/utils/whatsapp");
-          await sendWhatsappPoll(
-            buildTravelRequestApprovalPoll(
-              nextApproval.approvalNumber,
-              phone.replace(/^\+/, ""),
-              {
-                requestNumber: tr.requestNumber,
-                requesterName: tr.requester.name ?? tr.requester.email ?? "Unknown",
-                destination: tr.destination,
-                purpose: tr.purpose,
-                startDate: tr.startDate,
-                endDate: tr.endDate,
-              },
-            ),
-          );
-        }
-      })();
-
-      return updatedApproval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Reject travel request
-  // ───────────────────────────────────────────────────────────────────────────
-
-  rejectTravelRequest: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/reject-travel-request',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Reject travel request',
-      },
-      mcp: {
-        enabled: true,
-        name: "reject_travel_request",
-        description: "Reject a travel request with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        rejectionReason: z.string().min(10),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          travelRequest: true,
-        },
-      );
-
-      if (!approval.travelRequest) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a travel request",
-        });
-      }
-
-      // ── 2. Phone ownership verification ────────────────────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to reject this request",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.REJECTED,
-          rejectionReason: input.rejectionReason,
-          rejectedAt: new Date(),
-        },
-      });
-
-      await ctx.db.travelRequest.update({
-        where: { id: approval.travelRequestId as string },
-        data: { status: TravelStatus.REJECTED },
-      });
-
-      // Sync all non-deleted bailouts linked to this travel request → REJECTED
-      await ctx.db.bailout.updateMany({
+      return ctx.db.approval.count({
         where: {
-          travelRequestId: approval.travelRequestId as string,
-          deletedAt: null,
-        },
-        data: { status: BailoutStatus.REJECTED, rejectedAt: new Date() },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.REJECT,
-          entityType: "TravelRequest",
-          entityId: approval.travelRequestId as string,
-          metadata: {
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            rejectionReason: input.rejectionReason,
-          },
-        },
-      });
-
-      // Send poll notification to requester
-      void (async () => {
-        const tr = await ctx.db.travelRequest.findUnique({
-          where: { id: approval.travelRequestId as string },
-          include: {
-            requester: { select: { phoneNumber: true, name: true } },
-          },
-        });
-        const phone = tr?.requester?.phoneNumber;
-        if (phone) {
-          await sendWhatsappPoll({
-            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-            question:
-              `❌ *Travel Request Ditolak*\n` +
-              `Approval: ${approval.approvalNumber as string}\n` +
-              `Alasan: ${input.rejectionReason}\n` +
-              `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-            options: [`OK ${approval.approvalNumber as string}`],
-            maxAnswer: 1,
-          });
-        }
-      })();
-
-      return updatedApproval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Request revision for travel request
-  // ───────────────────────────────────────────────────────────────────────────
-
-  requestRevision: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/request-revision',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Request revision for travel request',
-      },
-      mcp: {
-        enabled: true,
-        name: "request_travel_request_revision",
-        description: "Request a revision for a travel request, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        comments: z.string().min(10),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          travelRequest: true,
-        },
-      );
-
-      if (!approval.travelRequest) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a travel request",
-        });
-      }
-
-      // ── 2. Phone ownership verification ────────────────────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to request revision for this request",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.REVISION_REQUESTED,
-          comments: input.comments,
-        },
-      });
-
-      // Reset all approvals to pending
-      await ctx.db.approval.updateMany({
-        where: { travelRequestId: approval.travelRequestId as string },
-        data: {
+          approverId: ctx.session.user.id,
           status: ApprovalStatus.PENDING,
-          approvedAt: null,
-          rejectedAt: null,
         },
       });
-
-      await ctx.db.travelRequest.update({
-        where: { id: approval.travelRequestId as string },
-        data: { status: TravelStatus.REVISION },
-      });
-
-      // Sync all non-deleted bailouts linked to this travel request → REVISION
-      await ctx.db.bailout.updateMany({
-        where: {
-          travelRequestId: approval.travelRequestId as string,
-          deletedAt: null,
-        },
-        data: { status: BailoutStatus.REVISION },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.UPDATE,
-          entityType: "TravelRequest",
-          entityId: approval.travelRequestId as string,
-          metadata: {
-            action: "revision_requested",
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            comments: input.comments,
-          },
-        },
-      });
-
-      // Send poll notification to requester
-      void (async () => {
-        const tr = await ctx.db.travelRequest.findUnique({
-          where: { id: approval.travelRequestId as string },
-          include: {
-            requester: { select: { phoneNumber: true, name: true } },
-          },
-        });
-        const phone = tr?.requester?.phoneNumber;
-        if (phone) {
-          await sendWhatsappPoll({
-            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-            question:
-              `🔄 *Revisi Travel Request Diminta*\n` +
-              `Approval: ${approval.approvalNumber as string}\n` +
-              `Catatan: ${input.comments}\n` +
-              `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
-            options: [`OK ${approval.approvalNumber as string}`],
-            maxAnswer: 1,
-          });
-        }
-      })();
-
-      return updatedApproval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Approve claim
-  // ───────────────────────────────────────────────────────────────────────────
-
-  approveClaim: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/approve-claim',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Approve claim',
-      },
-      mcp: {
-        enabled: true,
-        name: "approve_claim",
-        description: "Approve a claim at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        comments: z.string().optional(),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          claim: {
-            include: {
-              approvals: {
-                orderBy: { level: "asc" },
-              },
-            },
-          },
-        },
-      );
-
-      if (!approval.claim) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a claim",
-        });
-      }
-
-      // ── 2. Phone ownership verification ────────────────────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to approve this claim",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.APPROVED,
-          comments: input.comments,
-          approvedAt: new Date(),
-        },
-      });
-
-      const pendingApprovals = (approval.claim.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>).filter(
-        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
-      );
-
-      const newStatus =
-        pendingApprovals.length === 0 ? ClaimStatus.APPROVED : (approval.claim.status);
-
-      await ctx.db.claim.update({
-        where: { id: approval.claimId as string },
-        data: { status: newStatus },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.APPROVE,
-          entityType: "Claim",
-          entityId: approval.claimId as string,
-          metadata: {
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            comments: input.comments,
-          },
-        },
-      });
-
-      // Sequential chain: notify next approver by sequence, or notify submitter if fully approved
-      void (async () => {
-        if (newStatus === ClaimStatus.APPROVED) {
-          // All levels approved — notify the submitter
-          const cl = await ctx.db.claim.findUnique({
-            where: { id: approval.claimId as string },
-            include: {
-              submitter: { select: { phoneNumber: true, name: true } },
-            },
-          });
-          const phone = cl?.submitter?.phoneNumber;
-          if (phone) {
-            await sendWhatsappPoll({
-              phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-              question:
-                `✅ *Claim Disetujui Penuh*\n` +
-                `Claim: ${cl!.claimNumber}\n` +
-                `Semua level approval telah selesai.\n` +
-                `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-              options: [`OK`],
-              maxAnswer: 1,
-            });
-          }
-        } else {
-          // More approvals pending — find the next one by sequence and notify its approver
-          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
-          const nextApproval = (
-            approval.claim!.approvals as Array<{
-              id: string;
-              sequence: number;
-              status: string;
-              approverId: string;
-              approvalNumber: string;
-            }>
-          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
-
-          if (!nextApproval) return;
-
-          const nextApprover = await ctx.db.user.findUnique({
-            where: { id: nextApproval.approverId },
-            select: { phoneNumber: true },
-          });
-          const phone = nextApprover?.phoneNumber;
-          if (!phone) return;
-
-          const cl = await ctx.db.claim.findUnique({
-            where: { id: approval.claimId as string },
-            include: {
-              submitter: { select: { name: true, email: true } },
-              travelRequest: { select: { requestNumber: true } },
-            },
-          });
-          if (!cl) return;
-
-          const { buildClaimApprovalPoll } = await import("@/lib/utils/whatsapp");
-          await sendWhatsappPoll(
-            buildClaimApprovalPoll(
-              nextApproval.approvalNumber,
-              phone.replace(/^\+/, ""),
-              {
-                claimNumber: cl.claimNumber,
-                submitterName: cl.submitter.name ?? cl.submitter.email ?? "Unknown",
-                claimType: cl.claimType as string,
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-                amount: cl.amount as any,
-                description: cl.description,
-                travelRequestNumber: cl.travelRequest?.requestNumber,
-              },
-            ),
-          );
-        }
-      })();
-
-      return updatedApproval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Reject claim
-  // ───────────────────────────────────────────────────────────────────────────
-
-  rejectClaim: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/reject-claim',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Reject claim',
-      },
-      mcp: {
-        enabled: true,
-        name: "reject_claim",
-        description: "Reject a claim with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        rejectionReason: z.string().min(10),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          claim: true,
-        },
-      );
-
-      if (!approval.claim) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a claim",
-        });
-      }
-
-      // ── 2. Phone ownership verification ────────────────────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to reject this claim",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.REJECTED,
-          rejectionReason: input.rejectionReason,
-          rejectedAt: new Date(),
-        },
-      });
-
-      await ctx.db.claim.update({
-        where: { id: approval.claimId as string },
-        data: { status: ClaimStatus.REJECTED },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.REJECT,
-          entityType: "Claim",
-          entityId: approval.claimId as string,
-          metadata: {
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            rejectionReason: input.rejectionReason,
-          },
-        },
-      });
-
-      // Send poll notification to submitter
-      void (async () => {
-        const cl = await ctx.db.claim.findUnique({
-          where: { id: approval.claimId as string },
-          include: {
-            submitter: { select: { phoneNumber: true, name: true } },
-          },
-        });
-        const phone = cl?.submitter?.phoneNumber;
-        if (phone) {
-          await sendWhatsappPoll({
-            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-            question:
-              `❌ *Claim Ditolak*\n` +
-              `Approval: ${approval.approvalNumber as string}\n` +
-              `Claim: ${cl.claimNumber}\n` +
-              `Alasan: ${input.rejectionReason}\n` +
-              `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-            options: [`OK ${approval.approvalNumber as string}`],
-            maxAnswer: 1,
-          });
-        }
-      })();
-
-      return updatedApproval;
-    }),
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Request revision for claim
-  // ───────────────────────────────────────────────────────────────────────────
-
-  requestClaimRevision: supervisorProcedure
-    .meta({
-      openapi: {
-        method: 'POST',
-        path: '/approvals/request-claim-revision',
-        protect: true,
-        tags: ['Approvals'],
-        summary: 'Request revision for claim',
-      },
-      mcp: {
-        enabled: true,
-        name: "request_claim_revision",
-        description: "Request a revision for a claim, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
-      },
-    })
-    .input(
-      approvalIdentifierSchema.extend({
-        comments: z.string().min(10),
-      })
-    )
-    .output(z.any())
-    .mutation(async ({ ctx, input }) => {
-      // ── 1. Resolve approval record ──────────────────────────────────────────
-      const approval = await resolveApprovalBase(
-        ctx.db,
-        { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
-        {
-          approver: {
-            select: { id: true, phoneNumber: true },
-          },
-          claim: true,
-        },
-      );
-
-      if (!approval.claim) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Approval not found or is not linked to a claim",
-        });
-      }
-
-      // ── 2. Phone ownership verification ────────────────────────────────────
-      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
-
-      // ── 3. Session-based authorisation ─────────────────────────────────────
-      if (approval.approverId !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to request revision for this claim",
-        });
-      }
-
-      if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This approval has already been processed",
-        });
-      }
-
-      // ── 4. Perform update ───────────────────────────────────────────────────
-      const resolvedId = approval.id;
-
-      const updatedApproval = await ctx.db.approval.update({
-        where: { id: resolvedId },
-        data: {
-          status: ApprovalStatus.REVISION_REQUESTED,
-          comments: input.comments,
-        },
-      });
-
-      await ctx.db.approval.updateMany({
-        where: { claimId: approval.claimId as string },
-        data: {
-          status: ApprovalStatus.PENDING,
-          approvedAt: null,
-          rejectedAt: null,
-        },
-      });
-
-      await ctx.db.claim.update({
-        where: { id: approval.claimId as string },
-        data: { status: ClaimStatus.REVISION },
-      });
-
-      await ctx.db.auditLog.create({
-        data: {
-          userId: ctx.session.user.id,
-          action: AuditAction.UPDATE,
-          entityType: "Claim",
-          entityId: approval.claimId as string,
-          metadata: {
-            action: "revision_requested",
-            approvalId: resolvedId,
-            approvalNumber: approval.approvalNumber,
-            level: approval.level,
-            comments: input.comments,
-          },
-        },
-      });
-
-      // Send poll notification to submitter
-      void (async () => {
-        const cl = await ctx.db.claim.findUnique({
-          where: { id: approval.claimId as string },
-          include: {
-            submitter: { select: { phoneNumber: true, name: true } },
-          },
-        });
-        const phone = cl?.submitter?.phoneNumber;
-        if (phone) {
-          await sendWhatsappPoll({
-            phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-            question:
-              `🔄 *Revisi Claim Diminta*\n` +
-              `Approval: ${approval.approvalNumber as string}\n` +
-              `Claim: ${cl.claimNumber}\n` +
-              `Catatan: ${input.comments}\n` +
-              `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
-            options: [`OK ${approval.approvalNumber as string}`],
-            maxAnswer: 1,
-          });
-        }
-      })();
-
-      return updatedApproval;
     }),
 
   // ─── ADMIN / TESTING PROCEDURES ───────────────────────────────────────────
@@ -1905,571 +1743,4 @@ export const approvalRouter = createTRPCRouter({
 
       return { success: true };
     }),
-
-      // ─── APPROVE BAILOUT (via Approval chain) ─────────────────────────────────
-      /**
-       * Approve a bailout approval step.
-       * Works identically to approveTravelRequest — finds the Approval row by
-       * bailoutId + approverId, marks it APPROVED, then either advances to the
-       * next sequence or sets the Bailout to APPROVED (final) when no more
-       * PENDING steps remain.
-       */
-      approveBailout: protectedProcedure
-        .meta({
-          openapi: {
-            method: "POST",
-            path: "/bailouts/approve",
-            protect: true,
-            tags: ["Bailout"],
-            summary: "Approve a bailout approval step",
-          },
-          mcp: {
-            enabled: true,
-            name: "approve_bailout",
-            description:
-              "Approve a bailout at the current approval level. Provide approvalId (internal CUID) or approvalNumber (e.g. APR-2026-00001). Optionally include callerPhone to verify identity for WhatsApp-originated flows. Returns the updated Approval record.",
-          },
-        })
-        .input(
-          z
-            .object({
-              approvalId: z.string().optional(),
-              approvalNumber: z.string().optional(),
-              callerPhone: z.string().optional(),
-              comments: z.string().optional(),
-            })
-            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
-              message: "Either approvalId or approvalNumber must be provided",
-            })
-        )
-        .output(z.any())
-        .mutation(async ({ ctx, input }) => {
-          // ── 1. Resolve approval record ────────────────────────────────────────
-          const where = input.approvalId
-            ? { id: input.approvalId }
-            : { approvalNumber: input.approvalNumber! };
-    
-          const approval = await ctx.db.approval.findUnique({
-            where,
-            include: {
-              approver: { select: { id: true, phoneNumber: true } },
-              bailout: {
-                include: {
-                  approvals: { orderBy: { sequence: "asc" } },
-                  finance: { select: { id: true, phoneNumber: true, name: true } },
-                },
-              },
-            },
-          });
-    
-          if (!approval) {
-            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
-          }
-          if (!approval.bailout) {
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message: "Approval is not linked to a bailout",
-            });
-          }
-    
-          // ── 2. Phone ownership verification (WhatsApp flow) ───────────────────
-          if (input.callerPhone) {
-            const approverPhone = approval.approver.phoneNumber ?? "";
-            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
-            if (!approverPhone) {
-              throw new TRPCError({
-                code: "FORBIDDEN",
-                message: "Approver has no phone number on record",
-              });
-            }
-            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
-              throw new TRPCError({
-                code: "FORBIDDEN",
-                message: "Phone number does not match the approver on record",
-              });
-            }
-          }
-    
-          // ── 3. Session-based authorisation ───────────────────────────────────
-          if (approval.approverId !== ctx.session.user.id) {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Not authorized to approve this bailout",
-            });
-          }
-          if (approval.status !== ApprovalStatus.PENDING) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "This approval has already been processed",
-            });
-          }
-    
-          // ── 4. Mark this step approved ────────────────────────────────────────
-          const updatedApproval = await ctx.db.approval.update({
-            where: { id: approval.id },
-            data: {
-              status: ApprovalStatus.APPROVED,
-              comments: input.comments,
-              approvedAt: new Date(),
-            },
-          });
-    
-          // ── 5. Determine new bailout status ───────────────────────────────────
-          const pendingApprovals = (
-            approval.bailout.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>
-          ).filter((a) => a.status === ApprovalStatus.PENDING && a.id !== approval.id);
-    
-          const isFullyApproved = pendingApprovals.length === 0;
-    
-          let newBailoutStatus: BailoutStatus;
-          if (isFullyApproved) {
-            newBailoutStatus = BailoutStatus.APPROVED;
-          } else {
-            const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
-            const seqStatusMap: Record<number, BailoutStatus> = {
-              1: BailoutStatus.APPROVED_L1,
-              2: BailoutStatus.APPROVED_L2,
-              3: BailoutStatus.APPROVED_L3,
-              4: BailoutStatus.APPROVED_L4,
-              5: BailoutStatus.APPROVED_L5,
-            };
-            newBailoutStatus = seqStatusMap[currentSeq] ?? BailoutStatus.SUBMITTED;
-          }
-    
-          await ctx.db.bailout.update({
-            where: { id: approval.bailoutId as string },
-            data: { status: newBailoutStatus },
-          });
-    
-          await ctx.db.auditLog.create({
-            data: {
-              userId: ctx.session.user.id,
-              action: AuditAction.APPROVE,
-              entityType: "Bailout",
-              entityId: approval.bailoutId as string,
-              metadata: {
-                approvalId: approval.id,
-                approvalNumber: approval.approvalNumber,
-                level: approval.level,
-                comments: input.comments,
-              },
-            },
-          });
-    
-          // ── 6. Notifications ──────────────────────────────────────────────────
-          void (async () => {
-            if (isFullyApproved) {
-              // Notify requester
-              const fullBailout = await ctx.db.bailout.findUnique({
-                where: { id: approval.bailoutId as string },
-                include: {
-                  requester: { select: { phoneNumber: true, name: true, email: true } },
-                  finance: { select: { phoneNumber: true, name: true } },
-                  travelRequest: { select: { requestNumber: true, destination: true } },
-                },
-              });
-    
-              const requesterPhone = fullBailout?.requester?.phoneNumber;
-              if (requesterPhone) {
-                await sendWhatsappPoll({
-                  phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
-                  question:
-                    `✅ *Bailout Disetujui Penuh*\n` +
-                    `No: ${fullBailout!.bailoutNumber}\n` +
-                    `Jumlah: Rp ${Number(fullBailout!.amount).toLocaleString("id-ID")}\n` +
-                    `Semua level approval telah selesai.\n` +
-                    `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-                  options: [`OK`],
-                  maxAnswer: 1,
-                });
-              }
-
-              // Build category-specific detail for finance message
-              const fmtDate = (d: Date | null | undefined) =>
-                d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
-              const fmtDateTime = (d: Date | null | undefined) =>
-                d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-
-              let categoryDetail = "";
-              if (fullBailout) {
-                if (fullBailout.category === "TRANSPORT") {
-                  categoryDetail =
-                    `Mode          : ${fullBailout.transportMode ?? "-"}\n` +
-                    (fullBailout.carrier ? `Maskapai      : ${fullBailout.carrier}\n` : "") +
-                    (fullBailout.flightNumber ? `No. Penerbangan: ${fullBailout.flightNumber}\n` : "") +
-                    (fullBailout.seatClass ? `Kelas         : ${fullBailout.seatClass}\n` : "") +
-                    (fullBailout.bookingRef ? `Booking Ref   : ${fullBailout.bookingRef}\n` : "") +
-                    `Dari          : ${fullBailout.departureFrom ?? "-"} → ${fullBailout.arrivalTo ?? "-"}\n` +
-                    `Berangkat     : ${fmtDateTime(fullBailout.departureAt)}\n` +
-                    `Tiba          : ${fmtDateTime(fullBailout.arrivalAt)}\n`;
-                } else if (fullBailout.category === "HOTEL") {
-                  categoryDetail =
-                    `Hotel         : ${fullBailout.hotelName ?? "-"}\n` +
-                    (fullBailout.hotelAddress ? `Alamat        : ${fullBailout.hotelAddress}\n` : "") +
-                    (fullBailout.roomType ? `Tipe Kamar    : ${fullBailout.roomType}\n` : "") +
-                    `Check-in      : ${fmtDate(fullBailout.checkIn)}\n` +
-                    `Check-out     : ${fmtDate(fullBailout.checkOut)}\n`;
-                } else if (fullBailout.category === "MEAL") {
-                  categoryDetail =
-                    `Tanggal       : ${fmtDate(fullBailout.mealDate)}\n` +
-                    (fullBailout.mealLocation ? `Lokasi        : ${fullBailout.mealLocation}\n` : "");
-                }
-              }
-
-              const financeMsg = fullBailout
-                ? `💰 *Bailout Disetujui — Upload Dokumen & Proses Pencairan*\n` +
-                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `Bailout No    : ${fullBailout.bailoutNumber}\n` +
-                  `Travel Request: ${fullBailout.travelRequest?.requestNumber ?? "-"}\n` +
-                  `Tujuan        : ${fullBailout.travelRequest?.destination ?? "-"}\n` +
-                  `Pemohon       : ${fullBailout.requester.name ?? fullBailout.requester.email ?? "-"}\n` +
-                  `Kategori      : ${fullBailout.category}\n` +
-                  `Jumlah        : Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
-                  `Keterangan    : ${fullBailout.description}\n` +
-                  (categoryDetail ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}` : "") +
-                  `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                  `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}\n` +
-                  `Silakan upload dokumen/invoice dan proses pencairan.`
-                : "";
-
-              // Notify finance to upload documents / disburse
-              const financePhone = fullBailout?.finance?.phoneNumber ?? approval.bailout!.finance?.phoneNumber;
-              if (financePhone && financeMsg) {
-                await sendWhatsappMessage({
-                  phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
-                  message: financeMsg,
-                });
-              } else if (financeMsg) {
-                // Fallback: broadcast to all finance users
-                const financeUsers = await ctx.db.user.findMany({
-                  where: { role: Role.FINANCE, deletedAt: null, phoneNumber: { not: null } },
-                  select: { phoneNumber: true },
-                  take: 5,
-                });
-                for (const fin of financeUsers) {
-                  if (!fin.phoneNumber) continue;
-                  await sendWhatsappMessage({
-                    phone: `${fin.phoneNumber.replace(/^\+/, "")}@s.whatsapp.net`,
-                    message: financeMsg,
-                  });
-                }
-              }
-            } else {
-              // Notify next approver in sequence
-              const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
-              const nextApproval = (
-                approval.bailout!.approvals as Array<{
-                  id: string;
-                  sequence: number;
-                  status: string;
-                  approverId: string;
-                  approvalNumber: string;
-                }>
-              ).find((a) => a.sequence === currentSeq + 1 && a.status === "PENDING");
-    
-              if (!nextApproval) return;
-    
-              const nextApprover = await ctx.db.user.findUnique({
-                where: { id: nextApproval.approverId },
-                select: { phoneNumber: true },
-              });
-              const phone = nextApprover?.phoneNumber;
-              if (!phone) return;
-    
-              const fullBailout = await ctx.db.bailout.findUnique({
-                where: { id: approval.bailoutId as string },
-                include: {
-                  requester: { select: { name: true, email: true } },
-                },
-              });
-              if (!fullBailout) return;
-    
-              await sendWhatsappPoll({
-                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-                question:
-                  `📋 *Bailout Perlu Approval Anda*\n` +
-                  `No: ${nextApproval.approvalNumber}\n` +
-                  `Bailout: ${fullBailout.bailoutNumber}\n` +
-                  `Kategori: ${fullBailout.category}\n` +
-                  `Jumlah: Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
-                  `Keterangan: ${fullBailout.description}\n` +
-                  `Diajukan oleh: ${fullBailout.requester.name ?? fullBailout.requester.email ?? "Unknown"}`,
-                options: [
-                  `Approve ${nextApproval.approvalNumber}`,
-                  `Decline ${nextApproval.approvalNumber}`,
-                  `Revision ${nextApproval.approvalNumber}`,
-                ],
-                maxAnswer: 1,
-              });
-            }
-          })();
-    
-          return updatedApproval;
-        }),
-    
-      // ─── REJECT BAILOUT (via Approval chain) ──────────────────────────────────
-      rejectBailout: protectedProcedure
-        .meta({
-          openapi: {
-            method: "POST",
-            path: "/bailouts/reject",
-            protect: true,
-            tags: ["Bailout"],
-            summary: "Reject a bailout approval step",
-          },
-          mcp: {
-            enabled: true,
-            name: "reject_bailout",
-            description:
-              "Reject a bailout at the current approval level. Requires a rejectionReason (min 10 chars). Provide approvalId or approvalNumber. Optionally include callerPhone for WhatsApp-originated flows. Sets the Bailout to REJECTED and notifies the requester.",
-          },
-        })
-        .input(
-          z
-            .object({
-              approvalId: z.string().optional(),
-              approvalNumber: z.string().optional(),
-              callerPhone: z.string().optional(),
-              rejectionReason: z.string().min(10),
-            })
-            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
-              message: "Either approvalId or approvalNumber must be provided",
-            })
-        )
-        .output(z.any())
-        .mutation(async ({ ctx, input }) => {
-          const where = input.approvalId
-            ? { id: input.approvalId }
-            : { approvalNumber: input.approvalNumber! };
-    
-          const approval = await ctx.db.approval.findUnique({
-            where,
-            include: {
-              approver: { select: { id: true, phoneNumber: true } },
-              bailout: {
-                include: {
-                  requester: { select: { phoneNumber: true, name: true } },
-                },
-              },
-            },
-          });
-    
-          if (!approval) {
-            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
-          }
-          if (!approval.bailout) {
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message: "Approval is not linked to a bailout",
-            });
-          }
-    
-          // Phone ownership check
-          if (input.callerPhone) {
-            const approverPhone = approval.approver.phoneNumber ?? "";
-            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
-            if (!approverPhone) {
-              throw new TRPCError({ code: "FORBIDDEN", message: "Approver has no phone number on record" });
-            }
-            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
-              throw new TRPCError({ code: "FORBIDDEN", message: "Phone number does not match the approver on record" });
-            }
-          }
-    
-          if (approval.approverId !== ctx.session.user.id) {
-            throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized to reject this bailout" });
-          }
-          if (approval.status !== ApprovalStatus.PENDING) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
-          }
-    
-          const updatedApproval = await ctx.db.approval.update({
-            where: { id: approval.id },
-            data: {
-              status: ApprovalStatus.REJECTED,
-              rejectionReason: input.rejectionReason,
-              rejectedAt: new Date(),
-            },
-          });
-    
-          await ctx.db.bailout.update({
-            where: { id: approval.bailoutId as string },
-            data: {
-              status: BailoutStatus.REJECTED,
-              rejectedAt: new Date(),
-              rejectionReason: input.rejectionReason,
-            },
-          });
-    
-          await ctx.db.auditLog.create({
-            data: {
-              userId: ctx.session.user.id,
-              action: AuditAction.REJECT,
-              entityType: "Bailout",
-              entityId: approval.bailoutId as string,
-              metadata: {
-                approvalId: approval.id,
-                approvalNumber: approval.approvalNumber,
-                level: approval.level,
-                rejectionReason: input.rejectionReason,
-              },
-            },
-          });
-    
-          // Notify requester
-          void (async () => {
-            const phone = approval.bailout!.requester.phoneNumber;
-            if (phone) {
-              await sendWhatsappPoll({
-                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-                question:
-                  `❌ *Bailout Ditolak*\n` +
-                  `No: ${approval.bailout!.bailoutNumber}\n` +
-                  `Jumlah: Rp ${Number(approval.bailout!.amount).toLocaleString("id-ID")}\n` +
-                  `Alasan: ${input.rejectionReason}\n` +
-                  `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-                options: [`OK ${approval.bailout!.bailoutNumber}`],
-                maxAnswer: 1,
-              });
-            }
-          })();
-    
-          return updatedApproval;
-        }),
-    
-      // ─── REQUEST REVISION FOR BAILOUT (via Approval chain) ────────────────────
-      requestBailoutRevision: protectedProcedure
-        .meta({
-          openapi: {
-            method: "POST",
-            path: "/bailouts/request-revision",
-            protect: true,
-            tags: ["Bailout"],
-            summary: "Request revision for a bailout",
-          },
-          mcp: {
-            enabled: true,
-            name: "request_bailout_revision",
-            description:
-              "Request a revision for a bailout, resetting all its approval steps back to PENDING. Requires a comments field (min 10 chars). Provide approvalId or approvalNumber. Optionally include callerPhone for WhatsApp-originated flows. Sets the Bailout to REVISION and notifies the requester.",
-          },
-        })
-        .input(
-          z
-            .object({
-              approvalId: z.string().optional(),
-              approvalNumber: z.string().optional(),
-              callerPhone: z.string().optional(),
-              comments: z.string().min(10),
-            })
-            .refine((d) => d.approvalId !== undefined || d.approvalNumber !== undefined, {
-              message: "Either approvalId or approvalNumber must be provided",
-            })
-        )
-        .output(z.any())
-        .mutation(async ({ ctx, input }) => {
-          const where = input.approvalId
-            ? { id: input.approvalId }
-            : { approvalNumber: input.approvalNumber! };
-    
-          const approval = await ctx.db.approval.findUnique({
-            where,
-            include: {
-              approver: { select: { id: true, phoneNumber: true } },
-              bailout: {
-                include: {
-                  requester: { select: { phoneNumber: true, name: true } },
-                },
-              },
-            },
-          });
-    
-          if (!approval) {
-            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
-          }
-          if (!approval.bailout) {
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message: "Approval is not linked to a bailout",
-            });
-          }
-    
-          // Phone ownership check
-          if (input.callerPhone) {
-            const approverPhone = approval.approver.phoneNumber ?? "";
-            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
-            if (!approverPhone) {
-              throw new TRPCError({ code: "FORBIDDEN", message: "Approver has no phone number on record" });
-            }
-            if (normalize(input.callerPhone) !== normalize(approverPhone)) {
-              throw new TRPCError({ code: "FORBIDDEN", message: "Phone number does not match the approver on record" });
-            }
-          }
-    
-          if (approval.approverId !== ctx.session.user.id) {
-            throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized to request revision for this bailout" });
-          }
-          if (approval.status !== ApprovalStatus.PENDING) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
-          }
-    
-          const updatedApproval = await ctx.db.approval.update({
-            where: { id: approval.id },
-            data: {
-              status: ApprovalStatus.REVISION_REQUESTED,
-              comments: input.comments,
-            },
-          });
-    
-          // Reset all approval steps for this bailout back to PENDING
-          await ctx.db.approval.updateMany({
-            where: { bailoutId: approval.bailoutId as string },
-            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
-          });
-    
-          await ctx.db.bailout.update({
-            where: { id: approval.bailoutId as string },
-            data: { status: BailoutStatus.REVISION },
-          });
-    
-          await ctx.db.auditLog.create({
-            data: {
-              userId: ctx.session.user.id,
-              action: AuditAction.UPDATE,
-              entityType: "Bailout",
-              entityId: approval.bailoutId as string,
-              metadata: {
-                action: "revision_requested",
-                approvalId: approval.id,
-                approvalNumber: approval.approvalNumber,
-                level: approval.level,
-                comments: input.comments,
-              },
-            },
-          });
-    
-          // Notify requester
-          void (async () => {
-            const phone = approval.bailout!.requester.phoneNumber;
-            if (phone) {
-              await sendWhatsappPoll({
-                phone: `${phone.replace(/^\+/, "")}@s.whatsapp.net`,
-                question:
-                  `🔄 *Revisi Bailout Diminta*\n` +
-                  `No: ${approval.bailout!.bailoutNumber}\n` +
-                  `Jumlah: Rp ${Number(approval.bailout!.amount).toLocaleString("id-ID")}\n` +
-                  `Catatan: ${input.comments}\n` +
-                  `Dari: ${ctx.session.user.name ?? ctx.session.user.email}`,
-                options: [`OK ${approval.bailout!.bailoutNumber}`],
-                maxAnswer: 1,
-              });
-            }
-          })();
-    
-          return updatedApproval;
-        }),
-    
-
-    
 });
-

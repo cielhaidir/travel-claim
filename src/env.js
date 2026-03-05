@@ -30,6 +30,12 @@ export const env = createEnv({
     WHATSAPP_DEVICE_ID: z.string().optional(),
     // Basic auth credentials "username:password" — will be base64-encoded at runtime
     WHATSAPP_BASIC_AUTH: z.string().optional(),
+    // Cloudflare R2 / S3-compatible storage
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET_NAME: z.string().optional(),
+    R2_PUBLIC_URL: z.string().url().optional(),
   },
 
   /**
@@ -59,6 +65,11 @@ export const env = createEnv({
     WHATSAPP_BASE_URL: process.env.WHATSAPP_BASE_URL,
     WHATSAPP_DEVICE_ID: process.env.WHATSAPP_DEVICE_ID,
     WHATSAPP_BASIC_AUTH: process.env.WHATSAPP_BASIC_AUTH,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET_NAME: process.env.R2_BUCKET_NAME,
+    R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

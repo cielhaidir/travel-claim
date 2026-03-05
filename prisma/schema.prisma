@@ -164,6 +164,11 @@ enum TransportMode {
     OTHER
 }
 
+enum JournalEntryType {
+    DEBIT
+    CREDIT
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
@@ -238,7 +243,8 @@ model User {
     notifications        Notification[]
     auditLogs            AuditLog[]
     salesProjects        Project[]           @relation("SalesLead")
-    financeBailouts         Bailout[]           @relation("FinanceBailouts")
+    financeBailouts      Bailout[]           @relation("FinanceBailouts")
+    financeClaims        Claim[]             @relation("FinanceClaims")
 
     // Departments this user leads as chief
     ledDepartments Department[] @relation("DepartmentChief")
@@ -323,8 +329,9 @@ model ChartOfAccount {
     updatedAt DateTime @updatedAt
 
     // Relations
-    claims    Claim[]
-    auditLogs AuditLog[] @relation("COAAuditLogs")
+    claims              Claim[]
+    auditLogs           AuditLog[]          @relation("COAAuditLogs")
+    journalTransactions JournalTransaction[]
 
     @@index([code])
     @@index([accountType])
@@ -485,13 +492,17 @@ model Bailout {
     approvals Approval[]
 
     storageUrl String? @db.Text // For any receipt images or documents
-    financeId String? @db.VarChar(100) //
-    finance   User?   @relation("FinanceBailouts", fields: [financeId], references: [id])
+    financeId  String? // FK to User (finance officer who processed this bailout)
+    finance    User?   @relation("FinanceBailouts", fields: [financeId], references: [id])
+
+    // Reverse relation for journal transactions
+    journalTransactions JournalTransaction[]
 
     @@index([travelRequestId])
     @@index([requesterId, status])
     @@index([status, createdAt])
     @@index([bailoutNumber])
+    @@index([financeId])
 }
 
 // ============================================================================
@@ -616,13 +627,18 @@ model Claim {
     // Metadata
     submittedVia String? @db.VarChar(50) // "web" or "whatsapp"
 
+    // Finance officer who processed/paid this claim
+    financeId String?
+    finance   User?   @relation("FinanceClaims", fields: [financeId], references: [id])
+
     deletedAt DateTime?
     createdAt DateTime  @default(now())
     updatedAt DateTime  @updatedAt
 
     // Relations
-    attachments Attachment[]
-    approvals   Approval[]
+    attachments         Attachment[]
+    approvals           Approval[]
+    journalTransactions JournalTransaction[]
 
     @@index([travelRequestId])
     @@index([submitterId, status])
@@ -630,6 +646,7 @@ model Claim {
     @@index([claimNumber])
     @@index([claimType])
     @@index([coaId])
+    @@index([financeId])
 }
 
 model Attachment {
@@ -724,4 +741,76 @@ model AuditLog {
     @@index([entityType, entityId])
     @@index([action, createdAt])
     @@index([chartOfAccountId])
+}
+
+// ============================================================================
+// ACCOUNTING — BALANCE ACCOUNTS & JOURNAL TRANSACTIONS
+// ============================================================================
+
+model BalanceAccount {
+    id   String @id @default(cuid())
+    code String @unique @db.VarChar(30)
+    name String @db.VarChar(150)
+
+    // Current running balance (positive = debit-normal, or as defined by usage)
+    balance Decimal @default(0) @db.Decimal(19, 4)
+
+    isActive    Boolean @default(true)
+    description String? @db.Text
+
+    deletedAt DateTime?
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+
+    // Reverse relation
+    journalTransactions JournalTransaction[]
+
+    @@index([code])
+    @@index([isActive])
+}
+
+model JournalTransaction {
+    id                String @id @default(cuid())
+    transactionNumber String @unique @db.VarChar(50) // e.g. JRN-2026-00001
+
+    // Date of the accounting entry (may differ from createdAt)
+    transactionDate DateTime @db.Date
+
+    description String  @db.Text
+    amount      Decimal @db.Decimal(15, 2)
+
+    // DEBIT increases the account balance; CREDIT decreases it (or vice-versa
+    // depending on account type — the application layer enforces the rule).
+    entryType JournalEntryType
+
+    // ── Source document links (at most one set) ──────────────────────────────
+    bailoutId String?
+    bailout   Bailout? @relation(fields: [bailoutId], references: [id])
+
+    claimId String?
+    claim   Claim?  @relation(fields: [claimId], references: [id])
+
+    // ── Accounting links (both required) ─────────────────────────────────────
+    chartOfAccountId String
+    chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id])
+
+    balanceAccountId String
+    balanceAccount   BalanceAccount @relation(fields: [balanceAccountId], references: [id])
+
+    // Optional reference / notes
+    referenceNumber String? @db.VarChar(100)
+    notes           String? @db.Text
+
+    // Soft-delete
+    deletedAt DateTime?
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+
+    @@index([transactionNumber])
+    @@index([transactionDate])
+    @@index([chartOfAccountId])
+    @@index([balanceAccountId])
+    @@index([bailoutId])
+    @@index([claimId])
+    @@index([entryType, transactionDate])
 }

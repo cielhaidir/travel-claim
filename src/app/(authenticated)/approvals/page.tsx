@@ -93,29 +93,9 @@ function ApprovalsContent() {
   const { data: rawPending } = api.approval.getPendingCount.useQuery({});
   const pendingCount = typeof rawPending === "number" ? rawPending : 0;
 
-  const approveTravelMutation = api.approval.approveTravelRequest.useMutation({
+  const actionMutation = api.approval.actOnApproval.useMutation({
     onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
-  });
-  const rejectTravelMutation = api.approval.rejectTravelRequest.useMutation({
-    onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
-  });
-  const revisionMutation = api.approval.requestRevision.useMutation({
-    onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
-  });
-  const approveClaimMutation = api.approval.approveClaim.useMutation({
-    onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
-  });
-  const rejectClaimMutation = api.approval.rejectClaim.useMutation({
-    onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
-  });
-  const claimRevisionMutation = api.approval.requestClaimRevision.useMutation({
-    onSuccess: () => { void refetch(); closeActionModal(); },
-    onError: (err) => setActionError(err.message),
+    onError: (err: { message: string }) => setActionError(err.message),
   });
 
   const isTravelApproval = (a: Approval) => !!a.travelRequest;
@@ -143,32 +123,16 @@ function ApprovalsContent() {
       return;
     }
 
-    if (isTravelApproval(actionApproval)) {
-      if (actionType === "approve") {
-        approveTravelMutation.mutate({ approvalId: actionApproval.id, comments: actionComment || undefined });
-      } else if (actionType === "reject") {
-        rejectTravelMutation.mutate({ approvalId: actionApproval.id, rejectionReason: actionComment });
-      } else {
-        revisionMutation.mutate({ approvalId: actionApproval.id, comments: actionComment });
-      }
+    if (actionType === "approve") {
+      actionMutation.mutate({ action: "approve", approvalId: actionApproval.id, comments: actionComment || undefined });
+    } else if (actionType === "reject") {
+      actionMutation.mutate({ action: "reject", approvalId: actionApproval.id, rejectionReason: actionComment });
     } else {
-      if (actionType === "approve") {
-        approveClaimMutation.mutate({ approvalId: actionApproval.id, comments: actionComment || undefined });
-      } else if (actionType === "reject") {
-        rejectClaimMutation.mutate({ approvalId: actionApproval.id, rejectionReason: actionComment });
-      } else {
-        claimRevisionMutation.mutate({ approvalId: actionApproval.id, comments: actionComment });
-      }
+      actionMutation.mutate({ action: "revision", approvalId: actionApproval.id, comments: actionComment });
     }
   };
 
-  const isActionLoading =
-    approveTravelMutation.isPending ||
-    rejectTravelMutation.isPending ||
-    revisionMutation.isPending ||
-    approveClaimMutation.isPending ||
-    rejectClaimMutation.isPending ||
-    claimRevisionMutation.isPending;
+  const isActionLoading = actionMutation.isPending;
 
   const actionTitle =
     actionType === "approve"
