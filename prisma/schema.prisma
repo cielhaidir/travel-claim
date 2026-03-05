@@ -213,6 +213,7 @@ model User {
     // Extended user fields
     employeeId   String?     @unique @db.VarChar(50)
     role         Role        @default(EMPLOYEE)
+    userRoles    UserRole[]
     departmentId String?
     department   Department? @relation(fields: [departmentId], references: [id])
 
@@ -257,6 +258,18 @@ model User {
     @@index([email])
     @@index([departmentId])
     @@index([supervisorId])
+    @@index([role])
+}
+
+model UserRole {
+    userId    String
+    role      Role
+    createdAt DateTime @default(now())
+    createdBy String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@id([userId, role])
     @@index([role])
 }
 

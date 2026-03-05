@@ -1,4 +1,4 @@
-import { PrismaClient } from "../generated/prisma/index.js";
+import { PrismaClient, type Role } from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -9,6 +9,16 @@ const PASSWORD = "password123";
 
 async function hash(plain: string) {
   return bcrypt.hash(plain, 10);
+}
+
+async function syncUserRoles(users: Array<{ id: string; role: Role }>) {
+  for (const user of users) {
+    await prisma.$executeRaw`
+      INSERT INTO "UserRole" ("userId", "role", "createdAt")
+      VALUES (${user.id}, ${user.role}::"Role", NOW())
+      ON CONFLICT ("userId", "role") DO NOTHING
+    `;
+  }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -22,33 +32,66 @@ async function main() {
   console.log("📂 Creating departments…");
   const deptSales = await prisma.department.upsert({
     where: { code: "SALES" },
-    update: { name: "Sales", description: "Sales operations and customer relations" },
-    create: { code: "SALES", name: "Sales", description: "Sales operations and customer relations" },
+    update: {
+      name: "Sales",
+      description: "Sales operations and customer relations",
+    },
+    create: {
+      code: "SALES",
+      name: "Sales",
+      description: "Sales operations and customer relations",
+    },
   });
   const deptEng = await prisma.department.upsert({
     where: { code: "ENG" },
-    update: { name: "Engineering", description: "Software engineering and technical operations" },
-    create: { code: "ENG", name: "Engineering", description: "Software engineering and technical operations" },
+    update: {
+      name: "Engineering",
+      description: "Software engineering and technical operations",
+    },
+    create: {
+      code: "ENG",
+      name: "Engineering",
+      description: "Software engineering and technical operations",
+    },
   });
   const deptFinance = await prisma.department.upsert({
     where: { code: "FIN" },
     update: { name: "Finance", description: "Finance and accounting" },
-    create: { code: "FIN", name: "Finance", description: "Finance and accounting" },
+    create: {
+      code: "FIN",
+      name: "Finance",
+      description: "Finance and accounting",
+    },
   });
   const deptAdmin = await prisma.department.upsert({
     where: { code: "ADMIN" },
-    update: { name: "Administration", description: "Administrative and support operations" },
-    create: { code: "ADMIN", name: "Administration", description: "Administrative and support operations" },
+    update: {
+      name: "Administration",
+      description: "Administrative and support operations",
+    },
+    create: {
+      code: "ADMIN",
+      name: "Administration",
+      description: "Administrative and support operations",
+    },
   });
   console.log("  ✅ 4 departments ready\n");
 
   // ── 2. Clear reserved employeeIds to avoid unique conflicts on re-seed ───────
   const reservedIds = [
-    "EMP001", "EMP002", "EMP003",
-    "EMP010", "EMP011", "EMP012",
-    "EMP020", "EMP021", "EMP022",
-    "EMP030", "EMP031",
-    "EMP040", "EMP041",
+    "EMP001",
+    "EMP002",
+    "EMP003",
+    "EMP010",
+    "EMP011",
+    "EMP012",
+    "EMP020",
+    "EMP021",
+    "EMP022",
+    "EMP030",
+    "EMP031",
+    "EMP040",
+    "EMP041",
   ];
   await prisma.user.updateMany({
     where: { employeeId: { in: reservedIds } },
@@ -94,7 +137,9 @@ async function main() {
       supervisorId: executive.id,
     },
   });
-  console.log(`  👔 Director        : director@company.com    (EMP002) → supervisor: executive`);
+  console.log(
+    `  👔 Director        : director@company.com    (EMP002) → supervisor: executive`,
+  );
 
   // ── 3c. Finance Department ────────────────────────────────────────────────────
   // Finance Chief (SALES_CHIEF used as "dept chief" role; role=MANAGER for finance head)
@@ -119,7 +164,9 @@ async function main() {
       supervisorId: director.id,
     },
   });
-  console.log(`  🏦 Finance Chief   : finance.chief@company.com  (EMP003) → supervisor: director`);
+  console.log(
+    `  🏦 Finance Chief   : finance.chief@company.com  (EMP003) → supervisor: director`,
+  );
 
   const financeStaff1 = await prisma.user.upsert({
     where: { email: "finance.staff1@company.com" },
@@ -136,7 +183,9 @@ async function main() {
       supervisorId: financeChief.id,
     },
   });
-  console.log(`  👤 Finance Staff 1 : finance.staff1@company.com (EMP010) → supervisor: finance.chief`);
+  console.log(
+    `  👤 Finance Staff 1 : finance.staff1@company.com (EMP010) → supervisor: finance.chief`,
+  );
 
   const financeStaff2 = await prisma.user.upsert({
     where: { email: "finance.staff2@company.com" },
@@ -153,7 +202,9 @@ async function main() {
       supervisorId: financeChief.id,
     },
   });
-  console.log(`  👤 Finance Staff 2 : finance.staff2@company.com (EMP011) → supervisor: finance.chief`);
+  console.log(
+    `  👤 Finance Staff 2 : finance.staff2@company.com (EMP011) → supervisor: finance.chief`,
+  );
 
   // ── 3d. Sales Department ──────────────────────────────────────────────────────
   const salesChief = await prisma.user.upsert({
@@ -177,7 +228,9 @@ async function main() {
       supervisorId: director.id,
     },
   });
-  console.log(`  💼 Sales Chief     : sales.chief@company.com    (EMP020) → supervisor: director`);
+  console.log(
+    `  💼 Sales Chief     : sales.chief@company.com    (EMP020) → supervisor: director`,
+  );
 
   const salesStaff1 = await prisma.user.upsert({
     where: { email: "sales.staff1@company.com" },
@@ -194,7 +247,9 @@ async function main() {
       supervisorId: salesChief.id,
     },
   });
-  console.log(`  👤 Sales Staff 1   : sales.staff1@company.com   (EMP021) → supervisor: sales.chief`);
+  console.log(
+    `  👤 Sales Staff 1   : sales.staff1@company.com   (EMP021) → supervisor: sales.chief`,
+  );
 
   const salesStaff2 = await prisma.user.upsert({
     where: { email: "sales.staff2@company.com" },
@@ -211,7 +266,9 @@ async function main() {
       supervisorId: salesChief.id,
     },
   });
-  console.log(`  👤 Sales Staff 2   : sales.staff2@company.com   (EMP022) → supervisor: sales.chief`);
+  console.log(
+    `  👤 Sales Staff 2   : sales.staff2@company.com   (EMP022) → supervisor: sales.chief`,
+  );
 
   // ── 3e. Engineering Department ────────────────────────────────────────────────
   const engChief = await prisma.user.upsert({
@@ -235,7 +292,9 @@ async function main() {
       supervisorId: director.id,
     },
   });
-  console.log(`  🛠  Eng Chief      : engineer.chief@company.com  (EMP030) → supervisor: director`);
+  console.log(
+    `  🛠  Eng Chief      : engineer.chief@company.com  (EMP030) → supervisor: director`,
+  );
 
   const engStaff1 = await prisma.user.upsert({
     where: { email: "engineer.staff1@company.com" },
@@ -252,7 +311,9 @@ async function main() {
       supervisorId: engChief.id,
     },
   });
-  console.log(`  👤 Eng Staff 1     : engineer.staff1@company.com (EMP031) → supervisor: engineer.chief`);
+  console.log(
+    `  👤 Eng Staff 1     : engineer.staff1@company.com (EMP031) → supervisor: engineer.chief`,
+  );
 
   const engStaff2 = await prisma.user.upsert({
     where: { email: "engineer.staff2@company.com" },
@@ -269,7 +330,9 @@ async function main() {
       supervisorId: engChief.id,
     },
   });
-  console.log(`  👤 Eng Staff 2     : engineer.staff2@company.com (EMP032) → supervisor: engineer.chief`);
+  console.log(
+    `  👤 Eng Staff 2     : engineer.staff2@company.com (EMP032) → supervisor: engineer.chief`,
+  );
 
   // ── 3f. Administration Department ─────────────────────────────────────────────
   const adminChief = await prisma.user.upsert({
@@ -293,7 +356,9 @@ async function main() {
       supervisorId: director.id,
     },
   });
-  console.log(`  🔑 Admin Chief     : admin@company.com            (EMP040) → supervisor: director`);
+  console.log(
+    `  🔑 Admin Chief     : admin@company.com            (EMP040) → supervisor: director`,
+  );
 
   const adminStaff1 = await prisma.user.upsert({
     where: { email: "admin.staff1@company.com" },
@@ -310,16 +375,47 @@ async function main() {
       supervisorId: adminChief.id,
     },
   });
-  console.log(`  👤 Admin Staff 1   : admin.staff1@company.com     (EMP041) → supervisor: admin`);
+  console.log(
+    `  👤 Admin Staff 1   : admin.staff1@company.com     (EMP041) → supervisor: admin`,
+  );
 
   console.log("\n✅ All users created\n");
 
+  await syncUserRoles([
+    { id: executive.id, role: executive.role },
+    { id: director.id, role: director.role },
+    { id: financeChief.id, role: financeChief.role },
+    { id: financeStaff1.id, role: financeStaff1.role },
+    { id: financeStaff2.id, role: financeStaff2.role },
+    { id: salesChief.id, role: salesChief.role },
+    { id: salesStaff1.id, role: salesStaff1.role },
+    { id: salesStaff2.id, role: salesStaff2.role },
+    { id: engChief.id, role: engChief.role },
+    { id: engStaff1.id, role: engStaff1.role },
+    { id: engStaff2.id, role: engStaff2.role },
+    { id: adminChief.id, role: adminChief.role },
+    { id: adminStaff1.id, role: adminStaff1.role },
+  ]);
+  console.log("  ✅ UserRole rows synchronized from legacy role\n");
+
   // ── 4. Wire Department.chiefId ────────────────────────────────────────────────
   console.log("🔗 Wiring department chiefs…");
-  await prisma.department.update({ where: { id: deptSales.id },   data: { chiefId: salesChief.id } });
-  await prisma.department.update({ where: { id: deptEng.id },     data: { chiefId: engChief.id } });
-  await prisma.department.update({ where: { id: deptFinance.id }, data: { chiefId: financeChief.id } });
-  await prisma.department.update({ where: { id: deptAdmin.id },   data: { chiefId: adminChief.id } });
+  await prisma.department.update({
+    where: { id: deptSales.id },
+    data: { chiefId: salesChief.id },
+  });
+  await prisma.department.update({
+    where: { id: deptEng.id },
+    data: { chiefId: engChief.id },
+  });
+  await prisma.department.update({
+    where: { id: deptFinance.id },
+    data: { chiefId: financeChief.id },
+  });
+  await prisma.department.update({
+    where: { id: deptAdmin.id },
+    data: { chiefId: adminChief.id },
+  });
   console.log("  ✅ Sales    dept chief → sales.chief");
   console.log("  ✅ Eng      dept chief → engineer.chief");
   console.log("  ✅ Finance  dept chief → finance.chief");
@@ -332,23 +428,35 @@ async function main() {
 
   // ── 6. Summary ────────────────────────────────────────────────────────────────
   console.log("🎉 Seeding completed!\n");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  );
   console.log("  All passwords : password123");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  );
   console.log("");
   console.log("  Hierarchy:");
   console.log("  executive@company.com   (ADMIN / C-Level)");
   console.log("  └─ director@company.com  (DIRECTOR)");
-  console.log("     ├─ finance.chief@company.com   (MANAGER)  ← Finance dept chief");
+  console.log(
+    "     ├─ finance.chief@company.com   (MANAGER)  ← Finance dept chief",
+  );
   console.log("     │  ├─ finance.staff1@company.com (FINANCE)");
   console.log("     │  └─ finance.staff2@company.com (FINANCE)");
-  console.log("     ├─ sales.chief@company.com     (SALES_CHIEF) ← Sales dept chief");
+  console.log(
+    "     ├─ sales.chief@company.com     (SALES_CHIEF) ← Sales dept chief",
+  );
   console.log("     │  ├─ sales.staff1@company.com   (SALES_EMPLOYEE)");
   console.log("     │  └─ sales.staff2@company.com   (SALES_EMPLOYEE)");
-  console.log("     ├─ engineer.chief@company.com  (SUPERVISOR) ← Eng dept chief");
+  console.log(
+    "     ├─ engineer.chief@company.com  (SUPERVISOR) ← Eng dept chief",
+  );
   console.log("     │  ├─ engineer.staff1@company.com (EMPLOYEE)");
   console.log("     │  └─ engineer.staff2@company.com (EMPLOYEE)");
-  console.log("     └─ admin@company.com           (ADMIN)    ← Admin dept chief");
+  console.log(
+    "     └─ admin@company.com           (ADMIN)    ← Admin dept chief",
+  );
   console.log("        └─ admin.staff1@company.com  (EMPLOYEE)");
   console.log("");
   console.log("  Approval chain examples:");
@@ -361,10 +469,19 @@ async function main() {
   console.log("    seq=1 DEPT_CHIEF  → engineer.chief");
   console.log("    seq=2 DIRECTOR    → director");
   console.log("    seq=3 EXECUTIVE   → executive");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+  );
 
   // suppress unused-variable warnings
-  void [financeStaff2, salesStaff1, salesStaff2, engStaff1, engStaff2, adminStaff1];
+  void [
+    financeStaff2,
+    salesStaff1,
+    salesStaff2,
+    engStaff1,
+    engStaff2,
+    adminStaff1,
+  ];
 }
 
 // ─── Chart of Accounts ───────────────────────────────────────────────────────
@@ -396,45 +513,171 @@ async function createChartOfAccounts(createdById: string) {
     });
 
   // Root
-  const root = await upsertCoa("6000", "Operating Expenses", "Operating", null, null, "All operating expenses");
+  const root = await upsertCoa(
+    "6000",
+    "Operating Expenses",
+    "Operating",
+    null,
+    null,
+    "All operating expenses",
+  );
   console.log(`    6000 Operating Expenses`);
 
   // Travel
-  const travel = await upsertCoa("6100", "Travel & Transportation", "Travel", null, root.id, "All travel and transportation related expenses");
+  const travel = await upsertCoa(
+    "6100",
+    "Travel & Transportation",
+    "Travel",
+    null,
+    root.id,
+    "All travel and transportation related expenses",
+  );
   console.log(`    6100 Travel & Transportation`);
-  await upsertCoa("6110", "Airfare",                "Travel", "Transportation", travel.id, "Air travel expenses");
-  await upsertCoa("6120", "Ground Transportation",  "Travel", "Transportation", travel.id, "Taxi, car rental, fuel, parking expenses");
-  await upsertCoa("6130", "Accommodation",          "Travel", "Lodging",         travel.id, "Hotel and lodging expenses");
+  await upsertCoa(
+    "6110",
+    "Airfare",
+    "Travel",
+    "Transportation",
+    travel.id,
+    "Air travel expenses",
+  );
+  await upsertCoa(
+    "6120",
+    "Ground Transportation",
+    "Travel",
+    "Transportation",
+    travel.id,
+    "Taxi, car rental, fuel, parking expenses",
+  );
+  await upsertCoa(
+    "6130",
+    "Accommodation",
+    "Travel",
+    "Lodging",
+    travel.id,
+    "Hotel and lodging expenses",
+  );
 
   // Meals & Entertainment
-  const meals = await upsertCoa("6200", "Meals & Entertainment", "Entertainment", null, root.id, "Business meals and entertainment expenses");
+  const meals = await upsertCoa(
+    "6200",
+    "Meals & Entertainment",
+    "Entertainment",
+    null,
+    root.id,
+    "Business meals and entertainment expenses",
+  );
   console.log(`    6200 Meals & Entertainment`);
-  await upsertCoa("6210", "Business Meals",       "Entertainment", "Meals",        meals.id, "Business-related meal expenses");
-  await upsertCoa("6220", "Client Entertainment", "Entertainment", "Hospitality",  meals.id, "Entertainment expenses for clients and prospects");
+  await upsertCoa(
+    "6210",
+    "Business Meals",
+    "Entertainment",
+    "Meals",
+    meals.id,
+    "Business-related meal expenses",
+  );
+  await upsertCoa(
+    "6220",
+    "Client Entertainment",
+    "Entertainment",
+    "Hospitality",
+    meals.id,
+    "Entertainment expenses for clients and prospects",
+  );
 
   // Communication
-  const comm = await upsertCoa("6300", "Communication Expenses", "Communication", null, root.id, "Phone, internet, and communication expenses");
+  const comm = await upsertCoa(
+    "6300",
+    "Communication Expenses",
+    "Communication",
+    null,
+    root.id,
+    "Phone, internet, and communication expenses",
+  );
   console.log(`    6300 Communication Expenses`);
-  await upsertCoa("6310", "Phone & Mobile", "Communication", "Telecommunications", comm.id, "Phone and mobile billing expenses");
+  await upsertCoa(
+    "6310",
+    "Phone & Mobile",
+    "Communication",
+    "Telecommunications",
+    comm.id,
+    "Phone and mobile billing expenses",
+  );
 
   // Office & Supplies
-  const office = await upsertCoa("6400", "Office & Supplies", "Office", null, root.id, "Office supplies and equipment expenses");
+  const office = await upsertCoa(
+    "6400",
+    "Office & Supplies",
+    "Office",
+    null,
+    root.id,
+    "Office supplies and equipment expenses",
+  );
   console.log(`    6400 Office & Supplies`);
-  await upsertCoa("6410", "Stationery & Supplies", "Office", "Supplies", office.id, "Office stationery and supplies");
+  await upsertCoa(
+    "6410",
+    "Stationery & Supplies",
+    "Office",
+    "Supplies",
+    office.id,
+    "Office stationery and supplies",
+  );
 
   // Employee Benefits
-  const benefits = await upsertCoa("6500", "Employee Benefits", "Benefits", null, root.id, "Employee benefits and welfare expenses");
+  const benefits = await upsertCoa(
+    "6500",
+    "Employee Benefits",
+    "Benefits",
+    null,
+    root.id,
+    "Employee benefits and welfare expenses",
+  );
   console.log(`    6500 Employee Benefits`);
-  await upsertCoa("6510", "BPJS & Health Insurance", "Benefits", "Insurance", benefits.id, "BPJS health insurance and medical benefits");
-  await upsertCoa("6520", "Overtime Meals",           "Benefits", "Meals",     benefits.id, "Employee overtime meal allowances");
+  await upsertCoa(
+    "6510",
+    "BPJS & Health Insurance",
+    "Benefits",
+    "Insurance",
+    benefits.id,
+    "BPJS health insurance and medical benefits",
+  );
+  await upsertCoa(
+    "6520",
+    "Overtime Meals",
+    "Benefits",
+    "Meals",
+    benefits.id,
+    "Employee overtime meal allowances",
+  );
 
   // Vehicle
-  const vehicle = await upsertCoa("6600", "Vehicle Expenses", "Vehicle", null, root.id, "Vehicle-related expenses");
+  const vehicle = await upsertCoa(
+    "6600",
+    "Vehicle Expenses",
+    "Vehicle",
+    null,
+    root.id,
+    "Vehicle-related expenses",
+  );
   console.log(`    6600 Vehicle Expenses`);
-  await upsertCoa("6610", "Vehicle Maintenance", "Vehicle", "Maintenance", vehicle.id, "Motorcycle and vehicle maintenance and service");
+  await upsertCoa(
+    "6610",
+    "Vehicle Maintenance",
+    "Vehicle",
+    "Maintenance",
+    vehicle.id,
+    "Motorcycle and vehicle maintenance and service",
+  );
 
   // Misc
-  await upsertCoa("6900", "Other Expenses", "Miscellaneous", null, root.id, "Other miscellaneous business expenses");
+  await upsertCoa(
+    "6900",
+    "Other Expenses",
+    "Miscellaneous",
+    null,
+    root.id,
+    "Other miscellaneous business expenses",
+  );
   console.log(`    6900 Other Expenses`);
 }
 

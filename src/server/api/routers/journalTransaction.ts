@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { JournalEntryType, Role } from "../../../../generated/prisma";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { userHasAnyRole } from "@/lib/auth/role-check";
 
 const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
 
@@ -34,11 +35,11 @@ export const journalTransactionRouter = createTRPCRouter({
         endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).default(50),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const isFinance = FINANCE_ROLES.includes(ctx.session.user.role as Role);
+      const isFinance = userHasAnyRole(ctx.session.user, FINANCE_ROLES);
 
       // Build where clause
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,8 +55,10 @@ export const journalTransactionRouter = createTRPCRouter({
 
       if (input.bailoutId) where.bailoutId = input.bailoutId;
       if (input.claimId) where.claimId = input.claimId;
-      if (input.chartOfAccountId) where.chartOfAccountId = input.chartOfAccountId;
-      if (input.balanceAccountId) where.balanceAccountId = input.balanceAccountId;
+      if (input.chartOfAccountId)
+        where.chartOfAccountId = input.chartOfAccountId;
+      if (input.balanceAccountId)
+        where.balanceAccountId = input.balanceAccountId;
       if (input.entryType) where.entryType = input.entryType;
 
       if (input.startDate || input.endDate) {
@@ -119,7 +122,8 @@ export const journalTransactionRouter = createTRPCRouter({
       mcp: {
         enabled: true,
         name: "journal_get_by_id",
-        description: "Retrieve full detail of a single journal transaction including linked bailout, claim, COA, and balance account.",
+        description:
+          "Retrieve full detail of a single journal transaction including linked bailout, claim, COA, and balance account.",
       },
     })
     .input(z.object({ id: z.string() }))
@@ -156,7 +160,7 @@ export const journalTransactionRouter = createTRPCRouter({
         });
       }
 
-      const isFinance = FINANCE_ROLES.includes(ctx.session.user.role as Role);
+      const isFinance = userHasAnyRole(ctx.session.user, FINANCE_ROLES);
       const isBailoutOwner = tx.bailout?.requesterId === ctx.session.user.id;
       const isClaimOwner = tx.claim?.submitterId === ctx.session.user.id;
 
@@ -183,7 +187,8 @@ export const journalTransactionRouter = createTRPCRouter({
       mcp: {
         enabled: true,
         name: "list_balance_accounts",
-        description: "List all active balance accounts used for journal transaction tracking.",
+        description:
+          "List all active balance accounts used for journal transaction tracking.",
       },
     })
     .input(
@@ -191,7 +196,7 @@ export const journalTransactionRouter = createTRPCRouter({
         isActive: z.boolean().optional(),
         limit: z.number().min(1).max(200).default(100),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {

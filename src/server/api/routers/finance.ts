@@ -9,10 +9,8 @@ import {
   type Prisma,
 } from "../../../../generated/prisma";
 import { db as dbClient } from "@/server/db";
-import {
-  createTRPCRouter,
-  protectedProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { userHasAnyRole } from "@/lib/auth/role-check";
 
 const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
 
@@ -54,11 +52,11 @@ export const financeRouter = createTRPCRouter({
         status: z.nativeEnum(BailoutStatus).optional(),
         limit: z.number().min(1).max(100).default(50),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const isFinance = FINANCE_ROLES.includes(ctx.session.user.role as Role);
+      const isFinance = userHasAnyRole(ctx.session.user, FINANCE_ROLES);
 
       const where: Record<string, unknown> = { deletedAt: null };
 
@@ -119,7 +117,7 @@ export const financeRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can access this endpoint",
@@ -214,11 +212,11 @@ export const financeRouter = createTRPCRouter({
       z.object({
         bailoutNumber: z.string().min(1),
         storageUrl: z.string().url(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can attach files to a bailout",
@@ -317,11 +315,11 @@ export const financeRouter = createTRPCRouter({
         transactionDate: z.coerce.date().optional(),
         notes: z.string().optional(),
         referenceNumber: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can process bailout transactions",
@@ -334,7 +332,10 @@ export const financeRouter = createTRPCRouter({
       });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       // Only fully-approved bailouts can be processed (APPROVED_L2 or DISBURSED)
@@ -356,15 +357,25 @@ export const financeRouter = createTRPCRouter({
           where: { id: input.chartOfAccountId, isActive: true },
         }),
         ctx.db.balanceAccount.findUnique({
-          where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+          where: {
+            id: input.balanceAccountId,
+            isActive: true,
+            deletedAt: null,
+          },
         }),
       ]);
 
       if (!coa) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Chart of Account tidak ditemukan atau tidak aktif" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Chart of Account tidak ditemukan atau tidak aktif",
+        });
       }
       if (!balanceAccount) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Balance Account tidak ditemukan atau tidak aktif" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Balance Account tidak ditemukan atau tidak aktif",
+        });
       }
 
       // ── Generate transaction number ───────────────────────────────────────
@@ -389,7 +400,9 @@ export const financeRouter = createTRPCRouter({
           },
           include: {
             chartOfAccount: { select: { id: true, code: true, name: true } },
-            balanceAccount: { select: { id: true, code: true, name: true, balance: true } },
+            balanceAccount: {
+              select: { id: true, code: true, name: true, balance: true },
+            },
           },
         });
 
@@ -470,11 +483,11 @@ export const financeRouter = createTRPCRouter({
         transactionDate: z.coerce.date().optional(),
         notes: z.string().optional(),
         referenceNumber: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can process claim transactions",
@@ -487,7 +500,10 @@ export const financeRouter = createTRPCRouter({
       });
 
       if (!claim) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Claim tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Claim tidak ditemukan",
+        });
       }
 
       // Claim must be final (APPROVED or PAID)
@@ -508,15 +524,25 @@ export const financeRouter = createTRPCRouter({
           where: { id: input.chartOfAccountId, isActive: true },
         }),
         ctx.db.balanceAccount.findUnique({
-          where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+          where: {
+            id: input.balanceAccountId,
+            isActive: true,
+            deletedAt: null,
+          },
         }),
       ]);
 
       if (!coa) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Chart of Account tidak ditemukan atau tidak aktif" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Chart of Account tidak ditemukan atau tidak aktif",
+        });
       }
       if (!balanceAccount) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Balance Account tidak ditemukan atau tidak aktif" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Balance Account tidak ditemukan atau tidak aktif",
+        });
       }
 
       // ── Generate transaction number ───────────────────────────────────────
@@ -541,7 +567,9 @@ export const financeRouter = createTRPCRouter({
           },
           include: {
             chartOfAccount: { select: { id: true, code: true, name: true } },
-            balanceAccount: { select: { id: true, code: true, name: true, balance: true } },
+            balanceAccount: {
+              select: { id: true, code: true, name: true, balance: true },
+            },
           },
         });
 
@@ -602,7 +630,8 @@ export const financeRouter = createTRPCRouter({
       mcp: {
         enabled: true,
         name: "finance_list_balance_accounts",
-        description: "List all balance accounts used for expense tracking via journal transactions.",
+        description:
+          "List all balance accounts used for expense tracking via journal transactions.",
       },
     })
     .input(
@@ -610,11 +639,11 @@ export const financeRouter = createTRPCRouter({
         isActive: z.boolean().optional(),
         limit: z.number().min(1).max(200).default(100),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can list balance accounts",
@@ -653,7 +682,8 @@ export const financeRouter = createTRPCRouter({
       mcp: {
         enabled: true,
         name: "finance_create_balance_account",
-        description: "Create a new balance account for tracking expense allocations via journal transactions.",
+        description:
+          "Create a new balance account for tracking expense allocations via journal transactions.",
       },
     })
     .input(
@@ -663,11 +693,11 @@ export const financeRouter = createTRPCRouter({
         balance: z.number().default(0),
         description: z.string().optional(),
         isActive: z.boolean().default(true),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can create balance accounts",
@@ -725,11 +755,11 @@ export const financeRouter = createTRPCRouter({
         name: z.string().min(1).max(150).optional(),
         description: z.string().optional(),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can update balance accounts",
@@ -741,7 +771,10 @@ export const financeRouter = createTRPCRouter({
       });
 
       if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Balance account tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Balance account tidak ditemukan",
+        });
       }
 
       const { id, ...data } = input;
@@ -792,11 +825,11 @@ export const financeRouter = createTRPCRouter({
         filename: z.string().min(1),
         contentType: z.string().min(1),
         expiresIn: z.number().min(60).max(3600).default(900),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can request upload URLs",
@@ -807,7 +840,11 @@ export const financeRouter = createTRPCRouter({
       const { getPresignedUploadUrl, buildStorageKey, getPublicUrl } =
         await import("@/lib/storage/r2");
 
-      const key = buildStorageKey(input.entityType, input.entityId, input.filename);
+      const key = buildStorageKey(
+        input.entityType,
+        input.entityId,
+        input.filename,
+      );
 
       const uploadUrl = await getPresignedUploadUrl(
         key,

@@ -7,9 +7,23 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { db } from "@/server/db";
 import { env } from "@/env";
+import {
+  DEFAULT_USER_ROLES,
+  derivePrimaryRole,
+  normalizeRoles,
+  type Role,
+} from "@/lib/constants/roles";
 
-// Import Role type
-type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN" | "SALES_EMPLOYEE" | "SALES_CHIEF";
+type AuthToken = {
+  id?: string;
+  role?: Role;
+  roles?: Role[];
+  employeeId?: string | null;
+  departmentId?: string | null;
+  email?: string;
+  name?: string | null;
+  picture?: string | null;
+};
 
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
@@ -22,6 +36,7 @@ declare module "next-auth" {
     user: {
       id: string;
       role: Role;
+      roles: Role[];
       email: string;
       employeeId: string | null;
       departmentId: string | null;
@@ -30,9 +45,26 @@ declare module "next-auth" {
 
   interface User {
     role: Role;
+    roles: Role[];
     employeeId: string | null;
     departmentId: string | null;
   }
+}
+
+async function getUserRoles(
+  userId: string,
+  fallbackRole: Role,
+): Promise<Role[]> {
+  const rows = await db.$queryRaw<Array<{ role: Role }>>`
+    SELECT "role"
+    FROM "UserRole"
+    WHERE "userId" = ${userId}
+  `;
+
+  return normalizeRoles({
+    roles: rows.map((row) => row.role),
+    role: fallbackRole,
+  });
 }
 
 /**
@@ -81,25 +113,34 @@ export const authConfig = {
             return null;
           }
 
-          console.log("[auth] authorize: user found, hasPassword:", !!user.password);
+          console.log(
+            "[auth] authorize: user found, hasPassword:",
+            !!user.password,
+          );
 
           // In non-production environments, allow passwordless login with a specific bypass key.
           if (
             process.env.NODE_ENV !== "production" &&
             credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
           ) {
-            console.log(`[auth] authorize: bypass key accepted for ${user.email}.`);
+            console.log(
+              `[auth] authorize: bypass key accepted for ${user.email}.`,
+            );
             return {
               id: user.id,
               name: user.name,
               email: user.email,
               role: user.role,
+              roles: normalizeRoles({ roles: [], role: user.role }),
               employeeId: user.employeeId,
               departmentId: user.departmentId,
             };
           }
 
-          if (!credentials.password || typeof credentials.password !== "string") {
+          if (
+            !credentials.password ||
+            typeof credentials.password !== "string"
+          ) {
             console.error("[auth] authorize: missing or invalid password");
             return null;
           }
@@ -126,6 +167,7 @@ export const authConfig = {
             name: user.name,
             email: user.email,
             role: user.role,
+            roles: normalizeRoles({ roles: [], role: user.role }),
             employeeId: user.employeeId,
             departmentId: user.departmentId,
           };
@@ -136,25 +178,31 @@ export const authConfig = {
       },
     }),
     // Azure AD provider (conditional)
-    ...(env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET && env.AZURE_AD_TENANT_ID ? [
-      AzureADProvider({
-        clientId: env.AZURE_AD_CLIENT_ID,
-        clientSecret: env.AZURE_AD_CLIENT_SECRET,
-        issuer: `https://login.microsoftonline.com/${env.AZURE_AD_TENANT_ID}/v2.0`,
-        authorization: {
-          params: {
-            scope: "openid profile email offline_access User.Read",
-          },
-        },
-      }),
-    ] : []),
+    ...(env.AZURE_AD_CLIENT_ID &&
+    env.AZURE_AD_CLIENT_SECRET &&
+    env.AZURE_AD_TENANT_ID
+      ? [
+          AzureADProvider({
+            clientId: env.AZURE_AD_CLIENT_ID,
+            clientSecret: env.AZURE_AD_CLIENT_SECRET,
+            issuer: `https://login.microsoftonline.com/${env.AZURE_AD_TENANT_ID}/v2.0`,
+            authorization: {
+              params: {
+                scope: "openid profile email offline_access User.Read",
+              },
+            },
+          }),
+        ]
+      : []),
     // Google provider (conditional)
-    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? [
-      GoogleProvider({
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      }),
-    ] : []),
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [
+          GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          }),
+        ]
+      : []),
   ],
   adapter: PrismaAdapter(db) as unknown as Adapter,
   session: {
@@ -185,7 +233,10 @@ export const authConfig = {
 
         if (!existingUser) {
           // First-time login: create user with default EMPLOYEE role
-          const oauthProfile = profile as { extension_employeeId?: string; employeeId?: string } | null | undefined;
+          const oauthProfile = profile as
+            | { extension_employeeId?: string; employeeId?: string }
+            | null
+            | undefined;
           const newUser = await db.user.create({
             data: {
               email: user.email,
@@ -193,11 +244,19 @@ export const authConfig = {
               image: user.image,
               emailVerified: new Date(),
               role: "EMPLOYEE",
-              employeeId: oauthProfile?.extension_employeeId ?? oauthProfile?.employeeId ?? null,
+              employeeId:
+                oauthProfile?.extension_employeeId ??
+                oauthProfile?.employeeId ??
+                null,
             },
           });
 
           console.log(`Created new user: ${newUser.email} with role EMPLOYEE`);
+          await db.$executeRaw`
+            INSERT INTO "UserRole" ("userId", "role", "createdAt")
+            VALUES (${newUser.id}, ${DEFAULT_USER_ROLES[0]}::"Role", NOW())
+            ON CONFLICT ("userId", "role") DO NOTHING
+          `;
         } else {
           // Update existing user profile
           await db.user.update({
@@ -220,17 +279,23 @@ export const authConfig = {
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async jwt({ token, user, account, profile, trigger }) {
+      const authToken = token as AuthToken;
+
       // Initial sign in
       if (user) {
         // For credentials provider, user object already has all needed data
         if (account?.provider === "credentials") {
-          token.id = user.id;
-          token.role = user.role;
-          token.employeeId = user.employeeId;
-          token.departmentId = user.departmentId;
-          token.email = user.email;
-          token.name = user.name;
-          token.picture = user.image;
+          authToken.id = user.id;
+          authToken.role = user.role;
+          authToken.roles = normalizeRoles({
+            roles: user.roles,
+            role: user.role,
+          });
+          authToken.employeeId = user.employeeId;
+          authToken.departmentId = user.departmentId;
+          authToken.email = user.email ?? undefined;
+          authToken.name = user.name;
+          authToken.picture = user.image;
         } else {
           // For OAuth providers, fetch from database
           const dbUser = await db.user.findUnique({
@@ -247,21 +312,25 @@ export const authConfig = {
           });
 
           if (dbUser) {
-            token.id = dbUser.id;
-            token.role = dbUser.role;
-            token.employeeId = dbUser.employeeId;
-            token.departmentId = dbUser.departmentId;
-            token.email = dbUser.email;
-            token.name = dbUser.name;
-            token.picture = dbUser.image;
+            authToken.id = dbUser.id;
+            authToken.roles = await getUserRoles(
+              dbUser.id,
+              dbUser.role as Role,
+            );
+            authToken.role = derivePrimaryRole(authToken.roles);
+            authToken.employeeId = dbUser.employeeId;
+            authToken.departmentId = dbUser.departmentId;
+            authToken.email = dbUser.email ?? undefined;
+            authToken.name = dbUser.name;
+            authToken.picture = dbUser.image;
           }
         }
       }
 
       // Refresh user data on update trigger
-      if (trigger === "update" && token.id) {
+      if (trigger === "update" && authToken.id) {
         const dbUser = await db.user.findUnique({
-          where: { id: token.id as string },
+          where: { id: authToken.id },
           select: {
             id: true,
             role: true,
@@ -274,12 +343,13 @@ export const authConfig = {
         });
 
         if (dbUser) {
-          token.role = dbUser.role;
-          token.employeeId = dbUser.employeeId;
-          token.departmentId = dbUser.departmentId;
-          token.email = dbUser.email;
-          token.name = dbUser.name;
-          token.picture = dbUser.image;
+          authToken.roles = await getUserRoles(dbUser.id, dbUser.role as Role);
+          authToken.role = derivePrimaryRole(authToken.roles);
+          authToken.employeeId = dbUser.employeeId;
+          authToken.departmentId = dbUser.departmentId;
+          authToken.email = dbUser.email ?? undefined;
+          authToken.name = dbUser.name;
+          authToken.picture = dbUser.image;
         }
       }
 
@@ -287,14 +357,21 @@ export const authConfig = {
     },
 
     async session({ session, token }) {
+      const authToken = token as AuthToken;
+
       if (token && session.user) {
-        session.user.id = token.id as string;
-        session.user.role = token.role as Role;
-        session.user.employeeId = token.employeeId as string | null;
-        session.user.departmentId = token.departmentId as string | null;
-        session.user.email = token.email as string;
-        session.user.name = token.name as string;
-        session.user.image = token.picture as string;
+        session.user.id = authToken.id as string;
+        const roles = normalizeRoles({
+          roles: authToken.roles,
+          role: authToken.role,
+        });
+        session.user.roles = roles;
+        session.user.role = derivePrimaryRole(roles);
+        session.user.employeeId = authToken.employeeId as string | null;
+        session.user.departmentId = authToken.departmentId as string | null;
+        session.user.email = authToken.email as string;
+        session.user.name = authToken.name as string;
+        session.user.image = authToken.picture as string;
       }
 
       return session;

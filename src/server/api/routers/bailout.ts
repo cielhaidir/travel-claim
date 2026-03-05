@@ -8,13 +8,16 @@ import {
   Role,
   ApprovalStatus,
 } from "../../../../generated/prisma";
-import {
-  createTRPCRouter,
-  protectedProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
+import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
-const SALES_CHIEF_ROLES: string[] = [Role.SALES_CHIEF, Role.MANAGER, Role.DIRECTOR, Role.ADMIN];
+const SALES_CHIEF_ROLES: string[] = [
+  Role.SALES_CHIEF,
+  Role.MANAGER,
+  Role.DIRECTOR,
+  Role.ADMIN,
+];
 const DIRECTOR_ROLES: string[] = [Role.DIRECTOR, Role.ADMIN];
 
 export const bailoutRouter = createTRPCRouter({
@@ -35,7 +38,7 @@ export const bailoutRouter = createTRPCRouter({
         status: z.nativeEnum(BailoutStatus).optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -43,7 +46,7 @@ export const bailoutRouter = createTRPCRouter({
 
       // Non-privileged users only see their own bailouts
       const privilegedRoles: string[] = [...SALES_CHIEF_ROLES, Role.FINANCE];
-      if (!privilegedRoles.includes(ctx.session.user.role)) {
+      if (!userHasAnyRole(ctx.session.user, privilegedRoles)) {
         where.requesterId = ctx.session.user.id;
       }
 
@@ -117,8 +120,8 @@ export const bailoutRouter = createTRPCRouter({
 
       const canView =
         bailout.requesterId === ctx.session.user.id ||
-        SALES_CHIEF_ROLES.includes(ctx.session.user.role as Role) ||
-        ctx.session.user.role === Role.FINANCE;
+        userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES) ||
+        userHasRole(ctx.session.user, Role.FINANCE);
 
       if (!canView) {
         throw new TRPCError({
@@ -166,7 +169,7 @@ export const bailoutRouter = createTRPCRouter({
         // Meal
         mealDate: z.coerce.date().optional(),
         mealLocation: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -183,9 +186,13 @@ export const bailoutRouter = createTRPCRouter({
       }
 
       // Only requester or privileged roles can create bailout
-      const allowedRoles: Role[] = [Role.SALES_EMPLOYEE, Role.SALES_CHIEF, Role.EMPLOYEE];
+      const allowedRoles: Role[] = [
+        Role.SALES_EMPLOYEE,
+        Role.SALES_CHIEF,
+        Role.EMPLOYEE,
+      ];
       const isRequester = travelRequest.requesterId === ctx.session.user.id;
-      if (!isRequester && !allowedRoles.includes(ctx.session.user.role as Role)) {
+      if (!isRequester && !userHasAnyRole(ctx.session.user, allowedRoles)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Hanya pembuat trip yang bisa mengajukan bailout",
@@ -199,7 +206,14 @@ export const bailoutRouter = createTRPCRouter({
       });
       const bailoutNumber = `BLT-${year}-${String(count + 1).padStart(5, "0")}`;
 
-      const { travelRequestId, category, description, amount, transportMode, ...rest } = input;
+      const {
+        travelRequestId,
+        category,
+        description,
+        amount,
+        transportMode,
+        ...rest
+      } = input;
 
       const bailout = await ctx.db.bailout.create({
         data: {
@@ -215,7 +229,9 @@ export const bailoutRouter = createTRPCRouter({
         },
         include: {
           requester: { select: { id: true, name: true, email: true } },
-          travelRequest: { select: { id: true, requestNumber: true, destination: true } },
+          travelRequest: {
+            select: { id: true, requestNumber: true, destination: true },
+          },
         },
       });
 
@@ -242,11 +258,17 @@ export const bailoutRouter = createTRPCRouter({
       });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       if (bailout.requesterId !== ctx.session.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Hanya pembuat yang bisa submit" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Hanya pembuat yang bisa submit",
+        });
       }
 
       if (bailout.status !== BailoutStatus.DRAFT) {
@@ -315,21 +337,26 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         notes: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!SALES_CHIEF_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Hanya Sales Chief / Manager yang bisa approve di level ini",
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({ where: { id: input.id } });
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+      });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       if (bailout.status !== BailoutStatus.SUBMITTED) {
@@ -398,21 +425,26 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         notes: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!DIRECTOR_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, DIRECTOR_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Hanya Director yang bisa approve di level ini",
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({ where: { id: input.id } });
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+      });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       if (bailout.status !== BailoutStatus.APPROVED_L1) {
@@ -466,32 +498,56 @@ export const bailoutRouter = createTRPCRouter({
 
         // Notify Finance to disburse — with full category-specific detail
         const fmtDate = (d: Date | null | undefined) =>
-          d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+          d
+            ? new Date(d).toLocaleDateString("id-ID", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : "-";
         const fmtDateTime = (d: Date | null | undefined) =>
-          d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+          d
+            ? new Date(d).toLocaleString("id-ID", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "-";
 
         let categoryDetail = "";
         if (updated.category === "TRANSPORT") {
           categoryDetail =
             `Mode          : ${updated.transportMode ?? "-"}\n` +
             (updated.carrier ? `Maskapai      : ${updated.carrier}\n` : "") +
-            (updated.flightNumber ? `No. Penerbangan: ${updated.flightNumber}\n` : "") +
-            (updated.seatClass ? `Kelas         : ${updated.seatClass}\n` : "") +
-            (updated.bookingRef ? `Booking Ref   : ${updated.bookingRef}\n` : "") +
+            (updated.flightNumber
+              ? `No. Penerbangan: ${updated.flightNumber}\n`
+              : "") +
+            (updated.seatClass
+              ? `Kelas         : ${updated.seatClass}\n`
+              : "") +
+            (updated.bookingRef
+              ? `Booking Ref   : ${updated.bookingRef}\n`
+              : "") +
             `Dari          : ${updated.departureFrom ?? "-"} → ${updated.arrivalTo ?? "-"}\n` +
             `Berangkat     : ${fmtDateTime(updated.departureAt)}\n` +
             `Tiba          : ${fmtDateTime(updated.arrivalAt)}\n`;
         } else if (updated.category === "HOTEL") {
           categoryDetail =
             `Hotel         : ${updated.hotelName ?? "-"}\n` +
-            (updated.hotelAddress ? `Alamat        : ${updated.hotelAddress}\n` : "") +
+            (updated.hotelAddress
+              ? `Alamat        : ${updated.hotelAddress}\n`
+              : "") +
             (updated.roomType ? `Tipe Kamar    : ${updated.roomType}\n` : "") +
             `Check-in      : ${fmtDate(updated.checkIn)}\n` +
             `Check-out     : ${fmtDate(updated.checkOut)}\n`;
         } else if (updated.category === "MEAL") {
           categoryDetail =
             `Tanggal       : ${fmtDate(updated.mealDate)}\n` +
-            (updated.mealLocation ? `Lokasi        : ${updated.mealLocation}\n` : "");
+            (updated.mealLocation
+              ? `Lokasi        : ${updated.mealLocation}\n`
+              : "");
         }
 
         // Fetch requester name for the message
@@ -499,7 +555,9 @@ export const bailoutRouter = createTRPCRouter({
           where: { id: input.id },
           include: {
             requester: { select: { name: true, email: true } },
-            travelRequest: { select: { requestNumber: true, destination: true } },
+            travelRequest: {
+              select: { requestNumber: true, destination: true },
+            },
           },
         });
 
@@ -545,21 +603,26 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         rejectionReason: z.string().min(5),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!SALES_CHIEF_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Hanya Sales Chief / Director yang bisa reject bailout",
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({ where: { id: input.id } });
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+      });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       const rejectableStatuses: BailoutStatus[] = [
@@ -626,25 +689,26 @@ export const bailoutRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         disbursementRef: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (
-        !([Role.FINANCE, Role.ADMIN] as Role[]).includes(
-          ctx.session.user.role as Role
-        )
-      ) {
+      if (!userHasAnyRole(ctx.session.user, [Role.FINANCE, Role.ADMIN])) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Hanya Finance yang bisa mencairkan bailout",
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({ where: { id: input.id } });
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+      });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       if (bailout.status !== BailoutStatus.APPROVED_L2) {
@@ -681,12 +745,10 @@ export const bailoutRouter = createTRPCRouter({
     .input(z.object({}))
     .output(z.any())
     .query(async ({ ctx }) => {
-      const role = ctx.session.user.role as Role;
-
       let statusFilter: BailoutStatus;
-      if (DIRECTOR_ROLES.includes(role)) {
+      if (userHasAnyRole(ctx.session.user, DIRECTOR_ROLES)) {
         statusFilter = BailoutStatus.APPROVED_L1;
-      } else if (SALES_CHIEF_ROLES.includes(role)) {
+      } else if (userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
         statusFilter = BailoutStatus.SUBMITTED;
       } else {
         return { bailouts: [] };

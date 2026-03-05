@@ -2,21 +2,19 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { AuditAction, type Prisma } from "../../../../generated/prisma";
 
-import {
-  createTRPCRouter,
-  protectedProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
 export const attachmentRouter = createTRPCRouter({
   // Get attachments by claim ID
   getByClaim: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/attachments/by-claim/{claimId}',
+        method: "GET",
+        path: "/attachments/by-claim/{claimId}",
         protect: true,
-        tags: ['Attachments'],
-        summary: 'Get attachments by claim ID',
+        tags: ["Attachments"],
+        summary: "Get attachments by claim ID",
       },
       mcp: {
         enabled: true,
@@ -48,13 +46,17 @@ export const attachmentRouter = createTRPCRouter({
 
       // Check access rights
       const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester = claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isSubmitter && !isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -78,12 +80,12 @@ export const attachmentRouter = createTRPCRouter({
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/attachments/{id}',
+        method: "GET",
+        path: "/attachments/{id}",
         protect: true,
-        tags: ['Attachments'],
-        summary: 'Get attachment by ID',
-      }
+        tags: ["Attachments"],
+        summary: "Get attachment by ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -93,10 +95,31 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+              submitter: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                  role: true,
+                  departmentId: true,
+                  phoneNumber: true,
+                  image: true,
+                },
+              },
               travelRequest: {
                 include: {
-                  requester: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, image: true } },
+                  requester: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                      employeeId: true,
+                      role: true,
+                      departmentId: true,
+                      image: true,
+                    },
+                  },
                   participants: true,
                 },
               },
@@ -114,13 +137,17 @@ export const attachmentRouter = createTRPCRouter({
 
       // Check access rights
       const isSubmitter = attachment.claim.submitterId === ctx.session.user.id;
-      const isRequester = attachment.claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        attachment.claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = attachment.claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isSubmitter && !isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -136,11 +163,11 @@ export const attachmentRouter = createTRPCRouter({
   create: protectedProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/attachments',
+        method: "POST",
+        path: "/attachments",
         protect: true,
-        tags: ['Attachments'],
-        summary: 'Create attachment metadata',
+        tags: ["Attachments"],
+        summary: "Create attachment metadata",
       },
       mcp: {
         enabled: true,
@@ -159,7 +186,7 @@ export const attachmentRouter = createTRPCRouter({
         storageProvider: z.string().default("local"),
         ocrExtractedData: z.unknown().optional(),
         ocrConfidence: z.number().min(0).max(100).optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -184,9 +211,10 @@ export const attachmentRouter = createTRPCRouter({
 
       // Check if user can add attachments to this claim
       const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester = claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
 
       if (!isSubmitter && !isRequester && !isParticipant) {
@@ -200,7 +228,8 @@ export const attachmentRouter = createTRPCRouter({
       if (!["DRAFT", "REVISION"].includes(claim.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Can only add attachments to claims in DRAFT or REVISION status",
+          message:
+            "Can only add attachments to claims in DRAFT or REVISION status",
         });
       }
 
@@ -239,7 +268,9 @@ export const attachmentRouter = createTRPCRouter({
           fileSize: input.fileSize,
           storageUrl: input.storageUrl,
           storageProvider: input.storageProvider,
-          ocrExtractedData: input.ocrExtractedData as Prisma.InputJsonValue | undefined,
+          ocrExtractedData: input.ocrExtractedData as
+            | Prisma.InputJsonValue
+            | undefined,
           ocrConfidence: input.ocrConfidence,
         },
       });
@@ -266,26 +297,28 @@ export const attachmentRouter = createTRPCRouter({
   update: protectedProcedure
     .meta({
       openapi: {
-        method: 'PATCH',
-        path: '/attachments/{id}',
+        method: "PATCH",
+        path: "/attachments/{id}",
         protect: true,
-        tags: ['Attachments'],
-        summary: 'Update attachment metadata',
-      }
+        tags: ["Attachments"],
+        summary: "Update attachment metadata",
+      },
     })
     .input(
       z.object({
         id: z.string(),
         ocrExtractedData: z.unknown().optional(),
         ocrConfidence: z.number().min(0).max(100).optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const { id, ocrExtractedData, ...rest } = input;
       const updateData = {
         ...rest,
-        ...(ocrExtractedData !== undefined && { ocrExtractedData: ocrExtractedData as Prisma.InputJsonValue }),
+        ...(ocrExtractedData !== undefined && {
+          ocrExtractedData: ocrExtractedData as Prisma.InputJsonValue,
+        }),
       };
 
       const attachment = await ctx.db.attachment.findUnique({
@@ -293,7 +326,18 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+              submitter: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                  role: true,
+                  departmentId: true,
+                  phoneNumber: true,
+                  image: true,
+                },
+              },
             },
           },
         },
@@ -309,7 +353,7 @@ export const attachmentRouter = createTRPCRouter({
       // Only claim submitter or admin can update
       const canUpdate =
         attachment.claim.submitterId === ctx.session.user.id ||
-        ctx.session.user.role === "ADMIN";
+        userHasRole(ctx.session.user, "ADMIN");
 
       if (!canUpdate) {
         throw new TRPCError({
@@ -343,11 +387,11 @@ export const attachmentRouter = createTRPCRouter({
   delete: protectedProcedure
     .meta({
       openapi: {
-        method: 'DELETE',
-        path: '/attachments/{id}',
+        method: "DELETE",
+        path: "/attachments/{id}",
         protect: true,
-        tags: ['Attachments'],
-        summary: 'Delete attachment',
+        tags: ["Attachments"],
+        summary: "Delete attachment",
       },
       mcp: {
         enabled: true,
@@ -363,7 +407,18 @@ export const attachmentRouter = createTRPCRouter({
         include: {
           claim: {
             include: {
-              submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+              submitter: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                  role: true,
+                  departmentId: true,
+                  phoneNumber: true,
+                  image: true,
+                },
+              },
             },
           },
         },
@@ -379,7 +434,7 @@ export const attachmentRouter = createTRPCRouter({
       // Only claim submitter or admin can delete
       const canDelete =
         attachment.claim.submitterId === ctx.session.user.id ||
-        ctx.session.user.role === "ADMIN";
+        userHasRole(ctx.session.user, "ADMIN");
 
       if (!canDelete) {
         throw new TRPCError({
@@ -392,7 +447,8 @@ export const attachmentRouter = createTRPCRouter({
       if (!["DRAFT", "REVISION"].includes(attachment.claim.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Can only delete attachments from claims in DRAFT or REVISION status",
+          message:
+            "Can only delete attachments from claims in DRAFT or REVISION status",
         });
       }
 
@@ -425,12 +481,14 @@ export const attachmentRouter = createTRPCRouter({
   // Get download URL (generates a signed URL for secure download)
   getDownloadUrl: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .output(z.object({
-      url: z.string(),
-      filename: z.string(),
-      mimeType: z.string(),
-      expiresIn: z.number(),
-    }))
+    .output(
+      z.object({
+        url: z.string(),
+        filename: z.string(),
+        mimeType: z.string(),
+        expiresIn: z.number(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const attachment = await ctx.db.attachment.findUnique({
         where: { id: input.id },
@@ -456,13 +514,17 @@ export const attachmentRouter = createTRPCRouter({
 
       // Check access rights
       const isSubmitter = attachment.claim.submitterId === ctx.session.user.id;
-      const isRequester = attachment.claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        attachment.claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = attachment.claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isSubmitter && !isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -495,9 +557,9 @@ export const attachmentRouter = createTRPCRouter({
             fileSize: z.number().positive(),
             storageUrl: z.string(),
             storageProvider: z.string().default("local"),
-          })
+          }),
         ),
-      })
+      }),
     )
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -522,9 +584,10 @@ export const attachmentRouter = createTRPCRouter({
 
       // Check authorization
       const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester = claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
 
       if (!isSubmitter && !isRequester && !isParticipant) {
@@ -538,7 +601,8 @@ export const attachmentRouter = createTRPCRouter({
       if (!["DRAFT", "REVISION"].includes(claim.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Can only add attachments to claims in DRAFT or REVISION status",
+          message:
+            "Can only add attachments to claims in DRAFT or REVISION status",
         });
       }
 

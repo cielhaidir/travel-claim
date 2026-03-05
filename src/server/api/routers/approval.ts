@@ -19,6 +19,7 @@ import {
 } from "@/server/api/trpc";
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
+import { userHasAnyRole } from "@/lib/auth/role-check";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
@@ -232,7 +233,14 @@ export const approvalRouter = createTRPCRouter({
     .input(
       z.object({
         // ── Discriminator ──────────────────────────────────────────────────
-        action: z.enum(["list", "pending_count", "get", "approve", "reject", "revision"]),
+        action: z.enum([
+          "list",
+          "pending_count",
+          "get",
+          "approve",
+          "reject",
+          "revision",
+        ]),
 
         // ── Identifier (required for get / approve / reject / revision) ───
         approvalId: z.string().optional(),
@@ -255,7 +263,7 @@ export const approvalRouter = createTRPCRouter({
         entityType: z.enum(["TravelRequest", "Claim"]).optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -295,7 +303,12 @@ export const approvalRouter = createTRPCRouter({
             claim: {
               include: {
                 submitter: {
-                  select: { id: true, name: true, email: true, employeeId: true },
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    employeeId: true,
+                  },
                 },
                 travelRequest: {
                   select: { requestNumber: true, destination: true },
@@ -351,18 +364,23 @@ export const approvalRouter = createTRPCRouter({
 
           // Phone-based identity check when phone is supplied
           if (input.phone) {
-            const approverPhone = (found.approver as { phoneNumber?: string | null } | null)?.phoneNumber ?? "";
+            const approverPhone =
+              (found.approver as { phoneNumber?: string | null } | null)
+                ?.phoneNumber ?? "";
             if (!approverPhone) {
               throw new TRPCError({
                 code: "FORBIDDEN",
-                message: "The approver for this approval has no phone number registered",
+                message:
+                  "The approver for this approval has no phone number registered",
               });
             }
-            const normalize = (p: string) => p.replace(/^\+/, "").replace(/\s+/g, "");
+            const normalize = (p: string) =>
+              p.replace(/^\+/, "").replace(/\s+/g, "");
             if (normalize(input.phone) !== normalize(approverPhone)) {
               throw new TRPCError({
                 code: "FORBIDDEN",
-                message: "The supplied phone number does not match the approver on record",
+                message:
+                  "The supplied phone number does not match the approver on record",
               });
             }
           }
@@ -388,17 +406,25 @@ export const approvalRouter = createTRPCRouter({
           });
 
           if (!found) {
-            throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Approval not found",
+            });
           }
 
           // Session-based access check
           const isApprover = found.approverId === ctx.session.user.id;
           const isRequester =
-            (found.travelRequest as { requesterId?: string } | null)?.requesterId === ctx.session.user.id ||
-            (found.claim as { submitterId?: string } | null)?.submitterId === ctx.session.user.id;
-          const canView = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
-            ctx.session.user.role,
-          );
+            (found.travelRequest as { requesterId?: string } | null)
+              ?.requesterId === ctx.session.user.id ||
+            (found.claim as { submitterId?: string } | null)?.submitterId ===
+              ctx.session.user.id;
+          const canView = userHasAnyRole(ctx.session.user, [
+            "MANAGER",
+            "DIRECTOR",
+            "ADMIN",
+            "FINANCE",
+          ]);
 
           if (!isApprover && !isRequester && !canView) {
             throw new TRPCError({
@@ -453,15 +479,15 @@ export const approvalRouter = createTRPCRouter({
         approval.travelRequest
           ? "TravelRequest"
           : approval.claim
-          ? "Claim"
-          : approval.bailout
-          ? "Bailout"
-          : (() => {
-              throw new TRPCError({
-                code: "NOT_FOUND",
-                message: "Approval is not linked to any known entity",
-              });
-            })();
+            ? "Claim"
+            : approval.bailout
+              ? "Bailout"
+              : (() => {
+                  throw new TRPCError({
+                    code: "NOT_FOUND",
+                    message: "Approval is not linked to any known entity",
+                  });
+                })();
 
       // ── Phone ownership verification (WhatsApp flow) ───────────────────────
       verifyCallerPhone(
@@ -502,11 +528,22 @@ export const approvalRouter = createTRPCRouter({
         // ── TravelRequest approval chain ─────────────────────────────────────
         if (entityType === "TravelRequest") {
           const tr = approval.travelRequest!;
-          const allApprovals = tr.approvals as Array<{ level: ApprovalLevel; status: ApprovalStatus; id: string; sequence?: number }>;
+          const allApprovals = tr.approvals as Array<{
+            level: ApprovalLevel;
+            status: ApprovalStatus;
+            id: string;
+            sequence?: number;
+          }>;
 
-          const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level);
+          const currentLevelIndex = Object.values(ApprovalLevel).indexOf(
+            approval.level,
+          );
           const allPreviousApproved = allApprovals
-            .filter((a) => Object.values(ApprovalLevel).indexOf(a.level) < currentLevelIndex)
+            .filter(
+              (a) =>
+                Object.values(ApprovalLevel).indexOf(a.level) <
+                currentLevelIndex,
+            )
             .every((a) => a.status === ApprovalStatus.APPROVED);
 
           if (!allPreviousApproved) {
@@ -524,7 +561,8 @@ export const approvalRouter = createTRPCRouter({
           if (pendingApprovals.length === 0) {
             newStatus = TravelStatus.APPROVED;
           } else {
-            const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+            const currentSequence =
+              (approval as unknown as { sequence: number }).sequence ?? 1;
             const seqStatusMap: Record<number, TravelStatus> = {
               1: TravelStatus.APPROVED_L1,
               2: TravelStatus.APPROVED_L2,
@@ -587,9 +625,23 @@ export const approvalRouter = createTRPCRouter({
 
               if (fullTr?.bailouts && fullTr.bailouts.length > 0) {
                 const fmtDate = (d: Date | null | undefined) =>
-                  d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+                  d
+                    ? new Date(d).toLocaleDateString("id-ID", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : "-";
                 const fmtDateTime = (d: Date | null | undefined) =>
-                  d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+                  d
+                    ? new Date(d).toLocaleString("id-ID", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "-";
 
                 for (const bailout of fullTr.bailouts) {
                   const financePhone = bailout.finance?.phoneNumber;
@@ -599,23 +651,37 @@ export const approvalRouter = createTRPCRouter({
                   if (bailout.category === "TRANSPORT") {
                     detail =
                       `Mode: ${bailout.transportMode ?? "-"}\n` +
-                      (bailout.carrier ? `Maskapai/Operator: ${bailout.carrier}\n` : "") +
-                      (bailout.flightNumber ? `No. Penerbangan: ${bailout.flightNumber}\n` : "") +
-                      (bailout.seatClass ? `Kelas: ${bailout.seatClass}\n` : "") +
-                      (bailout.bookingRef ? `Booking Ref: ${bailout.bookingRef}\n` : "") +
+                      (bailout.carrier
+                        ? `Maskapai/Operator: ${bailout.carrier}\n`
+                        : "") +
+                      (bailout.flightNumber
+                        ? `No. Penerbangan: ${bailout.flightNumber}\n`
+                        : "") +
+                      (bailout.seatClass
+                        ? `Kelas: ${bailout.seatClass}\n`
+                        : "") +
+                      (bailout.bookingRef
+                        ? `Booking Ref: ${bailout.bookingRef}\n`
+                        : "") +
                       `Dari: ${bailout.departureFrom ?? "-"} → ${bailout.arrivalTo ?? "-"}\n` +
                       `Berangkat: ${fmtDateTime(bailout.departureAt)}\n` +
                       `Tiba: ${fmtDateTime(bailout.arrivalAt)}\n`;
                   } else if (bailout.category === "HOTEL") {
                     detail =
                       `Hotel: ${bailout.hotelName ?? "-"}\n` +
-                      (bailout.hotelAddress ? `Alamat: ${bailout.hotelAddress}\n` : "") +
-                      (bailout.roomType ? `Tipe Kamar: ${bailout.roomType}\n` : "") +
+                      (bailout.hotelAddress
+                        ? `Alamat: ${bailout.hotelAddress}\n`
+                        : "") +
+                      (bailout.roomType
+                        ? `Tipe Kamar: ${bailout.roomType}\n`
+                        : "") +
                       `Check-in: ${fmtDate(bailout.checkIn)} — Check-out: ${fmtDate(bailout.checkOut)}\n`;
                   } else if (bailout.category === "MEAL") {
                     detail =
                       `Tanggal: ${fmtDate(bailout.mealDate)}\n` +
-                      (bailout.mealLocation ? `Lokasi: ${bailout.mealLocation}\n` : "");
+                      (bailout.mealLocation
+                        ? `Lokasi: ${bailout.mealLocation}\n`
+                        : "");
                   }
 
                   await sendWhatsappMessage({
@@ -636,10 +702,20 @@ export const approvalRouter = createTRPCRouter({
                 }
               }
             } else {
-              const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const currentSequence =
+                (approval as unknown as { sequence: number }).sequence ?? 1;
               const nextApprovalRow = (
-                tr.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
-              ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+                tr.approvals as Array<{
+                  id: string;
+                  sequence: number;
+                  status: string;
+                  approverId: string;
+                  approvalNumber: string;
+                }>
+              ).find(
+                (a) =>
+                  a.sequence === currentSequence + 1 && a.status === "PENDING",
+              );
 
               if (!nextApprovalRow) return;
 
@@ -656,14 +732,18 @@ export const approvalRouter = createTRPCRouter({
               });
               if (!fullTr) return;
 
-              const { buildTravelRequestApprovalPoll } = await import("@/lib/utils/whatsapp");
+              const { buildTravelRequestApprovalPoll } =
+                await import("@/lib/utils/whatsapp");
               await sendWhatsappPoll(
                 buildTravelRequestApprovalPoll(
                   nextApprovalRow.approvalNumber,
                   phone.replace(/^\+/, ""),
                   {
                     requestNumber: fullTr.requestNumber,
-                    requesterName: fullTr.requester.name ?? fullTr.requester.email ?? "Unknown",
+                    requesterName:
+                      fullTr.requester.name ??
+                      fullTr.requester.email ??
+                      "Unknown",
                     destination: fullTr.destination,
                     purpose: fullTr.purpose,
                     startDate: fullTr.startDate,
@@ -678,7 +758,13 @@ export const approvalRouter = createTRPCRouter({
         // ── Claim approval chain ─────────────────────────────────────────────
         else if (entityType === "Claim") {
           const cl = approval.claim!;
-          const pendingApprovals = (cl.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>).filter(
+          const pendingApprovals = (
+            cl.approvals as Array<{
+              status: ApprovalStatus;
+              id: string;
+              sequence: number;
+            }>
+          ).filter(
             (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId,
           );
 
@@ -709,7 +795,9 @@ export const approvalRouter = createTRPCRouter({
             if (newStatus === ClaimStatus.APPROVED) {
               const fullCl = await ctx.db.claim.findUnique({
                 where: { id: approval.claimId as string },
-                include: { submitter: { select: { phoneNumber: true, name: true } } },
+                include: {
+                  submitter: { select: { phoneNumber: true, name: true } },
+                },
               });
               const phone = fullCl?.submitter?.phoneNumber;
               if (phone) {
@@ -725,10 +813,20 @@ export const approvalRouter = createTRPCRouter({
                 });
               }
             } else {
-              const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const currentSequence =
+                (approval as unknown as { sequence: number }).sequence ?? 1;
               const nextApprovalRow = (
-                cl.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
-              ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+                cl.approvals as Array<{
+                  id: string;
+                  sequence: number;
+                  status: string;
+                  approverId: string;
+                  approvalNumber: string;
+                }>
+              ).find(
+                (a) =>
+                  a.sequence === currentSequence + 1 && a.status === "PENDING",
+              );
 
               if (!nextApprovalRow) return;
 
@@ -748,14 +846,18 @@ export const approvalRouter = createTRPCRouter({
               });
               if (!fullCl) return;
 
-              const { buildClaimApprovalPoll } = await import("@/lib/utils/whatsapp");
+              const { buildClaimApprovalPoll } =
+                await import("@/lib/utils/whatsapp");
               await sendWhatsappPoll(
                 buildClaimApprovalPoll(
                   nextApprovalRow.approvalNumber,
                   phone.replace(/^\+/, ""),
                   {
                     claimNumber: fullCl.claimNumber,
-                    submitterName: fullCl.submitter.name ?? fullCl.submitter.email ?? "Unknown",
+                    submitterName:
+                      fullCl.submitter.name ??
+                      fullCl.submitter.email ??
+                      "Unknown",
                     claimType: fullCl.claimType as string,
                     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
                     amount: fullCl.amount as any,
@@ -772,8 +874,14 @@ export const approvalRouter = createTRPCRouter({
         else {
           const bailout = approval.bailout!;
           const pendingApprovals = (
-            bailout.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>
-          ).filter((a) => a.status === ApprovalStatus.PENDING && a.id !== approval.id);
+            bailout.approvals as Array<{
+              status: ApprovalStatus;
+              id: string;
+              sequence: number;
+            }>
+          ).filter(
+            (a) => a.status === ApprovalStatus.PENDING && a.id !== approval.id,
+          );
 
           const isFullyApproved = pendingApprovals.length === 0;
 
@@ -781,7 +889,8 @@ export const approvalRouter = createTRPCRouter({
           if (isFullyApproved) {
             newBailoutStatus = BailoutStatus.APPROVED;
           } else {
-            const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+            const currentSeq =
+              (approval as unknown as { sequence: number }).sequence ?? 1;
             const seqStatusMap: Record<number, BailoutStatus> = {
               1: BailoutStatus.APPROVED_L1,
               2: BailoutStatus.APPROVED_L2,
@@ -789,7 +898,8 @@ export const approvalRouter = createTRPCRouter({
               4: BailoutStatus.APPROVED_L4,
               5: BailoutStatus.APPROVED_L5,
             };
-            newBailoutStatus = seqStatusMap[currentSeq] ?? BailoutStatus.SUBMITTED;
+            newBailoutStatus =
+              seqStatusMap[currentSeq] ?? BailoutStatus.SUBMITTED;
           }
 
           await ctx.db.bailout.update({
@@ -817,9 +927,13 @@ export const approvalRouter = createTRPCRouter({
               const fullBailout = await ctx.db.bailout.findUnique({
                 where: { id: approval.bailoutId as string },
                 include: {
-                  requester: { select: { phoneNumber: true, name: true, email: true } },
+                  requester: {
+                    select: { phoneNumber: true, name: true, email: true },
+                  },
                   finance: { select: { phoneNumber: true, name: true } },
-                  travelRequest: { select: { requestNumber: true, destination: true } },
+                  travelRequest: {
+                    select: { requestNumber: true, destination: true },
+                  },
                 },
               });
 
@@ -839,33 +953,61 @@ export const approvalRouter = createTRPCRouter({
               }
 
               const fmtDate = (d: Date | null | undefined) =>
-                d ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+                d
+                  ? new Date(d).toLocaleDateString("id-ID", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })
+                  : "-";
               const fmtDateTime = (d: Date | null | undefined) =>
-                d ? new Date(d).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+                d
+                  ? new Date(d).toLocaleString("id-ID", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "-";
 
               let categoryDetail = "";
               if (fullBailout) {
                 if (fullBailout.category === "TRANSPORT") {
                   categoryDetail =
                     `Mode          : ${fullBailout.transportMode ?? "-"}\n` +
-                    (fullBailout.carrier ? `Maskapai      : ${fullBailout.carrier}\n` : "") +
-                    (fullBailout.flightNumber ? `No. Penerbangan: ${fullBailout.flightNumber}\n` : "") +
-                    (fullBailout.seatClass ? `Kelas         : ${fullBailout.seatClass}\n` : "") +
-                    (fullBailout.bookingRef ? `Booking Ref   : ${fullBailout.bookingRef}\n` : "") +
+                    (fullBailout.carrier
+                      ? `Maskapai      : ${fullBailout.carrier}\n`
+                      : "") +
+                    (fullBailout.flightNumber
+                      ? `No. Penerbangan: ${fullBailout.flightNumber}\n`
+                      : "") +
+                    (fullBailout.seatClass
+                      ? `Kelas         : ${fullBailout.seatClass}\n`
+                      : "") +
+                    (fullBailout.bookingRef
+                      ? `Booking Ref   : ${fullBailout.bookingRef}\n`
+                      : "") +
                     `Dari          : ${fullBailout.departureFrom ?? "-"} → ${fullBailout.arrivalTo ?? "-"}\n` +
                     `Berangkat     : ${fmtDateTime(fullBailout.departureAt)}\n` +
                     `Tiba          : ${fmtDateTime(fullBailout.arrivalAt)}\n`;
                 } else if (fullBailout.category === "HOTEL") {
                   categoryDetail =
                     `Hotel         : ${fullBailout.hotelName ?? "-"}\n` +
-                    (fullBailout.hotelAddress ? `Alamat        : ${fullBailout.hotelAddress}\n` : "") +
-                    (fullBailout.roomType ? `Tipe Kamar    : ${fullBailout.roomType}\n` : "") +
+                    (fullBailout.hotelAddress
+                      ? `Alamat        : ${fullBailout.hotelAddress}\n`
+                      : "") +
+                    (fullBailout.roomType
+                      ? `Tipe Kamar    : ${fullBailout.roomType}\n`
+                      : "") +
                     `Check-in      : ${fmtDate(fullBailout.checkIn)}\n` +
                     `Check-out     : ${fmtDate(fullBailout.checkOut)}\n`;
                 } else if (fullBailout.category === "MEAL") {
                   categoryDetail =
                     `Tanggal       : ${fmtDate(fullBailout.mealDate)}\n` +
-                    (fullBailout.mealLocation ? `Lokasi        : ${fullBailout.mealLocation}\n` : "");
+                    (fullBailout.mealLocation
+                      ? `Lokasi        : ${fullBailout.mealLocation}\n`
+                      : "");
                 }
               }
 
@@ -879,13 +1021,17 @@ export const approvalRouter = createTRPCRouter({
                   `Kategori      : ${fullBailout.category}\n` +
                   `Jumlah        : Rp ${Number(fullBailout.amount).toLocaleString("id-ID")}\n` +
                   `Keterangan    : ${fullBailout.description}\n` +
-                  (categoryDetail ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}` : "") +
+                  (categoryDetail
+                    ? `━━━━━━━━━━━━━━━━━━━━━━\n${categoryDetail}`
+                    : "") +
                   `━━━━━━━━━━━━━━━━━━━━━━\n` +
                   `Disetujui oleh: ${ctx.session.user.name ?? ctx.session.user.email}\n` +
                   `Silakan upload dokumen/invoice dan proses pencairan.`
                 : "";
 
-              const financePhone = fullBailout?.finance?.phoneNumber ?? bailout.finance?.phoneNumber;
+              const financePhone =
+                fullBailout?.finance?.phoneNumber ??
+                bailout.finance?.phoneNumber;
               if (financePhone && financeMsg) {
                 await sendWhatsappMessage({
                   phone: `${financePhone.replace(/^\+/, "")}@s.whatsapp.net`,
@@ -893,7 +1039,11 @@ export const approvalRouter = createTRPCRouter({
                 });
               } else if (financeMsg) {
                 const financeUsers = await ctx.db.user.findMany({
-                  where: { role: Role.FINANCE, deletedAt: null, phoneNumber: { not: null } },
+                  where: {
+                    role: Role.FINANCE,
+                    deletedAt: null,
+                    phoneNumber: { not: null },
+                  },
                   select: { phoneNumber: true },
                   take: 5,
                 });
@@ -906,10 +1056,19 @@ export const approvalRouter = createTRPCRouter({
                 }
               }
             } else {
-              const currentSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+              const currentSeq =
+                (approval as unknown as { sequence: number }).sequence ?? 1;
               const nextApprovalRow = (
-                bailout.approvals as Array<{ id: string; sequence: number; status: string; approverId: string; approvalNumber: string }>
-              ).find((a) => a.sequence === currentSeq + 1 && a.status === "PENDING");
+                bailout.approvals as Array<{
+                  id: string;
+                  sequence: number;
+                  status: string;
+                  approverId: string;
+                  approvalNumber: string;
+                }>
+              ).find(
+                (a) => a.sequence === currentSeq + 1 && a.status === "PENDING",
+              );
 
               if (!nextApprovalRow) return;
 
@@ -957,7 +1116,8 @@ export const approvalRouter = createTRPCRouter({
         if (!input.rejectionReason || input.rejectionReason.length < 10) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "rejectionReason is required and must be at least 10 characters",
+            message:
+              "rejectionReason is required and must be at least 10 characters",
           });
         }
 
@@ -977,7 +1137,10 @@ export const approvalRouter = createTRPCRouter({
           });
 
           await ctx.db.bailout.updateMany({
-            where: { travelRequestId: approval.travelRequestId as string, deletedAt: null },
+            where: {
+              travelRequestId: approval.travelRequestId as string,
+              deletedAt: null,
+            },
             data: { status: BailoutStatus.REJECTED, rejectedAt: new Date() },
           });
 
@@ -999,7 +1162,9 @@ export const approvalRouter = createTRPCRouter({
           void (async () => {
             const tr = await ctx.db.travelRequest.findUnique({
               where: { id: approval.travelRequestId as string },
-              include: { requester: { select: { phoneNumber: true, name: true } } },
+              include: {
+                requester: { select: { phoneNumber: true, name: true } },
+              },
             });
             const phone = tr?.requester?.phoneNumber;
             if (phone) {
@@ -1039,7 +1204,9 @@ export const approvalRouter = createTRPCRouter({
           void (async () => {
             const cl = await ctx.db.claim.findUnique({
               where: { id: approval.claimId as string },
-              include: { submitter: { select: { phoneNumber: true, name: true } } },
+              include: {
+                submitter: { select: { phoneNumber: true, name: true } },
+              },
             });
             const phone = cl?.submitter?.phoneNumber;
             if (phone) {
@@ -1084,13 +1251,19 @@ export const approvalRouter = createTRPCRouter({
 
           void (async () => {
             const bailout = approval.bailout!;
-            const phone = (bailout.approvals as unknown as { requester?: { phoneNumber?: string | null } }[]) &&
+            const phone =
+              (bailout.approvals as unknown as {
+                requester?: { phoneNumber?: string | null };
+              }[]) &&
               (await ctx.db.bailout.findUnique({
                 where: { id: approval.bailoutId as string },
-                include: { requester: { select: { phoneNumber: true, name: true } } },
+                include: {
+                  requester: { select: { phoneNumber: true, name: true } },
+                },
               }));
-            const requesterPhone = (phone as { requester?: { phoneNumber?: string | null } } | null)
-              ?.requester?.phoneNumber;
+            const requesterPhone = (
+              phone as { requester?: { phoneNumber?: string | null } } | null
+            )?.requester?.phoneNumber;
             if (requesterPhone) {
               await sendWhatsappPoll({
                 phone: `${requesterPhone.replace(/^\+/, "")}@s.whatsapp.net`,
@@ -1100,7 +1273,9 @@ export const approvalRouter = createTRPCRouter({
                   `Jumlah: Rp ${Number((bailout as unknown as { amount: number }).amount).toLocaleString("id-ID")}\n` +
                   `Alasan: ${input.rejectionReason}\n` +
                   `Ditolak oleh: ${ctx.session.user.name ?? ctx.session.user.email}`,
-                options: [`OK ${(bailout as unknown as { bailoutNumber: string }).bailoutNumber}`],
+                options: [
+                  `OK ${(bailout as unknown as { bailoutNumber: string }).bailoutNumber}`,
+                ],
                 maxAnswer: 1,
               });
             }
@@ -1117,7 +1292,8 @@ export const approvalRouter = createTRPCRouter({
         if (!input.comments || input.comments.length < 10) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "comments is required and must be at least 10 characters for revision",
+            message:
+              "comments is required and must be at least 10 characters for revision",
           });
         }
 
@@ -1132,7 +1308,11 @@ export const approvalRouter = createTRPCRouter({
         if (entityType === "TravelRequest") {
           await ctx.db.approval.updateMany({
             where: { travelRequestId: approval.travelRequestId as string },
-            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+            data: {
+              status: ApprovalStatus.PENDING,
+              approvedAt: null,
+              rejectedAt: null,
+            },
           });
 
           await ctx.db.travelRequest.update({
@@ -1141,7 +1321,10 @@ export const approvalRouter = createTRPCRouter({
           });
 
           await ctx.db.bailout.updateMany({
-            where: { travelRequestId: approval.travelRequestId as string, deletedAt: null },
+            where: {
+              travelRequestId: approval.travelRequestId as string,
+              deletedAt: null,
+            },
             data: { status: BailoutStatus.REVISION },
           });
 
@@ -1164,7 +1347,9 @@ export const approvalRouter = createTRPCRouter({
           void (async () => {
             const tr = await ctx.db.travelRequest.findUnique({
               where: { id: approval.travelRequestId as string },
-              include: { requester: { select: { phoneNumber: true, name: true } } },
+              include: {
+                requester: { select: { phoneNumber: true, name: true } },
+              },
             });
             const phone = tr?.requester?.phoneNumber;
             if (phone) {
@@ -1183,7 +1368,11 @@ export const approvalRouter = createTRPCRouter({
         } else if (entityType === "Claim") {
           await ctx.db.approval.updateMany({
             where: { claimId: approval.claimId as string },
-            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+            data: {
+              status: ApprovalStatus.PENDING,
+              approvedAt: null,
+              rejectedAt: null,
+            },
           });
 
           await ctx.db.claim.update({
@@ -1210,7 +1399,9 @@ export const approvalRouter = createTRPCRouter({
           void (async () => {
             const cl = await ctx.db.claim.findUnique({
               where: { id: approval.claimId as string },
-              include: { submitter: { select: { phoneNumber: true, name: true } } },
+              include: {
+                submitter: { select: { phoneNumber: true, name: true } },
+              },
             });
             const phone = cl?.submitter?.phoneNumber;
             if (phone) {
@@ -1231,7 +1422,11 @@ export const approvalRouter = createTRPCRouter({
           // Bailout
           await ctx.db.approval.updateMany({
             where: { bailoutId: approval.bailoutId as string },
-            data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+            data: {
+              status: ApprovalStatus.PENDING,
+              approvedAt: null,
+              rejectedAt: null,
+            },
           });
 
           await ctx.db.bailout.update({
@@ -1258,7 +1453,9 @@ export const approvalRouter = createTRPCRouter({
           void (async () => {
             const fullBailout = await ctx.db.bailout.findUnique({
               where: { id: approval.bailoutId as string },
-              include: { requester: { select: { phoneNumber: true, name: true } } },
+              include: {
+                requester: { select: { phoneNumber: true, name: true } },
+              },
             });
             const phone = fullBailout?.requester?.phoneNumber;
             if (phone) {
@@ -1294,7 +1491,7 @@ export const approvalRouter = createTRPCRouter({
         entityType: z.enum(["TravelRequest", "Claim"]).optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -1376,11 +1573,11 @@ export const approvalRouter = createTRPCRouter({
         level: z.nativeEnum(ApprovalLevel).optional(),
         status: z.nativeEnum(ApprovalStatus).optional(),
         limit: z.number().min(1).max(100).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+      if (!userHasAnyRole(ctx.session.user, ["ADMIN", "DIRECTOR", "MANAGER"])) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only admins and managers can view all approvals",
@@ -1445,11 +1642,11 @@ export const approvalRouter = createTRPCRouter({
         approvalId: z.string(),
         action: z.enum(["approve", "reject", "revision"]),
         comments: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
+      if (!userHasAnyRole(ctx.session.user, ["ADMIN", "DIRECTOR", "MANAGER"])) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only admins and managers can act on any approval",
@@ -1468,11 +1665,17 @@ export const approvalRouter = createTRPCRouter({
       });
 
       if (!approval || !approval.travelRequest) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Approval not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Approval not found",
+        });
       }
 
       if (approval.status !== ApprovalStatus.PENDING) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "This approval has already been processed" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This approval has already been processed",
+        });
       }
 
       if (input.action === "approve") {
@@ -1490,14 +1693,17 @@ export const approvalRouter = createTRPCRouter({
 
         // Determine new travel request status
         const pendingApprovals = approval.travelRequest.approvals.filter(
-          (a) => a.status === ApprovalStatus.PENDING
+          (a) => a.status === ApprovalStatus.PENDING,
         );
         let newStatus: TravelStatus;
-        const isLastPending = pendingApprovals.length === 1 && pendingApprovals[0]!.id === input.approvalId;
+        const isLastPending =
+          pendingApprovals.length === 1 &&
+          pendingApprovals[0]!.id === input.approvalId;
         if (isLastPending) {
           newStatus = TravelStatus.APPROVED;
         } else {
-          const approvalSeq = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const approvalSeq =
+            (approval as unknown as { sequence: number }).sequence ?? 1;
           const seqStatusMap: Record<number, TravelStatus> = {
             1: TravelStatus.APPROVED_L1,
             2: TravelStatus.APPROVED_L2,
@@ -1519,12 +1725,19 @@ export const approvalRouter = createTRPCRouter({
             action: AuditAction.APPROVE,
             entityType: "TravelRequest",
             entityId: approval.travelRequestId!,
-            metadata: { approvalId: input.approvalId, level: approval.level, adminOverride: true },
+            metadata: {
+              approvalId: input.approvalId,
+              level: approval.level,
+              adminOverride: true,
+            },
           },
         });
       } else if (input.action === "reject") {
         if (!input.comments || input.comments.length < 10) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Rejection reason required (min 10 chars)" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Rejection reason required (min 10 chars)",
+          });
         }
 
         await ctx.db.approval.update({
@@ -1547,24 +1760,38 @@ export const approvalRouter = createTRPCRouter({
             action: AuditAction.REJECT,
             entityType: "TravelRequest",
             entityId: approval.travelRequestId!,
-            metadata: { approvalId: input.approvalId, level: approval.level, adminOverride: true },
+            metadata: {
+              approvalId: input.approvalId,
+              level: approval.level,
+              adminOverride: true,
+            },
           },
         });
       } else {
         // revision
         if (!input.comments || input.comments.length < 10) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Revision reason required (min 10 chars)" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Revision reason required (min 10 chars)",
+          });
         }
 
         await ctx.db.approval.update({
           where: { id: input.approvalId },
-          data: { status: ApprovalStatus.REVISION_REQUESTED, comments: input.comments },
+          data: {
+            status: ApprovalStatus.REVISION_REQUESTED,
+            comments: input.comments,
+          },
         });
 
         // Reset all approvals to pending
         await ctx.db.approval.updateMany({
           where: { travelRequestId: approval.travelRequestId },
-          data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          data: {
+            status: ApprovalStatus.PENDING,
+            approvedAt: null,
+            rejectedAt: null,
+          },
         });
 
         await ctx.db.travelRequest.update({
@@ -1578,7 +1805,12 @@ export const approvalRouter = createTRPCRouter({
             action: AuditAction.UPDATE,
             entityType: "TravelRequest",
             entityId: approval.travelRequestId!,
-            metadata: { action: "revision_requested", approvalId: input.approvalId, level: approval.level, adminOverride: true },
+            metadata: {
+              action: "revision_requested",
+              approvalId: input.approvalId,
+              level: approval.level,
+              adminOverride: true,
+            },
           },
         });
       }
@@ -1593,24 +1825,35 @@ export const approvalRouter = createTRPCRouter({
       z.object({
         statusFilter: z.enum(["PENDING", "ALL"]).optional(),
         limit: z.number().min(1).max(100).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      if (!userHasAnyRole(ctx.session.user, ["ADMIN", "DIRECTOR", "MANAGER"])) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
       }
 
       // "PENDING" means: find requests where L3 approval is PENDING or doesn't exist yet
       // "ALL" means: find all requests that have ever had an L3 approval
-      const pendingOnly = !input?.statusFilter || input.statusFilter === "PENDING";
+      const pendingOnly =
+        !input?.statusFilter || input.statusFilter === "PENDING";
 
       if (pendingOnly) {
         // Find requests that have a DIRECTOR-level approval pending, or are at APPROVED_L1/L2/L3 waiting for the next step
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
             deletedAt: null,
-            status: { in: [TravelStatus.SUBMITTED, TravelStatus.APPROVED_L1, TravelStatus.APPROVED_L2, TravelStatus.APPROVED_L3] },
+            status: {
+              in: [
+                TravelStatus.SUBMITTED,
+                TravelStatus.APPROVED_L1,
+                TravelStatus.APPROVED_L2,
+                TravelStatus.APPROVED_L3,
+              ],
+            },
             approvals: {
               some: {
                 level: ApprovalLevel.DIRECTOR,
@@ -1621,13 +1864,17 @@ export const approvalRouter = createTRPCRouter({
           include: {
             requester: {
               select: {
-                id: true, name: true, employeeId: true,
+                id: true,
+                name: true,
+                employeeId: true,
                 department: { select: { name: true } },
               },
             },
             approvals: {
               where: { level: ApprovalLevel.DIRECTOR },
-              include: { approver: { select: { id: true, name: true, role: true } } },
+              include: {
+                approver: { select: { id: true, name: true, role: true } },
+              },
             },
           },
           take: input?.limit ?? 50,
@@ -1645,13 +1892,17 @@ export const approvalRouter = createTRPCRouter({
           include: {
             requester: {
               select: {
-                id: true, name: true, employeeId: true,
+                id: true,
+                name: true,
+                employeeId: true,
                 department: { select: { name: true } },
               },
             },
             approvals: {
               where: { level: ApprovalLevel.DIRECTOR },
-              include: { approver: { select: { id: true, name: true, role: true } } },
+              include: {
+                approver: { select: { id: true, name: true, role: true } },
+              },
             },
           },
           take: input?.limit ?? 50,
@@ -1669,17 +1920,24 @@ export const approvalRouter = createTRPCRouter({
         travelRequestId: z.string(),
         action: z.enum(["approve", "reject", "revision"]),
         comments: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!["ADMIN", "DIRECTOR", "MANAGER"].includes(ctx.session.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      if (!userHasAnyRole(ctx.session.user, ["ADMIN", "DIRECTOR", "MANAGER"])) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
       }
 
-      const requiresComment = input.action === "reject" || input.action === "revision";
+      const requiresComment =
+        input.action === "reject" || input.action === "revision";
       if (requiresComment && (!input.comments || input.comments.length < 10)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Reason required (min 10 chars)" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Reason required (min 10 chars)",
+        });
       }
 
       const travelRequest = await ctx.db.travelRequest.findUnique({
@@ -1687,13 +1945,18 @@ export const approvalRouter = createTRPCRouter({
       });
 
       if (!travelRequest) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Travel request not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Travel request not found",
+        });
       }
 
       const approvalStatus =
-        input.action === "approve" ? ApprovalStatus.APPROVED
-        : input.action === "reject" ? ApprovalStatus.REJECTED
-        : ApprovalStatus.REVISION_REQUESTED;
+        input.action === "approve"
+          ? ApprovalStatus.APPROVED
+          : input.action === "reject"
+            ? ApprovalStatus.REJECTED
+            : ApprovalStatus.REVISION_REQUESTED;
 
       // Create a DIRECTOR-level approval record with a resolved status (create + approve in one shot)
       const approvalNumber = await generateApprovalNumber(ctx.db);
@@ -1705,7 +1968,8 @@ export const approvalRouter = createTRPCRouter({
           level: ApprovalLevel.DIRECTOR,
           status: approvalStatus,
           comments: input.comments,
-          rejectionReason: input.action === "reject" ? input.comments : undefined,
+          rejectionReason:
+            input.action === "reject" ? input.comments : undefined,
           approvedAt: input.action === "approve" ? new Date() : undefined,
           rejectedAt: input.action === "reject" ? new Date() : undefined,
         },
@@ -1721,8 +1985,15 @@ export const approvalRouter = createTRPCRouter({
         newTravelStatus = TravelStatus.REVISION;
         // Reset all approvals to PENDING for revision
         await ctx.db.approval.updateMany({
-          where: { travelRequestId: input.travelRequestId, level: { not: ApprovalLevel.DIRECTOR } },
-          data: { status: ApprovalStatus.PENDING, approvedAt: null, rejectedAt: null },
+          where: {
+            travelRequestId: input.travelRequestId,
+            level: { not: ApprovalLevel.DIRECTOR },
+          },
+          data: {
+            status: ApprovalStatus.PENDING,
+            approvedAt: null,
+            rejectedAt: null,
+          },
         });
       }
 
@@ -1734,10 +2005,17 @@ export const approvalRouter = createTRPCRouter({
       await ctx.db.auditLog.create({
         data: {
           userId: ctx.session.user.id,
-          action: input.action === "approve" ? AuditAction.APPROVE : AuditAction.REJECT,
+          action:
+            input.action === "approve"
+              ? AuditAction.APPROVE
+              : AuditAction.REJECT,
           entityType: "TravelRequest",
           entityId: input.travelRequestId,
-          metadata: { action: input.action, level: "DIRECTOR", adminDirectAct: true },
+          metadata: {
+            action: input.action,
+            level: "DIRECTOR",
+            adminDirectAct: true,
+          },
         },
       });
 

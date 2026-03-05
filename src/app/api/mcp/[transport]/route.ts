@@ -4,6 +4,7 @@ import { createTRPCContext } from "@/server/api/trpc";
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { env } from "@/env";
+import { normalizeRoles } from "@/lib/constants/roles";
 
 /**
  * MCP Server Endpoint
@@ -62,6 +63,7 @@ async function handleMcpRequest(request: Request) {
             name: tokenUser.name ?? "",
             email: tokenUser.email ?? "",
             role: tokenUser.role,
+            roles: normalizeRoles({ roles: [], role: tokenUser.role }),
             employeeId: tokenUser.employeeId,
             departmentId: tokenUser.departmentId,
             image: tokenUser.image ?? null,
@@ -106,4 +108,8 @@ async function handleMcpRequest(request: Request) {
 }
 
 // Export the handler for DELETE, GET, and POST methods as required by Next.js App Router
-export { handleMcpRequest as DELETE, handleMcpRequest as GET, handleMcpRequest as POST };
+export {
+  handleMcpRequest as DELETE,
+  handleMcpRequest as GET,
+  handleMcpRequest as POST,
+};

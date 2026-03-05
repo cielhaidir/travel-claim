@@ -1,10 +1,8 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { AuditAction, Role } from "../../../../generated/prisma";
-import {
-  createTRPCRouter,
-  protectedProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
 const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
 
@@ -32,7 +30,7 @@ export const balanceAccountRouter = createTRPCRouter({
         search: z.string().optional(),
         limit: z.number().min(1).max(200).default(100),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -182,11 +180,11 @@ export const balanceAccountRouter = createTRPCRouter({
         balance: z.number().default(0),
         description: z.string().optional(),
         isActive: z.boolean().default(true),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can create balance accounts",
@@ -220,7 +218,13 @@ export const balanceAccountRouter = createTRPCRouter({
           action: AuditAction.CREATE,
           entityType: "BalanceAccount",
           entityId: ba.id,
-          changes: { after: { code: ba.code, name: ba.name, balance: ba.balance.toString() } },
+          changes: {
+            after: {
+              code: ba.code,
+              name: ba.name,
+              balance: ba.balance.toString(),
+            },
+          },
         },
       });
 
@@ -250,11 +254,11 @@ export const balanceAccountRouter = createTRPCRouter({
         name: z.string().min(1).max(150).optional(),
         description: z.string().optional(),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can update balance accounts",
@@ -334,11 +338,11 @@ export const balanceAccountRouter = createTRPCRouter({
         transactionDate: z.coerce.date().optional(),
         referenceNumber: z.string().optional(),
         notes: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!FINANCE_ROLES.includes(ctx.session.user.role as Role)) {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Finance or Admin can adjust balance accounts",
@@ -355,10 +359,16 @@ export const balanceAccountRouter = createTRPCRouter({
       ]);
 
       if (!ba) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Balance account not found or inactive" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Balance account not found or inactive",
+        });
       }
       if (!coa) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Chart of Account not found or inactive" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Chart of Account not found or inactive",
+        });
       }
 
       // Generate sequential journal number
@@ -433,7 +443,7 @@ export const balanceAccountRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (ctx.session.user.role !== Role.ADMIN) {
+      if (!userHasRole(ctx.session.user, Role.ADMIN)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Admin can delete balance accounts",
