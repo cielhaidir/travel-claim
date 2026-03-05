@@ -17,34 +17,34 @@ import {
   protectedProcedure,
   financeProcedure,
 } from "@/server/api/trpc";
-import {
-  sendWhatsappPoll,
-  buildClaimApprovalPoll,
-} from "@/lib/utils/whatsapp";
+import { sendWhatsappPoll, buildClaimApprovalPoll } from "@/lib/utils/whatsapp";
+import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
 export const claimRouter = createTRPCRouter({
   // Get all claims with filters
   getAll: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/claims',
+        method: "GET",
+        path: "/claims",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Get all claims',
-      }
+        tags: ["Claims"],
+        summary: "Get all claims",
+      },
     })
     .input(
-      z.object({
-        status: z.nativeEnum(ClaimStatus).optional(),
-        claimType: z.nativeEnum(ClaimType).optional(),
-        travelRequestId: z.string().optional(),
-        submitterId: z.string().optional(),
-        startDate: z.coerce.date().optional(),
-        endDate: z.coerce.date().optional(),
-        limit: z.number().min(1).max(100).optional(),
-        cursor: z.string().optional(),
-      }).optional()
+      z
+        .object({
+          status: z.nativeEnum(ClaimStatus).optional(),
+          claimType: z.nativeEnum(ClaimType).optional(),
+          travelRequestId: z.string().optional(),
+          submitterId: z.string().optional(),
+          startDate: z.coerce.date().optional(),
+          endDate: z.coerce.date().optional(),
+          limit: z.number().min(1).max(100).optional(),
+          cursor: z.string().optional(),
+        })
+        .optional(),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -53,7 +53,14 @@ export const claimRouter = createTRPCRouter({
       };
 
       // Non-finance users can only see their own claims
-      if (!["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(ctx.session.user.role)) {
+      if (
+        !userHasAnyRole(ctx.session.user, [
+          "FINANCE",
+          "ADMIN",
+          "MANAGER",
+          "DIRECTOR",
+        ])
+      ) {
         where.submitterId = ctx.session.user.id;
       }
 
@@ -151,16 +158,17 @@ export const claimRouter = createTRPCRouter({
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/claims/{id}',
+        method: "GET",
+        path: "/claims/{id}",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Get claim by ID',
+        tags: ["Claims"],
+        summary: "Get claim by ID",
       },
       mcp: {
         enabled: true,
         name: "get_claim",
-        description: "Get detailed information about a specific claim for review or resume",
+        description:
+          "Get detailed information about a specific claim for review or resume",
       },
     })
     .input(z.object({ id: z.string() }))
@@ -213,10 +221,14 @@ export const claimRouter = createTRPCRouter({
 
       // Check access rights
       const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester = claim.travelRequest.requesterId === ctx.session.user.id;
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isSubmitter && !isRequester && !canView) {
         throw new TRPCError({
@@ -232,12 +244,12 @@ export const claimRouter = createTRPCRouter({
   getByTravelRequest: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/claims/by-travel-request/{travelRequestId}',
+        method: "GET",
+        path: "/claims/by-travel-request/{travelRequestId}",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Get claims by travel request',
-      }
+        tags: ["Claims"],
+        summary: "Get claims by travel request",
+      },
     })
     .input(z.object({ travelRequestId: z.string() }))
     .output(z.any())
@@ -259,11 +271,14 @@ export const claimRouter = createTRPCRouter({
 
       const isRequester = travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -315,11 +330,11 @@ export const claimRouter = createTRPCRouter({
   createEntertainment: protectedProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/claims/entertainment',
+        method: "POST",
+        path: "/claims/entertainment",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Create entertainment claim',
+        tags: ["Claims"],
+        summary: "Create entertainment claim",
       },
       mcp: {
         enabled: true,
@@ -342,7 +357,7 @@ export const claimRouter = createTRPCRouter({
         description: z.string().min(10),
         notes: z.string().optional(),
         coaId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -366,18 +381,23 @@ export const claimRouter = createTRPCRouter({
       // Check if user is requester or participant
       const isRequester = travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
 
       if (!isRequester && !isParticipant) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You are not authorized to create claims for this travel request",
+          message:
+            "You are not authorized to create claims for this travel request",
         });
       }
 
       // Check if travel request is approved or locked
-      if (!([ TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]).includes(travelRequest.status)) {
+      if (
+        !(
+          [TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]
+        ).includes(travelRequest.status)
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Claims can only be created for approved travel requests",
@@ -405,7 +425,18 @@ export const claimRouter = createTRPCRouter({
           ...claimData,
         },
         include: {
-          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+          submitter: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              employeeId: true,
+              role: true,
+              departmentId: true,
+              phoneNumber: true,
+              image: true,
+            },
+          },
           travelRequest: true,
         },
       });
@@ -430,16 +461,17 @@ export const claimRouter = createTRPCRouter({
   createNonEntertainment: protectedProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/claims/non-entertainment',
+        method: "POST",
+        path: "/claims/non-entertainment",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Create non-entertainment claim',
+        tags: ["Claims"],
+        summary: "Create non-entertainment claim",
       },
       mcp: {
         enabled: true,
         name: "create_nonentertainment_claim_draft",
-        description: "Create a draft non-entertainment claim for a travel request",
+        description:
+          "Create a draft non-entertainment claim for a travel request",
       },
     })
     .input(
@@ -453,7 +485,7 @@ export const claimRouter = createTRPCRouter({
         description: z.string().min(10),
         notes: z.string().optional(),
         coaId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -477,18 +509,23 @@ export const claimRouter = createTRPCRouter({
       // Check authorization
       const isRequester = travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
 
       if (!isRequester && !isParticipant) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You are not authorized to create claims for this travel request",
+          message:
+            "You are not authorized to create claims for this travel request",
         });
       }
 
       // Check travel request status
-      if (!([TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]).includes(travelRequest.status)) {
+      if (
+        !(
+          [TravelStatus.APPROVED, TravelStatus.LOCKED] as TravelStatus[]
+        ).includes(travelRequest.status)
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Claims can only be created for approved travel requests",
@@ -516,7 +553,18 @@ export const claimRouter = createTRPCRouter({
           ...claimData,
         },
         include: {
-          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+          submitter: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              employeeId: true,
+              role: true,
+              departmentId: true,
+              phoneNumber: true,
+              image: true,
+            },
+          },
           travelRequest: true,
         },
       });
@@ -541,16 +589,17 @@ export const claimRouter = createTRPCRouter({
   update: protectedProcedure
     .meta({
       openapi: {
-        method: 'PUT',
-        path: '/claims/{id}',
+        method: "PUT",
+        path: "/claims/{id}",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Update claim',
+        tags: ["Claims"],
+        summary: "Update claim",
       },
       mcp: {
         enabled: true,
         name: "update_claim_draft",
-        description: "Update a claim draft (only works for DRAFT or REVISION status)",
+        description:
+          "Update a claim draft (only works for DRAFT or REVISION status)",
       },
     })
     .input(
@@ -572,7 +621,7 @@ export const claimRouter = createTRPCRouter({
         description: z.string().min(10).optional(),
         notes: z.string().optional(),
         coaId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -598,7 +647,11 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Can only update DRAFT or REVISION claims
-      if (!([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(existing.status)) {
+      if (
+        !([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(
+          existing.status,
+        )
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only update claims in DRAFT or REVISION status",
@@ -609,7 +662,18 @@ export const claimRouter = createTRPCRouter({
         where: { id },
         data: updateData,
         include: {
-          submitter: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, phoneNumber: true, image: true } },
+          submitter: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              employeeId: true,
+              role: true,
+              departmentId: true,
+              phoneNumber: true,
+              image: true,
+            },
+          },
           travelRequest: true,
           attachments: true,
         },
@@ -636,11 +700,11 @@ export const claimRouter = createTRPCRouter({
   submit: protectedProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/claims/{id}/submit',
+        method: "POST",
+        path: "/claims/{id}/submit",
         protect: true,
-        tags: ['Claims'],
-        summary: 'Submit claim for approval',
+        tags: ["Claims"],
+        summary: "Submit claim for approval",
       },
       mcp: {
         enabled: true,
@@ -658,7 +722,17 @@ export const claimRouter = createTRPCRouter({
             include: {
               supervisor: true,
               department: {
-                include: { chief: { include: { supervisor: { include: { supervisor: { include: { supervisor: true } } } } } } },
+                include: {
+                  chief: {
+                    include: {
+                      supervisor: {
+                        include: {
+                          supervisor: { include: { supervisor: true } },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -667,7 +741,13 @@ export const claimRouter = createTRPCRouter({
               project: {
                 include: {
                   salesLead: {
-                    include: { supervisor: { include: { supervisor: { include: { supervisor: true } } } } },
+                    include: {
+                      supervisor: {
+                        include: {
+                          supervisor: { include: { supervisor: true } },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -691,7 +771,11 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      if (!([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(claim.status)) {
+      if (
+        !([ClaimStatus.DRAFT, ClaimStatus.REVISION] as ClaimStatus[]).includes(
+          claim.status,
+        )
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only submit claims in DRAFT or REVISION status",
@@ -708,40 +792,84 @@ export const claimRouter = createTRPCRouter({
 
       // ── Build dynamic approval chain per DYNAMIC_APPROVAL_HIERARCHY.md ──────
       // Entry type includes sequence for chain ordering
-      const approvalEntries: { sequence: number; level: ApprovalLevel; approverId: string }[] = [];
+      const approvalEntries: {
+        sequence: number;
+        level: ApprovalLevel;
+        approverId: string;
+      }[] = [];
       let seq = 1;
 
       const submitterRole = claim.submitter.role;
-      const isSalesRole = submitterRole === "SALES_EMPLOYEE" || submitterRole === "SALES_CHIEF";
-      const isSalesTravel = claim.travelRequest?.travelType === "SALES" && !!claim.travelRequest?.projectId;
+      const isSalesRole =
+        submitterRole === "SALES_EMPLOYEE" || submitterRole === "SALES_CHIEF";
+      const isSalesTravel =
+        claim.travelRequest?.travelType === "SALES" &&
+        !!claim.travelRequest?.projectId;
 
-      if (!isSalesRole && isSalesTravel && claim.travelRequest?.project?.salesLead) {
+      if (
+        !isSalesRole &&
+        isSalesTravel &&
+        claim.travelRequest?.project?.salesLead
+      ) {
         // Rule B: Regular employee on a sales trip → start with SALES_LEAD (unless submitter IS the sales lead)
         const salesLead = claim.travelRequest.project.salesLead;
         if (salesLead.id !== claim.submitterId) {
-          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.SALES_LEAD, approverId: salesLead.id });
+          approvalEntries.push({
+            sequence: seq++,
+            level: ApprovalLevel.SALES_LEAD,
+            approverId: salesLead.id,
+          });
 
           // Walk the sales lead's supervisor chain: DEPT_CHIEF → DIRECTOR → SENIOR_DIRECTOR → EXECUTIVE
-          let current: { id: string; supervisorId: string | null; supervisor?: typeof salesLead | null } | null = salesLead;
-          const levels: ApprovalLevel[] = [ApprovalLevel.DEPT_CHIEF, ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          let current: {
+            id: string;
+            supervisorId: string | null;
+            supervisor?: typeof salesLead | null;
+          } | null = salesLead;
+          const levels: ApprovalLevel[] = [
+            ApprovalLevel.DEPT_CHIEF,
+            ApprovalLevel.DIRECTOR,
+            ApprovalLevel.SENIOR_DIRECTOR,
+            ApprovalLevel.EXECUTIVE,
+          ];
           for (const level of levels) {
             if (!current?.supervisorId) break;
             current = current.supervisor ?? null;
             if (!current) break;
-            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+            approvalEntries.push({
+              sequence: seq++,
+              level,
+              approverId: current.id,
+            });
           }
         } else {
           // Submitter IS the sales lead — start at DEPT_CHIEF via submitter's department chief
           const chief = claim.submitter.department?.chief;
           if (chief) {
-            approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
-            let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
-            const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+            approvalEntries.push({
+              sequence: seq++,
+              level: ApprovalLevel.DEPT_CHIEF,
+              approverId: chief.id,
+            });
+            let current: {
+              id: string;
+              supervisorId: string | null;
+              supervisor?: typeof chief | null;
+            } | null = chief;
+            const levels: ApprovalLevel[] = [
+              ApprovalLevel.DIRECTOR,
+              ApprovalLevel.SENIOR_DIRECTOR,
+              ApprovalLevel.EXECUTIVE,
+            ];
             for (const level of levels) {
               if (!current?.supervisorId) break;
               current = current.supervisor ?? null;
               if (!current) break;
-              approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+              approvalEntries.push({
+                sequence: seq++,
+                level,
+                approverId: current.id,
+              });
             }
           }
         }
@@ -750,32 +878,50 @@ export const claimRouter = createTRPCRouter({
         // Chain starts at DEPT_CHIEF then walks supervisor chain upward
         const chief = claim.submitter.department?.chief;
         if (chief) {
-          approvalEntries.push({ sequence: seq++, level: ApprovalLevel.DEPT_CHIEF, approverId: chief.id });
-          let current: { id: string; supervisorId: string | null; supervisor?: typeof chief | null } | null = chief;
-          const levels: ApprovalLevel[] = [ApprovalLevel.DIRECTOR, ApprovalLevel.SENIOR_DIRECTOR, ApprovalLevel.EXECUTIVE];
+          approvalEntries.push({
+            sequence: seq++,
+            level: ApprovalLevel.DEPT_CHIEF,
+            approverId: chief.id,
+          });
+          let current: {
+            id: string;
+            supervisorId: string | null;
+            supervisor?: typeof chief | null;
+          } | null = chief;
+          const levels: ApprovalLevel[] = [
+            ApprovalLevel.DIRECTOR,
+            ApprovalLevel.SENIOR_DIRECTOR,
+            ApprovalLevel.EXECUTIVE,
+          ];
           for (const level of levels) {
             if (!current?.supervisorId) break;
             current = current.supervisor ?? null;
             if (!current) break;
-            approvalEntries.push({ sequence: seq++, level, approverId: current.id });
+            approvalEntries.push({
+              sequence: seq++,
+              level,
+              approverId: current.id,
+            });
           }
         }
       }
 
       // Deduplicate by approverId (same person can't appear twice in the chain)
       const seen = new Set<string>();
-      const deduped = approvalEntries.filter((e) => {
-        if (seen.has(e.approverId)) return false;
-        seen.add(e.approverId);
-        return true;
-      }).map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
+      const deduped = approvalEntries
+        .filter((e) => {
+          if (seen.has(e.approverId)) return false;
+          seen.add(e.approverId);
+          return true;
+        })
+        .map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
 
       // Generate a unique approvalNumber for each approval record
       const approvalsWithNumbers = await Promise.all(
         deduped.map(async (entry) => ({
           ...entry,
           approvalNumber: await generateApprovalNumber(ctx.db),
-        }))
+        })),
       );
 
       // Update claim and create approvals
@@ -790,7 +936,17 @@ export const claimRouter = createTRPCRouter({
         include: {
           approvals: {
             include: {
-              approver: { select: { id: true, name: true, email: true, employeeId: true, role: true, departmentId: true, image: true } },
+              approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  employeeId: true,
+                  role: true,
+                  departmentId: true,
+                  image: true,
+                },
+              },
             },
           },
         },
@@ -811,11 +967,13 @@ export const claimRouter = createTRPCRouter({
       // (handled in approval.approveClaim).
       void (async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const first = (updated.approvals as unknown as Array<{
-          approvalNumber: string;
-          sequence: number;
-          approver: { id: string; name: string | null; email: string | null };
-        }>).find((a) => a.sequence === 1);
+        const first = (
+          updated.approvals as unknown as Array<{
+            approvalNumber: string;
+            sequence: number;
+            approver: { id: string; name: string | null; email: string | null };
+          }>
+        ).find((a) => a.sequence === 1);
 
         if (!first) return;
 
@@ -832,7 +990,8 @@ export const claimRouter = createTRPCRouter({
             phone.replace(/^\+/, ""),
             {
               claimNumber: claim.claimNumber,
-              submitterName: claim.submitter.name ?? claim.submitter.email ?? "Unknown",
+              submitterName:
+                claim.submitter.name ?? claim.submitter.email ?? "Unknown",
               claimType: claim.claimType,
               amount: claim.amount,
               description: claim.description,
@@ -852,7 +1011,7 @@ export const claimRouter = createTRPCRouter({
         id: z.string(),
         paymentReference: z.string(),
         paidBy: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -939,7 +1098,7 @@ export const claimRouter = createTRPCRouter({
       // Only submitter or admin can delete
       const canDelete =
         claim.submitterId === ctx.session.user.id ||
-        ctx.session.user.role === "ADMIN";
+        userHasRole(ctx.session.user, "ADMIN");
 
       if (!canDelete) {
         throw new TRPCError({
@@ -983,7 +1142,7 @@ export const claimRouter = createTRPCRouter({
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
         departmentId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -1006,34 +1165,35 @@ export const claimRouter = createTRPCRouter({
       }
       if (andFiltersStats.length > 0) where.AND = andFiltersStats;
 
-      const [total, byStatus, byType, totalAmount, paidAmount] = await Promise.all([
-        ctx.db.claim.count({ where }),
-        ctx.db.claim.groupBy({
-          by: ["status"],
-          where,
-          _count: true,
-        }),
-        ctx.db.claim.groupBy({
-          by: ["claimType"],
-          where,
-          _count: true,
-        }),
-        ctx.db.claim.aggregate({
-          where,
-          _sum: {
-            amount: true,
-          },
-        }),
-        ctx.db.claim.aggregate({
-          where: {
-            ...where,
-            status: ClaimStatus.PAID,
-          },
-          _sum: {
-            amount: true,
-          },
-        }),
-      ]);
+      const [total, byStatus, byType, totalAmount, paidAmount] =
+        await Promise.all([
+          ctx.db.claim.count({ where }),
+          ctx.db.claim.groupBy({
+            by: ["status"],
+            where,
+            _count: true,
+          }),
+          ctx.db.claim.groupBy({
+            by: ["claimType"],
+            where,
+            _count: true,
+          }),
+          ctx.db.claim.aggregate({
+            where,
+            _sum: {
+              amount: true,
+            },
+          }),
+          ctx.db.claim.aggregate({
+            where: {
+              ...where,
+              status: ClaimStatus.PAID,
+            },
+            _sum: {
+              amount: true,
+            },
+          }),
+        ]);
 
       return {
         total,

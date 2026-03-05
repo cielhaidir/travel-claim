@@ -29,6 +29,7 @@ interface OpenApiMeta {
 
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
+import { normalizeRoles } from "@/lib/constants/roles";
 
 /**
  * 1. CONTEXT
@@ -138,7 +139,7 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   if (!ctx.session?.user) {
     throw new TRPCError({
       code: "UNAUTHORIZED",
-      message: "Authentication required"
+      message: "Authentication required",
     });
   }
   return next({
@@ -157,23 +158,36 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
  */
 const enforceRole = (allowedRoles: Role[]) => {
   return t.middleware(({ ctx, next }) => {
-    if (!ctx.session?.user?.role) {
+    if (!ctx.session?.user) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
-        message: "Authentication required"
+        message: "Authentication required",
       });
     }
-    if (!allowedRoles.includes(ctx.session.user.role)) {
+
+    const userRoles = normalizeRoles({
+      roles: ctx.session.user.roles,
+      role: ctx.session.user.role,
+      includeDefault: false,
+    });
+
+    if (userRoles.length === 0) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Authentication required",
+      });
+    }
+    if (!allowedRoles.some((role) => userRoles.includes(role))) {
       throw new TRPCError({
         code: "FORBIDDEN",
-        message: "Insufficient permissions for this operation"
+        message: "Insufficient permissions for this operation",
       });
     }
     return next({
       ctx: {
         ...ctx,
         // Preserve the non-nullable session type from protectedProcedure
-        session: ctx.session,
+        session: { ...ctx.session, user: ctx.session.user },
       },
     });
   });
@@ -191,7 +205,7 @@ const enforceRole = (allowedRoles: Role[]) => {
 //   .use(timingMiddleware)
 //   .use(enforceUserIsAuthed);
 
-  export const protectedProcedure = t.procedure
+export const protectedProcedure = t.procedure
   .use(timingMiddleware)
   .use(enforceUserIsAuthed)
   .use(({ ctx, next }) => {
@@ -207,33 +221,35 @@ const enforceRole = (allowedRoles: Role[]) => {
     });
   });
 
-
 /**
  * Supervisor procedure - requires SUPERVISOR, SALES_CHIEF, MANAGER, DIRECTOR, or ADMIN role
  */
-export const supervisorProcedure = protectedProcedure
-  .use(enforceRole(["SUPERVISOR", "SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"]));
+export const supervisorProcedure = protectedProcedure.use(
+  enforceRole(["SUPERVISOR", "SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"]),
+);
 
 /**
  * Manager procedure - requires MANAGER, DIRECTOR, or ADMIN role
  */
-export const managerProcedure = protectedProcedure
-  .use(enforceRole(["MANAGER", "DIRECTOR", "ADMIN"]));
+export const managerProcedure = protectedProcedure.use(
+  enforceRole(["MANAGER", "DIRECTOR", "ADMIN"]),
+);
 
 /**
  * Director procedure - requires DIRECTOR or ADMIN role
  */
-export const directorProcedure = protectedProcedure
-  .use(enforceRole(["DIRECTOR", "ADMIN"]));
+export const directorProcedure = protectedProcedure.use(
+  enforceRole(["DIRECTOR", "ADMIN"]),
+);
 
 /**
  * Finance procedure - requires FINANCE or ADMIN role
  */
-export const financeProcedure = protectedProcedure
-  .use(enforceRole(["FINANCE", "ADMIN"]));
+export const financeProcedure = protectedProcedure.use(
+  enforceRole(["FINANCE", "ADMIN"]),
+);
 
 /**
  * Admin procedure - requires ADMIN role only
  */
-export const adminProcedure = protectedProcedure
-  .use(enforceRole(["ADMIN"]));
+export const adminProcedure = protectedProcedure.use(enforceRole(["ADMIN"]));

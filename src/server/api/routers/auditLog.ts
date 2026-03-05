@@ -8,18 +8,19 @@ import {
   managerProcedure,
   adminProcedure,
 } from "@/server/api/trpc";
+import { userHasAnyRole } from "@/lib/auth/role-check";
 
 export const auditLogRouter = createTRPCRouter({
   // Get all audit logs (admin/manager only)
   getAll: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/audit-logs',
+        method: "GET",
+        path: "/audit-logs",
         protect: true,
-        tags: ['Audit Logs'],
-        summary: 'Get all audit logs',
-      }
+        tags: ["Audit Logs"],
+        summary: "Get all audit logs",
+      },
     })
     .input(
       z.object({
@@ -31,7 +32,7 @@ export const auditLogRouter = createTRPCRouter({
         endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -99,12 +100,12 @@ export const auditLogRouter = createTRPCRouter({
   getById: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/audit-logs/{id}',
+        method: "GET",
+        path: "/audit-logs/{id}",
         protect: true,
-        tags: ['Audit Logs'],
-        summary: 'Get audit log by ID',
-      }
+        tags: ["Audit Logs"],
+        summary: "Get audit log by ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -144,24 +145,31 @@ export const auditLogRouter = createTRPCRouter({
   getByEntity: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/audit-logs/by-entity',
+        method: "GET",
+        path: "/audit-logs/by-entity",
         protect: true,
-        tags: ['Audit Logs'],
-        summary: 'Get audit logs for specific entity',
-      }
+        tags: ["Audit Logs"],
+        summary: "Get audit logs for specific entity",
+      },
     })
     .input(
       z.object({
         entityType: z.string(),
         entityId: z.string(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // Check if user has access to view this entity's audit logs
       // For now, only managers and above can view entity audit logs
-      if (!["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(ctx.session.user.role)) {
+      if (
+        !userHasAnyRole(ctx.session.user, [
+          "MANAGER",
+          "DIRECTOR",
+          "ADMIN",
+          "FINANCE",
+        ])
+      ) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Insufficient permissions to view audit logs",
@@ -194,12 +202,12 @@ export const auditLogRouter = createTRPCRouter({
   getMyActions: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/audit-logs/my-actions',
+        method: "GET",
+        path: "/audit-logs/my-actions",
         protect: true,
-        tags: ['Audit Logs'],
-        summary: 'Get my audit logs',
-      }
+        tags: ["Audit Logs"],
+        summary: "Get my audit logs",
+      },
     })
     .input(
       z.object({
@@ -209,7 +217,7 @@ export const auditLogRouter = createTRPCRouter({
         endDate: z.coerce.date().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -260,12 +268,12 @@ export const auditLogRouter = createTRPCRouter({
   getTravelRequestTrail: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/audit-logs/travel-request/{travelRequestId}',
+        method: "GET",
+        path: "/audit-logs/travel-request/{travelRequestId}",
         protect: true,
-        tags: ['Audit Logs'],
-        summary: 'Get audit trail for travel request',
-      }
+        tags: ["Audit Logs"],
+        summary: "Get audit trail for travel request",
+      },
     })
     .input(z.object({ travelRequestId: z.string() }))
     .output(z.any())
@@ -288,11 +296,14 @@ export const auditLogRouter = createTRPCRouter({
       // Check access rights
       const isRequester = travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "MANAGER",
+        "DIRECTOR",
+        "ADMIN",
+        "FINANCE",
+      ]);
 
       if (!isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -348,13 +359,17 @@ export const auditLogRouter = createTRPCRouter({
 
       // Check access rights
       const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester = claim.travelRequest.requesterId === ctx.session.user.id;
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
       const isParticipant = claim.travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id
+        (p) => p.userId === ctx.session.user.id,
       );
-      const canView = ["FINANCE", "ADMIN", "MANAGER", "DIRECTOR"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "FINANCE",
+        "ADMIN",
+        "MANAGER",
+        "DIRECTOR",
+      ]);
 
       if (!isSubmitter && !isRequester && !isParticipant && !canView) {
         throw new TRPCError({
@@ -390,7 +405,7 @@ export const auditLogRouter = createTRPCRouter({
       z.object({
         limit: z.number().min(1).max(100).optional(),
         entityTypes: z.array(z.string()).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -428,7 +443,7 @@ export const auditLogRouter = createTRPCRouter({
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
         userId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -517,7 +532,7 @@ export const auditLogRouter = createTRPCRouter({
       z.object({
         query: z.string().min(1),
         limit: z.number().min(1).max(100).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -557,7 +572,7 @@ export const auditLogRouter = createTRPCRouter({
         userId: z.string().optional(),
         entityType: z.string().optional(),
         action: z.nativeEnum(AuditAction).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {

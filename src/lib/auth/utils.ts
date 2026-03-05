@@ -1,8 +1,19 @@
 import { auth } from "@/server/auth";
 import type { Session } from "next-auth";
+import {
+  APPROVER_ROLES,
+  FINANCE_ROLES,
+  MANAGEMENT_ROLES,
+  normalizeRoles,
+  type Role,
+} from "@/lib/constants/roles";
 
-// Role type definition
-export type Role = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "DIRECTOR" | "FINANCE" | "ADMIN" | "SALES_EMPLOYEE" | "SALES_CHIEF";
+function sessionRoles(session: Session | null): Role[] {
+  return normalizeRoles({
+    roles: session?.user?.roles,
+    role: session?.user?.role,
+  });
+}
 
 /**
  * Get the current session with type safety
@@ -18,11 +29,11 @@ export async function getSession(): Promise<Session | null> {
  */
 export async function requireAuth(): Promise<Session> {
   const session = await auth();
-  
+
   if (!session?.user) {
     throw new Error("Unauthorized: Authentication required");
   }
-  
+
   return session;
 }
 
@@ -33,7 +44,7 @@ export async function requireAuth(): Promise<Session> {
  */
 export async function hasRole(role: Role): Promise<boolean> {
   const session = await auth();
-  return session?.user?.role === role;
+  return sessionRoles(session).includes(role);
 }
 
 /**
@@ -43,7 +54,8 @@ export async function hasRole(role: Role): Promise<boolean> {
  */
 export async function hasAnyRole(roles: Role[]): Promise<boolean> {
   const session = await auth();
-  return session?.user?.role ? roles.includes(session.user.role) : false;
+  const userRoles = sessionRoles(session);
+  return roles.some((role) => userRoles.includes(role));
 }
 
 /**
@@ -53,11 +65,11 @@ export async function hasAnyRole(roles: Role[]): Promise<boolean> {
  */
 export async function requireRole(role: Role): Promise<Session> {
   const session = await requireAuth();
-  
-  if (session.user.role !== role) {
+
+  if (!sessionRoles(session).includes(role)) {
     throw new Error(`Forbidden: ${role} role required`);
   }
-  
+
   return session;
 }
 
@@ -68,11 +80,11 @@ export async function requireRole(role: Role): Promise<Session> {
  */
 export async function requireAnyRole(roles: Role[]): Promise<Session> {
   const session = await requireAuth();
-  
-  if (!roles.includes(session.user.role)) {
+
+  if (!roles.some((role) => sessionRoles(session).includes(role))) {
     throw new Error(`Forbidden: One of [${roles.join(", ")}] roles required`);
   }
-  
+
   return session;
 }
 
@@ -87,47 +99,51 @@ export async function isAdmin(): Promise<boolean> {
  * Check if the current user is a manager or higher
  */
 export async function isManager(): Promise<boolean> {
-  return await hasAnyRole(["MANAGER", "DIRECTOR", "ADMIN"]);
+  return await hasAnyRole(MANAGEMENT_ROLES);
 }
 
 /**
  * Check if the current user is a supervisor or higher
  */
 export async function isSupervisor(): Promise<boolean> {
-  return await hasAnyRole(["SUPERVISOR", "MANAGER", "DIRECTOR", "ADMIN"]);
+  return await hasAnyRole(["SUPERVISOR", ...MANAGEMENT_ROLES]);
 }
 
 /**
  * Check if the current user has finance role
  */
 export async function isFinance(): Promise<boolean> {
-  return await hasAnyRole(["FINANCE", "ADMIN"]);
+  return await hasAnyRole(FINANCE_ROLES);
 }
 
 /**
  * Check if the current user can approve at a specific level
  * @param level - The approval level (L1, L2, L3, L4, L5)
  */
-export async function canApproveLevel(level: "L1" | "L2" | "L3" | "L4" | "L5"): Promise<boolean> {
+export async function canApproveLevel(
+  level: "L1" | "L2" | "L3" | "L4" | "L5",
+): Promise<boolean> {
   const session = await auth();
-  if (!session?.user?.role) return false;
+  const userRoles = sessionRoles(session);
+  if (userRoles.length === 0) return false;
 
-  const role = session.user.role;
+  const hasAny = (roles: Role[]) =>
+    roles.some((role) => userRoles.includes(role));
 
   switch (level) {
     case "L1":
       // L1: Supervisor and above
-      return ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"].includes(role);
+      return hasAny(["SUPERVISOR", ...APPROVER_ROLES]);
     case "L2":
       // L2: Manager and above
-      return ["MANAGER", "DIRECTOR", "FINANCE", "ADMIN"].includes(role);
+      return hasAny(["MANAGER", "DIRECTOR", "FINANCE", "ADMIN"]);
     case "L3":
       // L3: Director and above
-      return ["DIRECTOR", "FINANCE", "ADMIN"].includes(role);
+      return hasAny(["DIRECTOR", "FINANCE", "ADMIN"]);
     case "L4":
     case "L5":
       // L4/L5: Senior leadership (Finance and Admin)
-      return ["FINANCE", "ADMIN"].includes(role);
+      return hasAny(FINANCE_ROLES);
     default:
       return false;
   }
@@ -138,17 +154,21 @@ export async function canApproveLevel(level: "L1" | "L2" | "L3" | "L4" | "L5"): 
  * @param requesterId - The ID of the user who created the request
  * @param approverId - The ID of the approver (optional, defaults to current user)
  */
-export async function canApproveForUser(requesterId: string, approverId?: string): Promise<boolean> {
+export async function canApproveForUser(
+  requesterId: string,
+  approverId?: string,
+): Promise<boolean> {
   const session = await auth();
   if (!session?.user) return false;
 
   const currentUserId = approverId ?? session.user.id;
+  const userRoles = sessionRoles(session);
 
   // Admins can approve any request
-  if (session.user.role === "ADMIN") return true;
+  if (userRoles.includes("ADMIN")) return true;
 
   // Finance can approve any request
-  if (session.user.role === "FINANCE") return true;
+  if (userRoles.includes("FINANCE")) return true;
 
   // Users cannot approve their own requests
   if (currentUserId === requesterId) return false;

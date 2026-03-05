@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import type { Session } from "next-auth";
+import { hasAnyRole, normalizeRoles, type Role } from "@/lib/constants/roles";
 
 interface NavItem {
   label: string;
   href: string;
   icon: string;
-  roles?: string[];
+  roles?: Role[];
 }
 
 const navigationItems: NavItem[] = [
@@ -42,7 +43,14 @@ const navigationItems: NavItem[] = [
     label: "Approvals",
     href: "/approvals",
     icon: "✅",
-    roles: ["SUPERVISOR", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN", "SALES_CHIEF"],
+    roles: [
+      "SUPERVISOR",
+      "MANAGER",
+      "DIRECTOR",
+      "FINANCE",
+      "ADMIN",
+      "SALES_CHIEF",
+    ],
   },
   {
     label: "Chart of Accounts",
@@ -75,9 +83,13 @@ export function SidebarNav({
   onNavigate,
 }: SidebarNavProps) {
   const userRole = session.user.role ?? "EMPLOYEE";
+  const userRoles = normalizeRoles({
+    roles: session.user.roles,
+    role: userRole,
+  });
 
   const allowedItems = navigationItems.filter(
-    (item) => !item.roles || item.roles.includes(userRole)
+    (item) => !item.roles || hasAnyRole(userRoles, item.roles),
   );
 
   return (

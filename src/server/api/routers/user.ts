@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { Role, type PrismaClient, type Prisma } from "../../../../generated/prisma";
+import {
+  Role,
+  type PrismaClient,
+  type Prisma,
+} from "../../../../generated/prisma";
 import bcrypt from "bcryptjs";
 
 import {
@@ -9,72 +13,73 @@ import {
   adminProcedure,
   managerProcedure,
 } from "@/server/api/trpc";
+import { userHasAnyRole } from "@/lib/auth/role-check";
 
 export const userRouter = createTRPCRouter({
   // Get current user profile
   getMe: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/me',
+        method: "GET",
+        path: "/users/me",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get current user profile',
-      }
+        tags: ["Users"],
+        summary: "Get current user profile",
+      },
     })
     .input(z.void())
     .output(z.any())
     .query(async ({ ctx }) => {
-    const user = await ctx.db.user.findUnique({
-      where: { id: ctx.session.user.id },
-      include: {
-        department: true,
-        supervisor: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.session.user.id },
+        include: {
+          department: true,
+          supervisor: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
+          },
+          directReports: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+              employeeId: true,
+            },
           },
         },
-        directReports: {
-          where: { deletedAt: null },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            employeeId: true,
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "User not found",
       });
-    }
 
-    return user;
-  }),
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+
+      return user;
+    }),
 
   // Get active users (lightweight, for participant pickers - accessible to all logged-in users)
   getActiveUsers: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/active',
+        method: "GET",
+        path: "/users/active",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get list of active users for participant selection',
-      }
+        tags: ["Users"],
+        summary: "Get list of active users for participant selection",
+      },
     })
     .input(
       z.object({
         search: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -86,7 +91,9 @@ export const userRouter = createTRPCRouter({
                 OR: [
                   { name: { contains: input.search, mode: "insensitive" } },
                   { email: { contains: input.search, mode: "insensitive" } },
-                  { employeeId: { contains: input.search, mode: "insensitive" } },
+                  {
+                    employeeId: { contains: input.search, mode: "insensitive" },
+                  },
                 ],
               }
             : {}),
@@ -115,11 +122,11 @@ export const userRouter = createTRPCRouter({
   getByPhone: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/by-phone',
+        method: "GET",
+        path: "/users/by-phone",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get user by phone number',
+        tags: ["Users"],
+        summary: "Get user by phone number",
       },
       mcp: {
         enabled: true,
@@ -130,7 +137,7 @@ export const userRouter = createTRPCRouter({
     .input(
       z.object({
         search: z.string().min(1),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -184,11 +191,11 @@ export const userRouter = createTRPCRouter({
   getAll: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users',
+        method: "GET",
+        path: "/users",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get all users',
+        tags: ["Users"],
+        summary: "Get all users",
       },
     })
     .input(
@@ -199,7 +206,7 @@ export const userRouter = createTRPCRouter({
         search: z.string().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -273,12 +280,12 @@ export const userRouter = createTRPCRouter({
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/{id}',
+        method: "GET",
+        path: "/users/{id}",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get user by ID',
-      }
+        tags: ["Users"],
+        summary: "Get user by ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -324,9 +331,11 @@ export const userRouter = createTRPCRouter({
 
       // Only allow viewing own profile or if user is manager/admin
       const isOwn = user.id === ctx.session.user.id;
-      const canView = ["MANAGER", "DIRECTOR", "ADMIN"].includes(
-        ctx.session.user.role
-      );
+      const canView = userHasAnyRole(ctx.session.user, [
+        "MANAGER",
+        "DIRECTOR",
+        "ADMIN",
+      ]);
 
       if (!isOwn && !canView) {
         throw new TRPCError({
@@ -342,52 +351,52 @@ export const userRouter = createTRPCRouter({
   getDirectReports: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/direct-reports',
+        method: "GET",
+        path: "/users/direct-reports",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get direct reports',
-      }
+        tags: ["Users"],
+        summary: "Get direct reports",
+      },
     })
     .input(z.void())
     .output(z.any())
     .query(async ({ ctx }) => {
-    return ctx.db.user.findMany({
-      where: {
-        supervisorId: ctx.session.user.id,
-        deletedAt: null,
-      },
-      include: {
-        department: true,
-        _count: {
-          select: {
-            directReports: true,
-            travelRequests: true,
-            claims: true,
+      return ctx.db.user.findMany({
+        where: {
+          supervisorId: ctx.session.user.id,
+          deletedAt: null,
+        },
+        include: {
+          department: true,
+          _count: {
+            select: {
+              directReports: true,
+              travelRequests: true,
+              claims: true,
+            },
           },
         },
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
-  }),
+        orderBy: {
+          name: "asc",
+        },
+      });
+    }),
 
   // Get organizational hierarchy
   getHierarchy: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/users/hierarchy',
+        method: "GET",
+        path: "/users/hierarchy",
         protect: true,
-        tags: ['Users'],
-        summary: 'Get organizational hierarchy',
+        tags: ["Users"],
+        summary: "Get organizational hierarchy",
       },
     })
     .input(
       z.object({
         userId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -426,12 +435,12 @@ export const userRouter = createTRPCRouter({
   create: adminProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/users',
+        method: "POST",
+        path: "/users",
         protect: true,
-        tags: ['Users'],
-        summary: 'Create user',
-      }
+        tags: ["Users"],
+        summary: "Create user",
+      },
     })
     .input(
       z.object({
@@ -443,7 +452,7 @@ export const userRouter = createTRPCRouter({
         departmentId: z.string().optional(),
         supervisorId: z.string().optional(),
         phoneNumber: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -504,12 +513,12 @@ export const userRouter = createTRPCRouter({
   update: adminProcedure
     .meta({
       openapi: {
-        method: 'PUT',
-        path: '/users/{id}',
+        method: "PUT",
+        path: "/users/{id}",
         protect: true,
-        tags: ['Users'],
-        summary: 'Update user',
-      }
+        tags: ["Users"],
+        summary: "Update user",
+      },
     })
     .input(
       z.object({
@@ -521,7 +530,7 @@ export const userRouter = createTRPCRouter({
         departmentId: z.string().optional().nullable(),
         supervisorId: z.string().optional().nullable(),
         phoneNumber: z.string().optional().nullable(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -577,7 +586,7 @@ export const userRouter = createTRPCRouter({
         const isCircular = await checkCircularSupervisor(
           ctx.db,
           id,
-          input.supervisorId
+          input.supervisorId,
         );
         if (isCircular) {
           throw new TRPCError({
@@ -607,18 +616,18 @@ export const userRouter = createTRPCRouter({
   updateMe: protectedProcedure
     .meta({
       openapi: {
-        method: 'PATCH',
-        path: '/users/me',
+        method: "PATCH",
+        path: "/users/me",
         protect: true,
-        tags: ['Users'],
-        summary: 'Update own profile',
-      }
+        tags: ["Users"],
+        summary: "Update own profile",
+      },
     })
     .input(
       z.object({
         name: z.string().min(1).optional(),
         phoneNumber: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -642,18 +651,18 @@ export const userRouter = createTRPCRouter({
   changePassword: protectedProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/users/change-password',
+        method: "POST",
+        path: "/users/change-password",
         protect: true,
-        tags: ['Users'],
-        summary: 'Change password',
-      }
+        tags: ["Users"],
+        summary: "Change password",
+      },
     })
     .input(
       z.object({
         currentPassword: z.string(),
         newPassword: z.string().min(8),
-      })
+      }),
     )
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -670,7 +679,10 @@ export const userRouter = createTRPCRouter({
       }
 
       // Verify current password
-      const isValid = await bcrypt.compare(input.currentPassword, user.password);
+      const isValid = await bcrypt.compare(
+        input.currentPassword,
+        user.password,
+      );
       if (!isValid) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
@@ -710,12 +722,12 @@ export const userRouter = createTRPCRouter({
   delete: adminProcedure
     .meta({
       openapi: {
-        method: 'DELETE',
-        path: '/users/{id}',
+        method: "DELETE",
+        path: "/users/{id}",
         protect: true,
-        tags: ['Users'],
-        summary: 'Delete user',
-      }
+        tags: ["Users"],
+        summary: "Delete user",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -788,7 +800,7 @@ export const userRouter = createTRPCRouter({
 async function checkCircularSupervisor(
   db: PrismaClient,
   userId: string,
-  supervisorId: string
+  supervisorId: string,
 ): Promise<boolean> {
   const supervisor = await db.user.findUnique({
     where: { id: supervisorId },

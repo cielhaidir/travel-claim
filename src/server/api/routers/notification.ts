@@ -11,18 +11,19 @@ import {
   protectedProcedure,
   adminProcedure,
 } from "@/server/api/trpc";
+import { userHasRole } from "@/lib/auth/role-check";
 
 export const notificationRouter = createTRPCRouter({
   // Get user's notifications
   getMy: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/notifications/my',
+        method: "GET",
+        path: "/notifications/my",
         protect: true,
-        tags: ['Notifications'],
-        summary: 'Get my notifications',
-      }
+        tags: ["Notifications"],
+        summary: "Get my notifications",
+      },
     })
     .input(
       z.object({
@@ -31,7 +32,7 @@ export const notificationRouter = createTRPCRouter({
         unreadOnly: z.boolean().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -77,34 +78,34 @@ export const notificationRouter = createTRPCRouter({
   getUnreadCount: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/notifications/unread-count',
+        method: "GET",
+        path: "/notifications/unread-count",
         protect: true,
-        tags: ['Notifications'],
-        summary: 'Get unread count',
-      }
+        tags: ["Notifications"],
+        summary: "Get unread count",
+      },
     })
     .input(z.object({}))
     .output(z.number())
     .query(async ({ ctx }) => {
-    return ctx.db.notification.count({
-      where: {
-        userId: ctx.session.user.id,
-        readAt: null,
-      },
-    });
-  }),
+      return ctx.db.notification.count({
+        where: {
+          userId: ctx.session.user.id,
+          readAt: null,
+        },
+      });
+    }),
 
   // Get notification by ID
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/notifications/{id}',
+        method: "GET",
+        path: "/notifications/{id}",
         protect: true,
-        tags: ['Notifications'],
-        summary: 'Get notification by ID',
-      }
+        tags: ["Notifications"],
+        summary: "Get notification by ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
@@ -130,7 +131,10 @@ export const notificationRouter = createTRPCRouter({
       }
 
       // Only user can view their own notifications
-      if (notification.userId !== ctx.session.user.id && ctx.session.user.role !== "ADMIN") {
+      if (
+        notification.userId !== ctx.session.user.id &&
+        !userHasRole(ctx.session.user, "ADMIN")
+      ) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to view this notification",
@@ -144,12 +148,12 @@ export const notificationRouter = createTRPCRouter({
   create: adminProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/notifications',
+        method: "POST",
+        path: "/notifications",
         protect: true,
-        tags: ['Notifications'],
-        summary: 'Create notification',
-      }
+        tags: ["Notifications"],
+        summary: "Create notification",
+      },
     })
     .input(
       z.object({
@@ -162,7 +166,7 @@ export const notificationRouter = createTRPCRouter({
         actionUrl: z.string().optional(),
         priority: z.enum(["LOW", "NORMAL", "HIGH"]).optional(),
         templateId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -201,12 +205,12 @@ export const notificationRouter = createTRPCRouter({
   createBatch: adminProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/notifications/batch',
+        method: "POST",
+        path: "/notifications/batch",
         protect: true,
-        tags: ['Notifications'],
-        summary: 'Batch create notifications',
-      }
+        tags: ["Notifications"],
+        summary: "Batch create notifications",
+      },
     })
     .input(
       z.object({
@@ -218,7 +222,7 @@ export const notificationRouter = createTRPCRouter({
         entityId: z.string().optional(),
         actionUrl: z.string().optional(),
         priority: z.enum(["LOW", "NORMAL", "HIGH"]).optional(),
-      })
+      }),
     )
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -289,27 +293,27 @@ export const notificationRouter = createTRPCRouter({
   markAllAsRead: protectedProcedure
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx }) => {
-    const updated = await ctx.db.notification.updateMany({
-      where: {
-        userId: ctx.session.user.id,
-        readAt: null,
-      },
-      data: {
-        readAt: new Date(),
-      },
-    });
+      const updated = await ctx.db.notification.updateMany({
+        where: {
+          userId: ctx.session.user.id,
+          readAt: null,
+        },
+        data: {
+          readAt: new Date(),
+        },
+      });
 
-    return {
-      count: updated.count,
-    };
-  }),
+      return {
+        count: updated.count,
+      };
+    }),
 
   // Mark multiple notifications as read
   markManyAsRead: protectedProcedure
     .input(
       z.object({
         ids: z.array(z.string()),
-      })
+      }),
     )
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -321,7 +325,7 @@ export const notificationRouter = createTRPCRouter({
       });
 
       const unauthorized = notifications.some(
-        (n) => n.userId !== ctx.session.user.id
+        (n) => n.userId !== ctx.session.user.id,
       );
 
       if (unauthorized) {
@@ -362,7 +366,10 @@ export const notificationRouter = createTRPCRouter({
         });
       }
 
-      if (notification.userId !== ctx.session.user.id && ctx.session.user.role !== "ADMIN") {
+      if (
+        notification.userId !== ctx.session.user.id &&
+        !userHasRole(ctx.session.user, "ADMIN")
+      ) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to delete this notification",
@@ -379,17 +386,17 @@ export const notificationRouter = createTRPCRouter({
   deleteAllRead: protectedProcedure
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx }) => {
-    const deleted = await ctx.db.notification.deleteMany({
-      where: {
-        userId: ctx.session.user.id,
-        readAt: { not: null },
-      },
-    });
+      const deleted = await ctx.db.notification.deleteMany({
+        where: {
+          userId: ctx.session.user.id,
+          readAt: { not: null },
+        },
+      });
 
-    return {
-      count: deleted.count,
-    };
-  }),
+      return {
+        count: deleted.count,
+      };
+    }),
 
   // Update notification status (for system tracking)
   updateStatus: adminProcedure
@@ -401,7 +408,7 @@ export const notificationRouter = createTRPCRouter({
         deliveredAt: z.coerce.date().optional(),
         failedAt: z.coerce.date().optional(),
         errorMessage: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -431,7 +438,7 @@ export const notificationRouter = createTRPCRouter({
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
         channel: z.nativeEnum(NotificationChannel).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {

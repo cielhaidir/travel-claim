@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { type z, ZodError } from "zod";
 import { auth } from "@/server/auth";
 import type { Role } from "../../../generated/prisma";
+import { normalizeRoles } from "@/lib/constants/roles";
 
 // Standard API response format
 export interface ApiResponse<T = unknown> {
@@ -25,7 +26,7 @@ export function errorResponse(
   message: string,
   code = "INTERNAL_ERROR",
   status = 500,
-  details?: unknown
+  details?: unknown,
 ): NextResponse<ApiResponse> {
   return NextResponse.json(
     {
@@ -36,7 +37,7 @@ export function errorResponse(
         details,
       },
     },
-    { status }
+    { status },
   );
 }
 
@@ -44,7 +45,7 @@ export function errorResponse(
 export function successResponse<T>(
   data: T,
   meta?: ApiResponse["meta"],
-  status = 200
+  status = 200,
 ): NextResponse<ApiResponse<T>> {
   return NextResponse.json(
     {
@@ -52,18 +53,18 @@ export function successResponse<T>(
       data,
       meta,
     },
-    { status }
+    { status },
   );
 }
 
 // Get authenticated session
 export async function getAuthSession(_request: NextRequest) {
   const session = await auth();
-  
+
   if (!session?.user) {
     throw new ApiError("Unauthorized", "UNAUTHORIZED", 401);
   }
-  
+
   return session;
 }
 
@@ -73,7 +74,7 @@ export class ApiError extends Error {
     message: string,
     public code = "INTERNAL_ERROR",
     public status = 500,
-    public details?: unknown
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -81,25 +82,28 @@ export class ApiError extends Error {
 }
 
 // Check user role
-export function checkRole(userRole: Role, allowedRoles: Role[]): boolean {
-  return allowedRoles.includes(userRole);
+export function checkRole(
+  userRoles: readonly Role[] | Role,
+  allowedRoles: Role[],
+): boolean {
+  const normalized = Array.isArray(userRoles) ? userRoles : [userRoles];
+  return allowedRoles.some((role) => normalized.includes(role));
 }
 
 // Require specific roles
-export function requireRoles(userRole: Role, allowedRoles: Role[]) {
-  if (!checkRole(userRole, allowedRoles)) {
-    throw new ApiError(
-      "Insufficient permissions",
-      "FORBIDDEN",
-      403
-    );
+export function requireRoles(
+  userRoles: readonly Role[] | Role,
+  allowedRoles: Role[],
+) {
+  if (!checkRole(userRoles, allowedRoles)) {
+    throw new ApiError("Insufficient permissions", "FORBIDDEN", 403);
   }
 }
 
 // Validate request body with Zod schema
 export async function validateBody<T>(
   request: NextRequest,
-  schema: z.ZodSchema<T>
+  schema: z.ZodSchema<T>,
 ): Promise<T> {
   try {
     const body = (await request.json()) as unknown;
@@ -110,7 +114,7 @@ export async function validateBody<T>(
         "Validation error",
         "VALIDATION_ERROR",
         400,
-        error.issues
+        error.issues,
       );
     }
     throw new ApiError("Invalid JSON body", "BAD_REQUEST", 400);
@@ -149,7 +153,12 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
   console.error("API Error:", error);
 
   if (error instanceof ApiError) {
-    return errorResponse(error.message, error.code, error.status, error.details);
+    return errorResponse(
+      error.message,
+      error.code,
+      error.status,
+      error.details,
+    );
   }
 
   if (error instanceof ZodError) {
@@ -157,47 +166,38 @@ export function handleApiError(error: unknown): NextResponse<ApiResponse> {
       "Validation error",
       "VALIDATION_ERROR",
       400,
-      error.issues
+      error.issues,
     );
   }
 
   // Prisma errors
   if (error && typeof error === "object" && "code" in error) {
-    const prismaError = error as { code: string; meta?: Record<string, unknown> };
-    
+    const prismaError = error as {
+      code: string;
+      meta?: Record<string, unknown>;
+    };
+
     switch (prismaError.code) {
       case "P2002":
         return errorResponse(
           "A record with this value already exists",
           "DUPLICATE_ENTRY",
-          409
+          409,
         );
       case "P2025":
-        return errorResponse(
-          "Record not found",
-          "NOT_FOUND",
-          404
-        );
+        return errorResponse("Record not found", "NOT_FOUND", 404);
       case "P2003":
         return errorResponse(
           "Foreign key constraint failed",
           "FOREIGN_KEY_ERROR",
-          400
+          400,
         );
       default:
-        return errorResponse(
-          "Database error",
-          "DATABASE_ERROR",
-          500
-        );
+        return errorResponse("Database error", "DATABASE_ERROR", 500);
     }
   }
 
-  return errorResponse(
-    "An unexpected error occurred",
-    "INTERNAL_ERROR",
-    500
-  );
+  return errorResponse("An unexpected error occurred", "INTERNAL_ERROR", 500);
 }
 
 // Route context type for Next.js API handlers
@@ -205,7 +205,10 @@ type RouteContext = { params?: Record<string, string> };
 
 // Wrapper for API route handlers with error handling
 export function withErrorHandler(
-  handler: (request: NextRequest, context?: RouteContext) => Promise<NextResponse>
+  handler: (
+    request: NextRequest,
+    context?: RouteContext,
+  ) => Promise<NextResponse>,
 ) {
   return async (request: NextRequest, context?: RouteContext) => {
     try {
@@ -220,13 +223,18 @@ export function withErrorHandler(
 export function withAuth(
   handler: (
     request: NextRequest,
-    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: Record<string, string> }
-  ) => Promise<NextResponse>
+    context: {
+      session: Awaited<ReturnType<typeof getAuthSession>>;
+      params?: Record<string, string>;
+    },
+  ) => Promise<NextResponse>,
 ) {
-  return withErrorHandler(async (request: NextRequest, routeContext?: RouteContext) => {
-    const session = await getAuthSession(request);
-    return handler(request, { session, params: routeContext?.params });
-  });
+  return withErrorHandler(
+    async (request: NextRequest, routeContext?: RouteContext) => {
+      const session = await getAuthSession(request);
+      return handler(request, { session, params: routeContext?.params });
+    },
+  );
 }
 
 // Wrapper for role-protected API routes
@@ -234,11 +242,18 @@ export function withRoles(
   allowedRoles: Role[],
   handler: (
     request: NextRequest,
-    context: { session: Awaited<ReturnType<typeof getAuthSession>>; params?: Record<string, string> }
-  ) => Promise<NextResponse>
+    context: {
+      session: Awaited<ReturnType<typeof getAuthSession>>;
+      params?: Record<string, string>;
+    },
+  ) => Promise<NextResponse>,
 ) {
   return withAuth(async (request, context) => {
-    requireRoles(context.session.user.role, allowedRoles);
+    const roles = normalizeRoles({
+      roles: context.session.user.roles,
+      role: context.session.user.role,
+    }) as Role[];
+    requireRoles(roles, allowedRoles);
     return handler(request, context);
   });
 }
@@ -258,13 +273,13 @@ export interface PaginationParams {
 export function getPaginationParams(
   request: NextRequest,
   defaultLimit = 50,
-  maxLimit = 100
+  maxLimit = 100,
 ): PaginationParams {
   const query = parseQuery(request);
   const page = Math.max(1, query.getNumber("page", 1) ?? 1);
   const limit = Math.min(
     maxLimit,
-    Math.max(1, query.getNumber("limit", defaultLimit) ?? defaultLimit)
+    Math.max(1, query.getNumber("limit", defaultLimit) ?? defaultLimit),
   );
   const skip = (page - 1) * limit;
 
@@ -274,7 +289,7 @@ export function getPaginationParams(
 export function createPaginationMeta(
   page: number,
   limit: number,
-  total: number
+  total: number,
 ): ApiResponse["meta"] {
   return {
     page,
