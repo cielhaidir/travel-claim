@@ -1,7 +1,7 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "next-auth/adapters";
 import { type DefaultSession, type NextAuthConfig } from "next-auth";
-import AzureADProvider from "next-auth/providers/azure-ad";
+import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
@@ -177,12 +177,12 @@ export const authConfig = {
         }
       },
     }),
-    // Azure AD provider (conditional)
+    // Microsoft Entra ID (formerly Azure AD) provider (conditional)
     ...(env.AZURE_AD_CLIENT_ID &&
     env.AZURE_AD_CLIENT_SECRET &&
     env.AZURE_AD_TENANT_ID
       ? [
-          AzureADProvider({
+          MicrosoftEntraID({
             clientId: env.AZURE_AD_CLIENT_ID,
             clientSecret: env.AZURE_AD_CLIENT_SECRET,
             issuer: `https://login.microsoftonline.com/${env.AZURE_AD_TENANT_ID}/v2.0`,
@@ -210,7 +210,7 @@ export const authConfig = {
   },
   pages: {
     signIn: "/login",
-    error: "/auth/error",
+    error: "/login",
   },
   callbacks: {
     async signIn({ user, account, profile }) {
