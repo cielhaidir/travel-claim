@@ -114,7 +114,7 @@ export default function FinanceDashboard() {
     isLoading: loadingBailouts,
     refetch: refetchBailouts,
   } = api.bailout.getAll.useQuery(
-    { status: "APPROVED_L2", limit: 50 },
+    { status: "APPROVED_DIRECTOR", limit: 50 },
     { enabled: isAllowed },
   );
   const bailouts =
