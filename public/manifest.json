@@ -1,0 +1,16 @@
+{
+  "name": "Bussines Trip & Claim System",
+  "short_name": "TripClaim",
+  "description": "Streamline your bussines trip requests and expense claims with automated approvals and integrated Microsoft authentication.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563EB",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

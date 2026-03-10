@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
@@ -96,6 +97,21 @@ export default function UserManagementPage() {
 
 // ─────────────────────────── Main Content ───────────────────────────
 
+// ─────────────────────────── Import Types ───────────────────────────
+
+interface ImportRow {
+  id?: string;
+  displayName: string;
+  userPrincipalName: string;
+  userType: string;
+}
+
+interface ImportResult {
+  email: string;
+  status: "created" | "skipped";
+  reason?: string;
+}
+
 function UserManagementContent() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Role | "ALL">("ALL");
@@ -107,6 +123,14 @@ function UserManagementContent() {
   const [viewingUser, setViewingUser] = useState<UserRef | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserRef | null>(null);
   const [resetPwUser, setResetPwUser] = useState<UserRef | null>(null);
+
+  // Import modal state
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importPassword, setImportPassword] = useState("Password@123");
+  const [importError, setImportError] = useState("");
+  const [importResults, setImportResults] = useState<ImportResult[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form & password state
   const [form, setForm] = useState<UserFormData>(DEFAULT_FORM);
@@ -147,6 +171,90 @@ function UserManagementContent() {
     onSuccess: () => { setResetPwUser(null); setNewPassword(""); alert("Password reset successfully."); },
     onError: (e) => alert(`Error: ${e.message}`),
   });
+
+  const bulkImportMutation = api.user.bulkImport.useMutation({
+    onSuccess: (data) => {
+      const d = data as { results: ImportResult[]; created: number; skipped: number; total: number };
+      setImportResults(d.results);
+      void refetch();
+    },
+    onError: (e) => setImportError(e.message),
+  });
+
+  // Import helpers
+  const openImport = () => {
+    setImportRows([]);
+    setImportError("");
+    setImportResults(null);
+    setImportPassword("Password@123");
+    setIsImportOpen(true);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError("");
+    setImportResults(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) { setImportError("No sheets found in file."); return; }
+        const sheet = workbook.Sheets[sheetName];
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet!, { defval: "" });
+
+        // Normalize keys (case-insensitive)
+        const normalised: ImportRow[] = rows
+          .map((row) => {
+            const lower: Record<string, string> = {};
+            for (const [k, v] of Object.entries(row)) {
+              lower[k.trim().toLowerCase()] = String(v).trim();
+            }
+            return {
+              id: lower["id"] ?? "",
+              displayName: lower["displayname"] ?? lower["display_name"] ?? "",
+              userPrincipalName: lower["userprincipalname"] ?? lower["user_principal_name"] ?? lower["email"] ?? "",
+              userType: lower["usertype"] ?? lower["user_type"] ?? "",
+            };
+          })
+          // Only include member rows
+          .filter((row) => row.userType.toLowerCase() === "member")
+          // Drop rows missing required fields
+          .filter((row) => row.displayName && row.userPrincipalName);
+
+        if (normalised.length === 0) {
+          setImportError("No valid member rows found. Make sure your file has a 'userType' column with value 'member'.");
+          setImportRows([]);
+        } else {
+          setImportRows(normalised);
+        }
+      } catch {
+        setImportError("Failed to parse file. Please upload a valid Excel (.xlsx) or CSV file.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImportSubmit = () => {
+    if (importRows.length === 0) return;
+    if (importPassword.length < 8) {
+      setImportError("Default password must be at least 8 characters.");
+      return;
+    }
+    setImportError("");
+    bulkImportMutation.mutate({
+      users: importRows.map((r) => ({
+        id: r.id || undefined,
+        displayName: r.displayName,
+        userPrincipalName: r.userPrincipalName,
+      })),
+      defaultPassword: importPassword,
+    });
+  };
 
   // Helpers
   const openCreate = () => { setForm(DEFAULT_FORM); setFormError(""); setIsCreateOpen(true); };
@@ -211,6 +319,7 @@ function UserManagementContent() {
         title="User Management"
         description="Manage users, roles, and organisational hierarchy"
         primaryAction={{ label: "Add User", onClick: openCreate }}
+        secondaryAction={{ label: "Import Users", onClick: openImport }}
       />
 
       {/* Department / Group Summary Cards */}
@@ -508,6 +617,135 @@ function UserManagementContent() {
             >
               Reset Password
             </Button>
+          </div>
+        </div>
+      </Modal>
+      {/* Import Users Modal */}
+      <Modal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        title="Import Users from Excel / CSV"
+        size="lg"
+      >
+        <div className="space-y-4 text-sm">
+          {/* Instructions */}
+          <div className="rounded-lg bg-blue-50 px-4 py-3 text-blue-800">
+            <p className="font-medium">Expected columns in your file:</p>
+            <ul className="mt-1 list-disc pl-4 text-xs">
+              <li><code>id</code> — optional, Azure/external ID</li>
+              <li><code>displayName</code> — full name (required)</li>
+              <li><code>userPrincipalName</code> — email address (required)</li>
+              <li><code>userType</code> — only rows with value <strong>member</strong> will be imported</li>
+            </ul>
+            <p className="mt-1 text-xs">Supports <strong>.xlsx</strong>, <strong>.xls</strong>, and <strong>.csv</strong> files.</p>
+          </div>
+
+          {/* File picker */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Upload File *</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileChange}
+              className="block w-full text-sm text-gray-600 file:mr-3 file:rounded file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-blue-700 hover:file:bg-blue-100"
+            />
+          </div>
+
+          {/* Default password */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Default Password (min 8 chars) *</label>
+            <input
+              type="text"
+              value={importPassword}
+              onChange={(e) => setImportPassword(e.target.value)}
+              placeholder="Password@123"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-xs text-gray-500">All imported users will receive this temporary password.</p>
+          </div>
+
+          {/* Error */}
+          {importError && (
+            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{importError}</div>
+          )}
+
+          {/* Preview table */}
+          {importRows.length > 0 && !importResults && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-gray-700">
+                Preview — <span className="text-blue-600">{importRows.length} member row(s)</span> ready to import
+              </p>
+              <div className="max-h-52 overflow-y-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 text-left">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold text-gray-500">Display Name</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">Email (UPN)</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {importRows.map((row, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{row.displayName}</td>
+                        <td className="px-3 py-2 text-gray-600">{row.userPrincipalName}</td>
+                        <td className="px-3 py-2 text-gray-400">{row.id ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Results */}
+          {importResults && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-gray-700">Import Results</p>
+              <div className="max-h-52 overflow-y-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 text-left">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold text-gray-500">Email</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">Status</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {importResults.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{r.email}</td>
+                        <td className={`px-3 py-2 font-semibold ${r.status === "created" ? "text-green-600" : "text-amber-600"}`}>
+                          {r.status === "created" ? "✓ Created" : "⚠ Skipped"}
+                        </td>
+                        <td className="px-3 py-2 text-gray-400">{r.reason ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                {importResults.filter((r) => r.status === "created").length} created ·{" "}
+                {importResults.filter((r) => r.status === "skipped").length} skipped
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 border-t pt-4">
+            <Button variant="secondary" size="sm" onClick={() => setIsImportOpen(false)}>
+              {importResults ? "Close" : "Cancel"}
+            </Button>
+            {!importResults && (
+              <Button
+                size="sm"
+                onClick={handleImportSubmit}
+                isLoading={bulkImportMutation.isPending}
+                disabled={importRows.length === 0 || importPassword.length < 8}
+              >
+                Import {importRows.length > 0 ? `${importRows.length} Users` : "Users"}
+              </Button>
+            )}
           </div>
         </div>
       </Modal>

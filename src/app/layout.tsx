@@ -1,6 +1,6 @@
 import "@/styles/globals.css";
 
-import { type Metadata } from "next";
+import { type Metadata, type Viewport } from "next";
 import { Geist } from "next/font/google";
 
 import { TRPCReactProvider } from "@/trpc/react";
@@ -15,12 +15,12 @@ export const metadata: Metadata = {
   keywords: ["travel management", "expense claims", "approval system", "business travel"],
   authors: [{ name: "Travel & Claim System" }],
   icons: [{ rel: "icon", url: "/favicon.ico" }],
-  manifest: "/manifest.json",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
   themeColor: "#2563EB",
 };
 

@@ -794,6 +794,61 @@ export const userRouter = createTRPCRouter({
         },
       });
     }),
+
+  // Bulk import users from Excel/CSV (only userType = member)
+  bulkImport: adminProcedure
+    .input(
+      z.object({
+        users: z.array(
+          z.object({
+            id: z.string().optional(),
+            displayName: z.string().min(1),
+            userPrincipalName: z.string().email(),
+          }),
+        ),
+        defaultPassword: z.string().min(8),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const results: {
+        email: string;
+        status: "created" | "skipped";
+        reason?: string;
+      }[] = [];
+
+      for (const row of input.users) {
+        const email = row.userPrincipalName.toLowerCase().trim();
+
+        // Check if email already exists
+        const existing = await ctx.db.user.findUnique({
+          where: { email },
+        });
+
+        if (existing) {
+          results.push({ email, status: "skipped", reason: "Email already exists" });
+          continue;
+        }
+
+        const hashedPassword = await bcrypt.hash(input.defaultPassword, 10);
+
+        await ctx.db.user.create({
+          data: {
+            name: row.displayName.trim(),
+            email,
+            password: hashedPassword,
+            role: Role.EMPLOYEE,
+          },
+        });
+
+        results.push({ email, status: "created" });
+      }
+
+      const created = results.filter((r) => r.status === "created").length;
+      const skipped = results.filter((r) => r.status === "skipped").length;
+
+      return { results, created, skipped, total: input.users.length };
+    }),
 });
 
 // Helper function to check circular supervisor references
