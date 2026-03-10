@@ -95,8 +95,8 @@ function ApprovalsContent() {
   const [actionComment, setActionComment] = useState("");
   const [actionError, setActionError] = useState("");
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     data: rawData,
     isLoading,
     refetch,

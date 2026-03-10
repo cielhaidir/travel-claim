@@ -200,12 +200,16 @@ function UserManagementContent() {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
         const workbook = XLSX.read(data, { type: "array" });
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         const sheetName = workbook.SheetNames[0];
         if (!sheetName) { setImportError("No sheets found in file."); return; }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         const sheet = workbook.Sheets[sheetName];
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet!, { defval: "" });
+        if (!sheet) { setImportError("Sheet not found in file."); return; }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+        const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
         // Normalize keys (case-insensitive)
         const normalised: ImportRow[] = rows
@@ -215,10 +219,10 @@ function UserManagementContent() {
               lower[k.trim().toLowerCase()] = String(v).trim();
             }
             return {
-              id: lower["id"] ?? "",
-              displayName: lower["displayname"] ?? lower["display_name"] ?? "",
-              userPrincipalName: lower["userprincipalname"] ?? lower["user_principal_name"] ?? lower["email"] ?? "",
-              userType: lower["usertype"] ?? lower["user_type"] ?? "",
+              id: lower.id ?? "",
+              displayName: lower.displayname ?? lower.display_name ?? "",
+              userPrincipalName: lower.userprincipalname ?? lower.user_principal_name ?? lower.email ?? "",
+              userType: lower.usertype ?? lower.user_type ?? "",
             };
           })
           // Only include member rows
@@ -248,7 +252,7 @@ function UserManagementContent() {
     setImportError("");
     bulkImportMutation.mutate({
       users: importRows.map((r) => ({
-        id: r.id || undefined,
+        id: r.id ?? undefined,
         displayName: r.displayName,
         userPrincipalName: r.userPrincipalName,
       })),
