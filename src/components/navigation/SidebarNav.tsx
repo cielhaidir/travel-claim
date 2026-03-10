@@ -53,6 +53,12 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
+    label: "Finance",
+    href: "/finance",
+    icon: "💵",
+    roles: ["FINANCE", "ADMIN"],
+  },
+  {
     label: "Chart of Accounts",
     href: "/chart-of-accounts",
     icon: "📋",

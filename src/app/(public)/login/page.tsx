@@ -1,6 +1,6 @@
 "use client";
 // import type { Metadata } from "next";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
 
@@ -15,11 +15,25 @@ import { useState, useEffect } from "react";
 
 export default function LoginPage() {
    const router = useRouter();
+   const searchParams = useSearchParams();
    const { data: session } = useSession();
    const [email, setEmail] = useState("");
    const [password, setPassword] = useState("");
-   const [error, setError] = useState("");
    const [isLoading, setIsLoading] = useState(false);
+
+   const urlError = searchParams.get("error");
+   const authErrorMessages: Record<string, string> = {
+     Configuration: "Server configuration error. Please contact your IT administrator.",
+     AccessDenied: "You do not have permission to sign in.",
+     Verification: "The verification link has expired or has already been used.",
+     OAuthSignin: "Error starting Microsoft sign-in. Please try again.",
+     OAuthCallback: "Error completing Microsoft sign-in. Please try again.",
+     OAuthCreateAccount: "Could not create account. Please contact your IT administrator.",
+     OAuthAccountNotLinked: "This email is already linked to another sign-in method.",
+   };
+   const [error, setError] = useState(
+     urlError ? (authErrorMessages[urlError] ?? `Sign-in error: ${urlError}`) : ""
+   );
   
   // Redirect to dashboard if already authenticated
   useEffect(() => {
@@ -149,9 +163,9 @@ export default function LoginPage() {
           </div>
 
           {/* Microsoft Sign-in */}
-          <form action="/api/auth/signin/azure-ad" method="POST">
-            <button
-              type="submit"
+          <button
+              type="button"
+              onClick={() => signIn("microsoft-entra-id", { callbackUrl: "/" })}
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               <svg
@@ -191,7 +205,6 @@ export default function LoginPage() {
               </svg>
               Sign in with Microsoft
             </button>
-          </form>
                 {/* <button
                     type="button"
                     onClick={handleGoogleLogin}
