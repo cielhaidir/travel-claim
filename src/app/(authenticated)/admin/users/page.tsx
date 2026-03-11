@@ -31,6 +31,7 @@ interface UserRef {
   createdAt: string | Date;
   department: Department | null;
   supervisor: { id: string; name: string | null; email: string | null } | null;
+  userRoles: { role: Role }[];
   _count: { directReports: number; travelRequests: number; claims: number };
 }
 
@@ -39,7 +40,7 @@ interface UserFormData {
   email: string;
   password: string;
   employeeId: string;
-  role: Role;
+  roles: Role[];
   departmentId: string;
   supervisorId: string;
   phoneNumber: string;
@@ -74,7 +75,7 @@ const DEFAULT_FORM: UserFormData = {
   email: "",
   password: "",
   employeeId: "",
-  role: "EMPLOYEE",
+  roles: ["EMPLOYEE"],
   departmentId: "",
   supervisorId: "",
   phoneNumber: "",
@@ -200,15 +201,13 @@ function UserManagementContent() {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
         const workbook = XLSX.read(data, { type: "array" });
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         const sheetName = workbook.SheetNames[0];
+
         if (!sheetName) { setImportError("No sheets found in file."); return; }
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         const sheet = workbook.Sheets[sheetName];
+
         if (!sheet) { setImportError("Sheet not found in file."); return; }
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
         const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
         // Normalize keys (case-insensitive)
@@ -268,7 +267,7 @@ function UserManagementContent() {
       email: user.email ?? "",
       password: "",
       employeeId: user.employeeId ?? "",
-      role: user.role,
+      roles: (user.userRoles?.length ?? 0) > 0 ? user.userRoles.map((r) => r.role) : [user.role],
       departmentId: user.department?.id ?? "",
       supervisorId: user.supervisor?.id ?? "",
       phoneNumber: user.phoneNumber ?? "",
@@ -289,7 +288,7 @@ function UserManagementContent() {
       email: form.email,
       password: form.password,
       employeeId: form.employeeId || undefined,
-      role: form.role,
+      roles: form.roles,
       departmentId: form.departmentId || undefined,
       supervisorId: form.supervisorId || undefined,
       phoneNumber: form.phoneNumber || undefined,
@@ -305,7 +304,7 @@ function UserManagementContent() {
       name: form.name,
       email: form.email,
       employeeId: form.employeeId || undefined,
-      role: form.role,
+      roles: form.roles,
       departmentId: form.departmentId || null,
       supervisorId: form.supervisorId || null,
       phoneNumber: form.phoneNumber || null,
@@ -443,11 +442,16 @@ function UserManagementContent() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">{user.email ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[user.role]}`}
-                    >
-                      {ROLE_LABELS[user.role]}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {((user.userRoles?.length ?? 0) > 0 ? user.userRoles.map((r) => r.role) : [user.role]).map((r) => (
+                        <span
+                          key={r}
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
+                        >
+                          {ROLE_LABELS[r]}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{user.department?.name ?? "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{user.supervisor?.name ?? "—"}</td>
@@ -542,11 +546,16 @@ function UserManagementContent() {
               </div>
               <div>
                 <p className="text-lg font-semibold text-gray-900">{viewingUser.name ?? "—"}</p>
-                <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[viewingUser.role]}`}
-                >
-                  {ROLE_LABELS[viewingUser.role]}
-                </span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {((viewingUser.userRoles?.length ?? 0) > 0 ? viewingUser.userRoles.map((r) => r.role) : [viewingUser.role]).map((r) => (
+                    <span
+                      key={r}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
+                    >
+                      {ROLE_LABELS[r]}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -844,24 +853,67 @@ function UserForm({
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        {/* Role */}
-        <div>
-          <label className="block text-xs font-medium text-gray-700">Role *</label>
-          <select
-            required
-            value={form.role}
-            onChange={(e) => set("role", e.target.value as Role)}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="EMPLOYEE">Employee</option>
-            <option value="SUPERVISOR">Supervisor (Chief)</option>
-            <option value="MANAGER">Manager</option>
-            <option value="DIRECTOR">Director</option>
-            <option value="FINANCE">Finance</option>
-            <option value="ADMIN">Admin</option>
-            <option value="SALES_EMPLOYEE">Sales Employee</option>
-            <option value="SALES_CHIEF">Sales Chief</option>
-          </select>
+        {/* Roles — multi-select checkboxes */}
+        <div className="col-span-2">
+          <label className="block text-xs font-medium text-gray-700">
+            Roles * <span className="font-normal text-gray-400">(select one or more)</span>
+          </label>
+          <div className="mt-1 grid grid-cols-4 gap-2">
+            {([
+              { value: "EMPLOYEE", label: "Employee" },
+              { value: "SUPERVISOR", label: "Supervisor" },
+              { value: "MANAGER", label: "Manager" },
+              { value: "DIRECTOR", label: "Director" },
+              { value: "FINANCE", label: "Finance" },
+              { value: "ADMIN", label: "Admin" },
+              { value: "SALES_EMPLOYEE", label: "Sales Employee" },
+              { value: "SALES_CHIEF", label: "Sales Chief" },
+            ] as { value: Role; label: string }[]).map(({ value, label }) => {
+              const checked = form.roles.includes(value);
+              return (
+                <label
+                  key={value}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                    checked
+                      ? `${ROLE_COLORS[value]} border-current`
+                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-current"
+                    checked={checked}
+                    onChange={() =>
+                      setForm((prev) => {
+                        const has = prev.roles.includes(value);
+                        if (has && prev.roles.length === 1) return prev; // keep at least one
+                        return {
+                          ...prev,
+                          roles: has
+                            ? prev.roles.filter((r) => r !== value)
+                            : [...prev.roles, value],
+                        };
+                      })
+                    }
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+          {form.roles.length > 0 && (
+            <p className="mt-1 text-xs text-gray-400">
+              Primary role (auto-derived):{" "}
+              <span className="font-medium text-gray-600">
+                {ROLE_LABELS[
+                  [
+                    "ADMIN", "FINANCE", "DIRECTOR", "MANAGER",
+                    "SALES_CHIEF", "SUPERVISOR", "SALES_EMPLOYEE", "EMPLOYEE",
+                  ].find((r) => form.roles.includes(r as Role)) as Role ?? "EMPLOYEE"
+                ]}
+              </span>
+            </p>
+          )}
         </div>
         {/* Department */}
         <div>

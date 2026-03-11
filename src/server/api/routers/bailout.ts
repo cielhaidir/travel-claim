@@ -783,4 +783,116 @@ export const bailoutRouter = createTRPCRouter({
 
       return { bailouts };
     }),
+
+  // ─── GET PRESIGNED UPLOAD URL ─────────────────────────────────────────────
+  getUploadUrl: protectedProcedure
+    .input(
+      z.object({
+        bailoutId: z.string().min(1),
+        filename: z.string().min(1),
+        contentType: z.string().min(1),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.bailoutId },
+        select: { requesterId: true },
+      });
+
+      if (!bailout) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+      }
+
+      const isOwner = bailout.requesterId === ctx.session.user.id;
+      const isPrivileged = userHasAnyRole(ctx.session.user, [
+        ...SALES_CHIEF_ROLES,
+        Role.FINANCE,
+        Role.ADMIN,
+      ]);
+
+      if (!isOwner && !isPrivileged) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak upload file ini" });
+      }
+
+      const { getPresignedUploadUrl, buildStorageKey, getPublicUrl } =
+        await import("@/lib/storage/r2");
+
+      const key = buildStorageKey("bailouts", input.bailoutId, input.filename);
+      const uploadUrl = await getPresignedUploadUrl(key, input.contentType, 900);
+
+      return { uploadUrl, key, publicUrl: getPublicUrl(key) };
+    }),
+
+  // ─── ATTACH FILE (simpan URL setelah upload berhasil) ────────────────────
+  attachFile: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        // Accepts either a storage key (Option B) or full URL (Option A)
+        storageUrl: z.string().min(1),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+        select: { requesterId: true },
+      });
+
+      if (!bailout) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+      }
+
+      const isOwner = bailout.requesterId === ctx.session.user.id;
+      const isPrivileged = userHasAnyRole(ctx.session.user, [
+        ...SALES_CHIEF_ROLES,
+        Role.FINANCE,
+        Role.ADMIN,
+      ]);
+
+      if (!isOwner && !isPrivileged) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak mengubah file ini" });
+      }
+
+      return ctx.db.bailout.update({
+        where: { id: input.id },
+        data: { storageUrl: input.storageUrl },
+      });
+    }),
+
+  // ─── GET PRESIGNED DOWNLOAD URL ──────────────────────────────────────────
+  getFileUrl: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.id },
+        select: { requesterId: true, storageUrl: true },
+      });
+
+      if (!bailout) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+      }
+
+      const isOwner = bailout.requesterId === ctx.session.user.id;
+      const isPrivileged = userHasAnyRole(ctx.session.user, [
+        ...SALES_CHIEF_ROLES,
+        Role.FINANCE,
+        Role.ADMIN,
+      ]);
+
+      if (!isOwner && !isPrivileged) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak mengakses file ini" });
+      }
+
+      if (!bailout.storageUrl) {
+        return { url: null };
+      }
+
+      const { getPresignedDownloadUrl } = await import("@/lib/storage/r2");
+      // 30-minute presigned GET URL
+      const url = await getPresignedDownloadUrl(bailout.storageUrl, 1800);
+      return { url };
+    }),
 });

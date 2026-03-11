@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
+import { BailoutFileUpload } from "@/components/features/BailoutFileUpload";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 
@@ -29,6 +30,8 @@ interface Bailout {
   finance?: { id: string; name: string | null; email: string | null } | null;
   chiefApprover?: { id: string; name: string | null } | null;
   directorApprover?: { id: string; name: string | null } | null;
+  category: "TRANSPORT" | "HOTEL" | "MEAL" | "OTHER";
+  storageUrl: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,6 +113,16 @@ function ActionModal({
             <p className="text-xs text-gray-700">{bailout.rejectionReason}</p>
           </div>
         )}
+      </div>
+
+      {/* Upload File Pendukung */}
+      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+        <BailoutFileUpload
+          bailoutId={bailout.id}
+          category={bailout.category}
+          currentUrl={bailout.storageUrl}
+          onUploaded={() => onDone()}
+        />
       </div>
 
       {/* Reject Form */}

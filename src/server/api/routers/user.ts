@@ -15,6 +15,25 @@ import {
 } from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
 
+// Role precedence for deriving primary role from a set of roles
+const ROLE_PRECEDENCE_ORDER = [
+  Role.ADMIN,
+  Role.FINANCE,
+  Role.DIRECTOR,
+  Role.MANAGER,
+  Role.SALES_CHIEF,
+  Role.SUPERVISOR,
+  Role.SALES_EMPLOYEE,
+  Role.EMPLOYEE,
+] as const;
+
+function derivePrimary(roles: Role[]): Role {
+  for (const r of ROLE_PRECEDENCE_ORDER) {
+    if (roles.includes(r)) return r;
+  }
+  return Role.EMPLOYEE;
+}
+
 export const userRouter = createTRPCRouter({
   // Get current user profile
   getMe: protectedProcedure
@@ -250,6 +269,9 @@ export const userRouter = createTRPCRouter({
               email: true,
             },
           },
+          userRoles: {
+            select: { role: true },
+          },
           _count: {
             select: {
               directReports: true,
@@ -449,6 +471,7 @@ export const userRouter = createTRPCRouter({
         password: z.string().min(8),
         employeeId: z.string().optional(),
         role: z.nativeEnum(Role).optional(),
+        roles: z.array(z.nativeEnum(Role)).min(1).optional(),
         departmentId: z.string().optional(),
         supervisorId: z.string().optional(),
         phoneNumber: z.string().optional(),
@@ -485,16 +508,25 @@ export const userRouter = createTRPCRouter({
       // Hash password
       const hashedPassword = await bcrypt.hash(input.password, 10);
 
+      // Resolve roles
+      const allRoles = input.roles && input.roles.length > 0
+        ? input.roles
+        : [input.role ?? Role.EMPLOYEE];
+      const primaryRole = derivePrimary(allRoles);
+
       return ctx.db.user.create({
         data: {
           name: input.name,
           email: input.email,
           password: hashedPassword,
           employeeId: input.employeeId,
-          role: input.role ?? Role.EMPLOYEE,
+          role: primaryRole,
           departmentId: input.departmentId,
           supervisorId: input.supervisorId,
           phoneNumber: input.phoneNumber,
+          userRoles: {
+            create: allRoles.map((r) => ({ role: r })),
+          },
         },
         include: {
           department: true,
@@ -527,6 +559,7 @@ export const userRouter = createTRPCRouter({
         email: z.string().email().optional(),
         employeeId: z.string().optional(),
         role: z.nativeEnum(Role).optional(),
+        roles: z.array(z.nativeEnum(Role)).min(1).optional(),
         departmentId: z.string().optional().nullable(),
         supervisorId: z.string().optional().nullable(),
         phoneNumber: z.string().optional().nullable(),
@@ -534,7 +567,7 @@ export const userRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const { id, ...updateData } = input;
+      const { id, roles: inputRoles, ...updateData } = input;
 
       // Check if user exists
       const user = await ctx.db.user.findUnique({
@@ -594,6 +627,15 @@ export const userRouter = createTRPCRouter({
             message: "Circular supervisor reference detected",
           });
         }
+      }
+
+      // Sync multi-role table when roles array is provided
+      if (inputRoles && inputRoles.length > 0) {
+        updateData.role = derivePrimary(inputRoles);
+        await ctx.db.userRole.deleteMany({ where: { userId: id } });
+        await ctx.db.userRole.createMany({
+          data: inputRoles.map((r) => ({ userId: id, role: r })),
+        });
       }
 
       return ctx.db.user.update({

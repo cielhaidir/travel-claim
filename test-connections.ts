@@ -19,6 +19,8 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   DeleteObjectCommand,
+  PutBucketCorsCommand,
+  GetBucketCorsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db } from "@/server/db";
@@ -195,6 +197,111 @@ if (!r2 || !uploadedOk) {
     pass("DeleteObject", `${TEST_KEY} removed`);
   } catch (e) {
     fail("DeleteObject", e);
+  }
+}
+
+// ─── 9. CORS Configuration ────────────────────────────────────────────────────
+console.log("\n" + BOLD("9. R2 - CORS Configuration"));
+if (!r2) {
+  skip("CORS", "R2 env vars missing");
+} else {
+  // Check existing CORS
+  try {
+    const existing = await r2.send(new GetBucketCorsCommand({ Bucket: bucketName }));
+    pass("Current CORS rules", `${existing.CORSRules?.length ?? 0} rule(s) found`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("NoSuchCORSConfiguration") || msg.includes("does not exist")) {
+      skip("Current CORS rules", "no rules set yet");
+    } else {
+      fail("GetBucketCors", e);
+    }
+  }
+
+  // Apply CORS rules — allow browser PUT/GET from the app origins
+  try {
+    await r2.send(
+      new PutBucketCorsCommand({
+        Bucket: bucketName,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: [
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "https://*.vercel.app",
+                // Add your production domain below if applicable
+                // "https://your-app.com",
+              ],
+              AllowedMethods: ["PUT", "GET", "HEAD"],
+              AllowedHeaders: ["Content-Type", "Content-Length", "Authorization"],
+              ExposeHeaders: ["ETag"],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      }),
+    );
+    pass("PutBucketCors", "CORS rules applied successfully");
+
+    // Verify
+    const verify = await r2.send(new GetBucketCorsCommand({ Bucket: bucketName }));
+    const rules = verify.CORSRules ?? [];
+    for (const rule of rules) {
+      pass(
+        "  Rule",
+        `origins=${rule.AllowedOrigins?.join(", ")} | methods=${rule.AllowedMethods?.join(", ")}`,
+      );
+    }
+  } catch (e) {
+    fail("PutBucketCors", e);
+    console.log(`
+  ${YELLOW} Tip: The R2 S3 API key does not have permission to set CORS via SDK.
+       Configure CORS manually in the Cloudflare Dashboard:
+       → https://dash.cloudflare.com/ → R2 → ${bucketName} → Settings → CORS
+
+       Paste this JSON:
+       [
+         {
+           "AllowedOrigins": ["http://localhost:3000", "https://your-production-domain.com"],
+           "AllowedMethods": ["PUT", "GET", "HEAD"],
+           "AllowedHeaders": ["Content-Type", "Content-Length", "Authorization"],
+           "ExposeHeaders": ["ETag"],
+           "MaxAgeSeconds": 3600
+         }
+       ]
+`);
+  }
+}
+
+// ─── 10. CORS Preflight Verification ─────────────────────────────────────────
+console.log("\n" + BOLD("10. R2 - CORS Preflight Verification (simulates browser request)"));
+if (!r2) {
+  skip("CORS preflight", "R2 env vars missing");
+} else {
+  const r2Endpoint = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/`;
+  try {
+    const res = await fetch(r2Endpoint, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "Content-Type",
+      },
+    });
+    const allowOrigin = res.headers.get("access-control-allow-origin");
+    const allowMethods = res.headers.get("access-control-allow-methods");
+    if (allowOrigin) {
+      pass("CORS preflight (OPTIONS)", `Allow-Origin: ${allowOrigin} | Methods: ${allowMethods}`);
+    } else {
+      fail(
+        "CORS preflight (OPTIONS)",
+        `No CORS headers in response (HTTP ${res.status}). ` +
+        "CORS is NOT configured on this bucket — configure it in the Cloudflare Dashboard.",
+      );
+    }
+  } catch (e) {
+    fail("CORS preflight", e);
   }
 }
 
