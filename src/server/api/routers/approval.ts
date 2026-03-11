@@ -1497,6 +1497,10 @@ export const approvalRouter = createTRPCRouter({
         ? {} // ADMIN sees all approvals
         : { approverId: ctx.session.user.id };
 
+      if (input?.status) {
+        where.status = input.status;
+      }
+
       if (input?.status) where.status = input.status;
       if (input?.entityType === "TravelRequest") {
         where.travelRequestId = { not: null };
