@@ -106,7 +106,7 @@ export function ClaimForm({
   // Chart of Accounts
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawCoas } = api.chartOfAccount.getAll.useQuery({ isActive: true });
-  const coas = (rawCoas as Array<{ id: string; code: string; name: string }> | undefined) ?? [];
+  const coas = (rawCoas as { accounts: Array<{ id: string; code: string; name: string }> } | undefined)?.accounts ?? [];
 
   // Entertainment fields
   const entInitial = initialData as Partial<EntertainmentFormData> | undefined;

@@ -280,6 +280,10 @@ if (!r2) {
   skip("CORS preflight", "R2 env vars missing");
 } else {
   const r2Endpoint = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/`;
+  console.log(DIM(`  → OPTIONS ${r2Endpoint}`));
+  console.log(DIM(`     Origin: http://localhost:3000`));
+  console.log(DIM(`     Access-Control-Request-Method: PUT`));
+  console.log(DIM(`     Access-Control-Request-Headers: Content-Type`));
   try {
     const res = await fetch(r2Endpoint, {
       method: "OPTIONS",
@@ -289,19 +293,35 @@ if (!r2) {
         "Access-Control-Request-Headers": "Content-Type",
       },
     });
+
+    console.log(`\n  HTTP ${res.status} ${res.statusText}`);
+
+    // Print all response headers
+    console.log("  Response headers:");
+    res.headers.forEach((value, name) => {
+      console.log(`    ${name}: ${value}`);
+    });
+
+    // Print body if any
+    const body = await res.text();
+    if (body.trim()) {
+      console.log("\n  Response body:");
+      console.log("  " + body.trim().split("\n").join("\n  "));
+    }
+
     const allowOrigin = res.headers.get("access-control-allow-origin");
     const allowMethods = res.headers.get("access-control-allow-methods");
+    console.log();
     if (allowOrigin) {
-      pass("CORS preflight (OPTIONS)", `Allow-Origin: ${allowOrigin} | Methods: ${allowMethods}`);
+      pass("CORS preflight OK", `Allow-Origin: ${allowOrigin} | Methods: ${allowMethods}`);
     } else {
       fail(
-        "CORS preflight (OPTIONS)",
-        `No CORS headers in response (HTTP ${res.status}). ` +
-        "CORS is NOT configured on this bucket — configure it in the Cloudflare Dashboard.",
+        "CORS preflight FAILED — no Access-Control-Allow-Origin in response",
+        `HTTP ${res.status}: bucket "${bucketName}" has no CORS rule for Origin http://localhost:3000`,
       );
     }
   } catch (e) {
-    fail("CORS preflight", e);
+    fail("CORS preflight (network error)", e);
   }
 }
 
