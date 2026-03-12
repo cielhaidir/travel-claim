@@ -12,6 +12,15 @@ import { Modal } from "@/components/ui/Modal";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type BailoutStatus = "DRAFT" | "SUBMITTED" | "APPROVED_CHIEF" | "APPROVED_DIRECTOR" | "REJECTED" | "DISBURSED";
+type BailoutCategory = "TRANSPORT" | "HOTEL" | "MEAL" | "OTHER";
+type TransportMode = "FLIGHT" | "TRAIN" | "BUS" | "FERRY" | "CAR_RENTAL" | "OTHER";
+
+interface TravelRequestRef {
+  id: string;
+  requestNumber: string;
+  destination: string;
+  status: string;
+}
 
 interface Bailout {
   id: string;
@@ -30,7 +39,7 @@ interface Bailout {
   finance?: { id: string; name: string | null; email: string | null } | null;
   chiefApprover?: { id: string; name: string | null } | null;
   directorApprover?: { id: string; name: string | null } | null;
-  category: "TRANSPORT" | "HOTEL" | "MEAL" | "OTHER";
+  category: BailoutCategory;
   storageUrl: string | null;
 }
 
@@ -54,6 +63,292 @@ const STATUS_COLORS: Record<BailoutStatus, string> = {
   REJECTED: "bg-red-100 text-red-700", DISBURSED: "bg-green-100 text-green-700",
 };
 
+const FIELD_CLS = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+const LABEL_CLS = "block text-xs font-medium text-gray-700 mb-1";
+
+// ─── Create Bailout Form ───────────────────────────────────────────────────────
+
+function CreateBailoutModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [travelRequestId, setTravelRequestId] = useState("");
+  const [category, setCategory] = useState<BailoutCategory>("OTHER");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  // Transport fields
+  const [transportMode, setTransportMode] = useState<TransportMode>("FLIGHT");
+  const [carrier, setCarrier] = useState("");
+  const [departureFrom, setDepartureFrom] = useState("");
+  const [arrivalTo, setArrivalTo] = useState("");
+  const [departureAt, setDepartureAt] = useState("");
+  const [arrivalAt, setArrivalAt] = useState("");
+  const [flightNumber, setFlightNumber] = useState("");
+  const [seatClass, setSeatClass] = useState("");
+  const [bookingRef, setBookingRef] = useState("");
+  // Hotel fields
+  const [hotelName, setHotelName] = useState("");
+  const [hotelAddress, setHotelAddress] = useState("");
+  const [checkIn, setCheckIn] = useState("");
+  const [checkOut, setCheckOut] = useState("");
+  const [roomType, setRoomType] = useState("");
+  // Meal fields
+  const [mealDate, setMealDate] = useState("");
+  const [mealLocation, setMealLocation] = useState("");
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Travel requests eligible for bailout: sudah APPROVED atau LOCKED (sudah disetujui / sudah berangkat)
+  const travelRequestQuery = api.travelRequest.getAll.useQuery({ limit: 100 }, { refetchOnWindowFocus: false });
+  const rawTR = travelRequestQuery.data as { requests: TravelRequestRef[] } | undefined;
+  const eligibleTravelRequests = (rawTR?.requests ?? [])
+    .filter((tr) => ["APPROVED", "LOCKED", "APPROVED_L1", "APPROVED_L2", "APPROVED_L3", "APPROVED_L4", "APPROVED_L5"].includes(tr.status));
+
+  const createMutation = api.bailout.create.useMutation({
+    onSuccess: () => { onCreated(); onClose(); },
+    onError: (err) => setErrors({ _global: err.message }),
+  });
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!travelRequestId) e.travelRequestId = "Pilih perjalanan dinas terlebih dahulu";
+    if (description.trim().length < 10) e.description = "Deskripsi minimal 10 karakter";
+    if (!amount || Number(amount) <= 0) e.amount = "Jumlah harus lebih dari 0";
+    if (category === "TRANSPORT") {
+      if (!departureFrom) e.departureFrom = "Kota asal wajib diisi";
+      if (!arrivalTo) e.arrivalTo = "Kota tujuan wajib diisi";
+    }
+    if (category === "HOTEL") {
+      if (!hotelName) e.hotelName = "Nama hotel wajib diisi";
+      if (!checkIn) e.checkIn = "Tanggal check-in wajib diisi";
+      if (!checkOut) e.checkOut = "Tanggal check-out wajib diisi";
+    }
+    if (category === "MEAL" && !mealDate) e.mealDate = "Tanggal makan wajib diisi";
+    return e;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const errs = validate();
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    setErrors({});
+
+    createMutation.mutate({
+      travelRequestId,
+      category,
+      description: description.trim(),
+      amount: Number(amount),
+      ...(category === "TRANSPORT" && {
+        transportMode,
+        carrier: carrier || undefined,
+        departureFrom: departureFrom || undefined,
+        arrivalTo: arrivalTo || undefined,
+        departureAt: departureAt ? new Date(departureAt) : undefined,
+        arrivalAt: arrivalAt ? new Date(arrivalAt) : undefined,
+        flightNumber: flightNumber || undefined,
+        seatClass: seatClass || undefined,
+        bookingRef: bookingRef || undefined,
+      }),
+      ...(category === "HOTEL" && {
+        hotelName: hotelName || undefined,
+        hotelAddress: hotelAddress || undefined,
+        checkIn: checkIn ? new Date(checkIn) : undefined,
+        checkOut: checkOut ? new Date(checkOut) : undefined,
+        roomType: roomType || undefined,
+      }),
+      ...(category === "MEAL" && {
+        mealDate: mealDate ? new Date(mealDate) : undefined,
+        mealLocation: mealLocation || undefined,
+      }),
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {errors._global && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+          {errors._global}
+        </div>
+      )}
+
+      {/* Travel Request */}
+      <div>
+        <label className={LABEL_CLS}>Perjalanan Dinas *</label>
+        <select value={travelRequestId} onChange={(e) => setTravelRequestId(e.target.value)} className={FIELD_CLS}>
+          <option value="">— Pilih perjalanan dinas —</option>
+          {eligibleTravelRequests.map((tr) => (
+            <option key={tr.id} value={tr.id}>
+              {tr.requestNumber} — {tr.destination}
+            </option>
+          ))}
+        </select>
+        {eligibleTravelRequests.length === 0 && (
+          <p className="mt-1 text-xs text-amber-600">
+            Tidak ada perjalanan dinas yang sudah disetujui. Bailout hanya bisa diajukan untuk trip yang sudah approved.
+          </p>
+        )}
+        {errors.travelRequestId && <p className="mt-1 text-xs text-red-600">{errors.travelRequestId}</p>}
+      </div>
+
+      {/* Category */}
+      <div>
+        <label className={LABEL_CLS}>Kategori *</label>
+        <select value={category} onChange={(e) => setCategory(e.target.value as BailoutCategory)} className={FIELD_CLS}>
+          <option value="TRANSPORT">Transport (Tiket)</option>
+          <option value="HOTEL">Hotel (Akomodasi)</option>
+          <option value="MEAL">Makan (Konsumsi)</option>
+          <option value="OTHER">Lainnya</option>
+        </select>
+      </div>
+
+      {/* Description */}
+      <div>
+        <label className={LABEL_CLS}>Deskripsi / Keperluan *</label>
+        <textarea
+          rows={2}
+          className={FIELD_CLS}
+          placeholder="Jelaskan keperluan dana talangan (min. 10 karakter)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        {errors.description && <p className="mt-1 text-xs text-red-600">{errors.description}</p>}
+      </div>
+
+      {/* Amount */}
+      <div>
+        <label className={LABEL_CLS}>Jumlah Dana (IDR) *</label>
+        <input
+          type="number"
+          min={1}
+          className={FIELD_CLS}
+          placeholder="Contoh: 500000"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        {amount && Number(amount) > 0 && (
+          <p className="mt-1 text-xs text-gray-500">{currency(Number(amount))}</p>
+        )}
+        {errors.amount && <p className="mt-1 text-xs text-red-600">{errors.amount}</p>}
+      </div>
+
+      {/* ── Transport Fields ── */}
+      {category === "TRANSPORT" && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 space-y-3">
+          <p className="text-xs font-semibold text-blue-700">Detail Transport</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL_CLS}>Moda Transport</label>
+              <select value={transportMode} onChange={(e) => setTransportMode(e.target.value as TransportMode)} className={FIELD_CLS}>
+                <option value="FLIGHT">Pesawat</option>
+                <option value="TRAIN">Kereta</option>
+                <option value="BUS">Bus</option>
+                <option value="FERRY">Kapal</option>
+                <option value="CAR_RENTAL">Sewa Mobil</option>
+                <option value="OTHER">Lainnya</option>
+              </select>
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Maskapai / Operator</label>
+              <input type="text" className={FIELD_CLS} placeholder="Garuda, KAI, dll." value={carrier} onChange={(e) => setCarrier(e.target.value)} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Kota Asal *</label>
+              <input type="text" className={FIELD_CLS} placeholder="Jakarta" value={departureFrom} onChange={(e) => setDepartureFrom(e.target.value)} />
+              {errors.departureFrom && <p className="mt-1 text-xs text-red-600">{errors.departureFrom}</p>}
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Kota Tujuan *</label>
+              <input type="text" className={FIELD_CLS} placeholder="Surabaya" value={arrivalTo} onChange={(e) => setArrivalTo(e.target.value)} />
+              {errors.arrivalTo && <p className="mt-1 text-xs text-red-600">{errors.arrivalTo}</p>}
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Waktu Berangkat</label>
+              <input type="datetime-local" className={FIELD_CLS} value={departureAt} onChange={(e) => setDepartureAt(e.target.value)} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Waktu Tiba</label>
+              <input type="datetime-local" className={FIELD_CLS} value={arrivalAt} onChange={(e) => setArrivalAt(e.target.value)} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>No. Penerbangan / Tiket</label>
+              <input type="text" className={FIELD_CLS} placeholder="GA-123" value={flightNumber} onChange={(e) => setFlightNumber(e.target.value)} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Kelas</label>
+              <input type="text" className={FIELD_CLS} placeholder="Economy / Business" value={seatClass} onChange={(e) => setSeatClass(e.target.value)} />
+            </div>
+            <div className="col-span-2">
+              <label className={LABEL_CLS}>Booking Reference</label>
+              <input type="text" className={FIELD_CLS} placeholder="ABC123" value={bookingRef} onChange={(e) => setBookingRef(e.target.value)} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Hotel Fields ── */}
+      {category === "HOTEL" && (
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-3">
+          <p className="text-xs font-semibold text-indigo-700">Detail Hotel</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className={LABEL_CLS}>Nama Hotel *</label>
+              <input type="text" className={FIELD_CLS} placeholder="Hotel Borobudur Jakarta" value={hotelName} onChange={(e) => setHotelName(e.target.value)} />
+              {errors.hotelName && <p className="mt-1 text-xs text-red-600">{errors.hotelName}</p>}
+            </div>
+            <div className="col-span-2">
+              <label className={LABEL_CLS}>Alamat Hotel</label>
+              <input type="text" className={FIELD_CLS} placeholder="Jl. Lapangan Banteng Selatan..." value={hotelAddress} onChange={(e) => setHotelAddress(e.target.value)} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Check-in *</label>
+              <input type="date" className={FIELD_CLS} value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
+              {errors.checkIn && <p className="mt-1 text-xs text-red-600">{errors.checkIn}</p>}
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Check-out *</label>
+              <input type="date" className={FIELD_CLS} value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
+              {errors.checkOut && <p className="mt-1 text-xs text-red-600">{errors.checkOut}</p>}
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Tipe Kamar</label>
+              <input type="text" className={FIELD_CLS} placeholder="Superior / Deluxe" value={roomType} onChange={(e) => setRoomType(e.target.value)} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Meal Fields ── */}
+      {category === "MEAL" && (
+        <div className="rounded-lg border border-green-100 bg-green-50 p-3 space-y-3">
+          <p className="text-xs font-semibold text-green-700">Detail Makan</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL_CLS}>Tanggal Makan *</label>
+              <input type="date" className={FIELD_CLS} value={mealDate} onChange={(e) => setMealDate(e.target.value)} />
+              {errors.mealDate && <p className="mt-1 text-xs text-red-600">{errors.mealDate}</p>}
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Lokasi</label>
+              <input type="text" className={FIELD_CLS} placeholder="Restoran / Warung / Hotel" value={mealLocation} onChange={(e) => setMealLocation(e.target.value)} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+        <Button type="button" variant="secondary" onClick={onClose}>Batal</Button>
+        <Button type="submit" isLoading={createMutation.isPending}>
+          Simpan sebagai Draft
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 // ─── Action Modal ─────────────────────────────────────────────────────────────
 
 function ActionModal({
@@ -61,17 +356,19 @@ function ActionModal({
   onClose,
   onDone,
   userRole,
+  currentUserId,
 }: {
   bailout: Bailout;
   onClose: () => void;
   onDone: () => void;
   userRole: string;
+  currentUserId: string;
 }) {
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [showDisburse, setShowDisburse] = useState(false);
   const [disbursementRef, setDisbursementRef] = useState("");
-  const [storageUrl, setStorageUrl] = useState("");
+  const [currentStorageUrl, setCurrentStorageUrl] = useState(bailout.storageUrl);
 
   const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
   const directorRoles = ["DIRECTOR", "ADMIN"];
@@ -84,8 +381,9 @@ function ActionModal({
   const approveDirector = api.bailout.approveByDirector.useMutation({ onSuccess: refresh });
   const reject = api.bailout.reject.useMutation({ onSuccess: refresh });
   const disburse = api.bailout.disburse.useMutation({ onSuccess: refresh });
+  const submit = api.bailout.submit.useMutation({ onSuccess: refresh });
 
-  const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending;
+  const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending || submit.isPending;
 
   return (
     <div className="space-y-5">
@@ -115,15 +413,18 @@ function ActionModal({
         )}
       </div>
 
-      {/* Upload File Pendukung */}
-      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-        <BailoutFileUpload
-          bailoutId={bailout.id}
-          category={bailout.category}
-          currentUrl={bailout.storageUrl}
-          onUploaded={() => onDone()}
-        />
-      </div>
+      {/* Bukti pembayaran — hanya tampil setelah dicairkan */}
+      {bailout.status === "DISBURSED" && currentStorageUrl && (
+        <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+          <p className="text-xs font-semibold text-green-700 mb-2">Bukti Pembayaran</p>
+          <BailoutFileUpload
+            bailoutId={bailout.id}
+            category={bailout.category}
+            currentUrl={currentStorageUrl}
+            onUploaded={(key) => setCurrentStorageUrl(key)}
+          />
+        </div>
+      )}
 
       {/* Reject Form */}
       {showReject && (
@@ -161,13 +462,12 @@ function ActionModal({
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">URL Bukti Transfer (opsional)</label>
-            <input
-              type="url"
-              className="w-full rounded border border-green-300 px-3 py-2 text-sm bg-white focus:outline-none"
-              placeholder="https://storage.example.com/bukti-transfer.jpg"
-              value={storageUrl}
-              onChange={(e) => setStorageUrl(e.target.value)}
+            <label className="text-xs text-gray-500 block mb-2">Upload Bukti Pembayaran / Tiket (opsional)</label>
+            <BailoutFileUpload
+              bailoutId={bailout.id}
+              category={bailout.category}
+              currentUrl={currentStorageUrl}
+              onUploaded={(key) => setCurrentStorageUrl(key)}
             />
           </div>
           <div className="flex gap-2 justify-end">
@@ -176,7 +476,6 @@ function ActionModal({
               onClick={() => disburse.mutate({
                 id: bailout.id,
                 disbursementRef: disbursementRef || undefined,
-                storageUrl: storageUrl || undefined,
               })}>
               ✓ Konfirmasi Cairkan
             </Button>
@@ -187,6 +486,11 @@ function ActionModal({
       {/* Action Buttons */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
         <Button variant="secondary" onClick={onClose}>Tutup</Button>
+        {bailout.status === "DRAFT" && bailout.requester.id === currentUserId && (
+          <Button isLoading={submit.isPending} onClick={() => submit.mutate({ id: bailout.id })}>
+            Kirim Pengajuan
+          </Button>
+        )}
         {!showReject && chiefRoles.includes(userRole) && ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status) && (
           <button onClick={() => setShowReject(true)} disabled={isActing}
             className="rounded px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200">
@@ -225,9 +529,11 @@ function selectBailouts(d: { bailouts: Bailout[] }) {
 export default function BailoutApprovalPage() {
   const { data: session } = useSession();
   const userRole = session?.user?.role ?? "EMPLOYEE";
+  const currentUserId = session?.user?.id ?? "";
 
   const [statusFilter, setStatusFilter] = useState<BailoutStatus | "ALL">("ALL");
   const [selected, setSelected] = useState<Bailout | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const utils = api.useUtils();
 
@@ -260,6 +566,10 @@ export default function BailoutApprovalPage() {
       <PageHeader
         title="Bailout Approval"
         description="Kelola dan setujui pengajuan dana talangan perjalanan dinas"
+        primaryAction={{
+          label: "Ajukan Bailout",
+          onClick: () => setIsCreateOpen(true),
+        }}
       />
 
       {/* Pending Summary */}
@@ -362,8 +672,22 @@ export default function BailoutApprovalPage() {
             onClose={() => setSelected(null)}
             onDone={() => void utils.bailout.getAll.invalidate()}
             userRole={userRole}
+            currentUserId={currentUserId}
           />
         )}
+      </Modal>
+
+      {/* Create Bailout Modal */}
+      <Modal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Ajukan Dana Talangan (Bailout)"
+        size="lg"
+      >
+        <CreateBailoutModal
+          onClose={() => setIsCreateOpen(false)}
+          onCreated={() => void utils.bailout.getAll.invalidate()}
+        />
       </Modal>
     </div>
   );
