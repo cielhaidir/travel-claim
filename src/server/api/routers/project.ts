@@ -7,6 +7,28 @@ import {
   managerProcedure,
 } from "@/server/api/trpc";
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
 export const projectRouter = createTRPCRouter({
   // ─── GET ALL ──────────────────────────────────────────────────────────────
   getAll: protectedProcedure
@@ -25,11 +47,13 @@ export const projectRouter = createTRPCRouter({
         search: z.string().optional(),
         limit: z.number().min(1).max(100).optional(),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = { deletedAt: null };
+      const where: Record<string, unknown> = withTenantWhere(ctx, {
+        deletedAt: null,
+      });
 
       if (input?.isActive !== undefined) {
         where.isActive = input.isActive;
@@ -74,8 +98,8 @@ export const projectRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const project = await ctx.db.project.findUnique({
-        where: { id: input.id },
+      const project = await ctx.db.project.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           _count: { select: { travelRequests: true } },
         },
@@ -109,13 +133,13 @@ export const projectRouter = createTRPCRouter({
         description: z.string().optional(),
         clientName: z.string().max(200).optional(),
         isActive: z.boolean().optional().default(true),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check unique code
-      const existing = await ctx.db.project.findUnique({
-        where: { code: input.code },
+      const existing = await ctx.db.project.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
       });
       if (existing) {
         throw new TRPCError({
@@ -124,10 +148,16 @@ export const projectRouter = createTRPCRouter({
         });
       }
 
-      const project = await ctx.db.project.create({ data: input });
+      const project = await ctx.db.project.create({
+        data: {
+          ...input,
+          tenantId: getTenantScope(ctx).tenantId,
+        },
+      });
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: project.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Project",
@@ -158,13 +188,15 @@ export const projectRouter = createTRPCRouter({
         description: z.string().optional(),
         clientName: z.string().max(200).optional(),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
-      const existing = await ctx.db.project.findUnique({ where: { id } });
+      const existing = await ctx.db.project.findFirst({
+        where: withTenantWhere(ctx, { id }),
+      });
       if (!existing) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -174,8 +206,8 @@ export const projectRouter = createTRPCRouter({
 
       // Check code uniqueness if changed
       if (data.code && data.code !== existing.code) {
-        const codeConflict = await ctx.db.project.findUnique({
-          where: { code: data.code },
+        const codeConflict = await ctx.db.project.findFirst({
+          where: withTenantWhere(ctx, { code: data.code }),
         });
         if (codeConflict) {
           throw new TRPCError({
@@ -189,6 +221,7 @@ export const projectRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Project",
@@ -214,8 +247,8 @@ export const projectRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.project.findUnique({
-        where: { id: input.id },
+      const existing = await ctx.db.project.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: { _count: { select: { travelRequests: true } } },
       });
 
@@ -241,6 +274,7 @@ export const projectRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "Project",
@@ -251,4 +285,3 @@ export const projectRouter = createTRPCRouter({
       return deleted;
     }),
 });
-

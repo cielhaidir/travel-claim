@@ -4,7 +4,7 @@ import { createTRPCContext } from "@/server/api/trpc";
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { env } from "@/env";
-import { normalizeRoles } from "@/lib/constants/roles";
+import { normalizeRoles, type Role } from "@/lib/constants/roles";
 
 /**
  * MCP Server Endpoint
@@ -56,6 +56,43 @@ async function handleMcpRequest(request: Request) {
       });
 
       if (tokenUser) {
+        const memberships = await db.$queryRaw<
+          Array<{
+            tenantId: string;
+            tenantName: string;
+            tenantSlug: string;
+            role: string;
+            status: string;
+            isDefault: boolean;
+            isRootTenant: boolean;
+          }>
+        >`
+          SELECT
+            tm."tenantId" as "tenantId",
+            t."name" as "tenantName",
+            t."slug" as "tenantSlug",
+            tm."role"::text as "role",
+            tm."status"::text as "status",
+            tm."isDefault" as "isDefault",
+            t."isRoot" as "isRootTenant"
+          FROM "TenantMembership" tm
+          INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
+          WHERE tm."userId" = ${tokenUser.id}
+          ORDER BY tm."isDefault" DESC, tm."createdAt" ASC
+        `;
+        const activeMemberships = memberships.filter(
+          (membership) => membership.status === "ACTIVE",
+        );
+        const activeTenantId =
+          activeMemberships.find((membership) => membership.isDefault)
+            ?.tenantId ??
+          activeMemberships[0]?.tenantId ??
+          memberships.find((membership) => membership.isRootTenant)?.tenantId ??
+          null;
+
+        const roles = normalizeRoles({ roles: [], role: tokenUser.role });
+        const isRoot = roles.includes("ROOT");
+
         // Build a synthetic session object matching the NextAuth session shape
         session = {
           user: {
@@ -63,9 +100,20 @@ async function handleMcpRequest(request: Request) {
             name: tokenUser.name ?? "",
             email: tokenUser.email ?? "",
             role: tokenUser.role,
-            roles: normalizeRoles({ roles: [], role: tokenUser.role }),
+            roles,
             employeeId: tokenUser.employeeId,
             departmentId: tokenUser.departmentId,
+            activeTenantId,
+            isRoot,
+            memberships: memberships.map((membership) => ({
+              tenantId: membership.tenantId,
+              tenantName: membership.tenantName,
+              tenantSlug: membership.tenantSlug,
+              role: membership.role as Role,
+              status: membership.status as "ACTIVE" | "INVITED" | "SUSPENDED",
+              isDefault: membership.isDefault,
+              isRootTenant: membership.isRootTenant,
+            })),
             image: tokenUser.image ?? null,
           },
           expires: new Date(Date.now() + 1000 * 60 * 60).toISOString(), // 1h

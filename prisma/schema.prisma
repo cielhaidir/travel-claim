@@ -18,6 +18,7 @@ datasource db {
 // ============================================================================
 
 enum Role {
+    ROOT
     EMPLOYEE
     SUPERVISOR
     MANAGER
@@ -164,9 +165,66 @@ enum JournalEntryType {
     CREDIT
 }
 
+enum MembershipStatus {
+    ACTIVE
+    INVITED
+    SUSPENDED
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
+
+model Tenant {
+    id        String   @id @default(cuid())
+    slug      String   @unique @db.VarChar(100)
+    name      String   @db.VarChar(200)
+    isRoot    Boolean  @default(false)
+    deletedAt DateTime?
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    memberships         TenantMembership[]
+    userRoles           UserRole[]
+    departments         Department[]
+    projects            Project[]
+    travelRequests      TravelRequest[]
+    travelParticipants  TravelParticipant[]
+    bailouts            Bailout[]
+    approvals           Approval[]
+    claims              Claim[]
+    attachments         Attachment[]
+    notifications       Notification[]
+    auditLogs           AuditLog[]
+    chartOfAccounts     ChartOfAccount[]
+    balanceAccounts     BalanceAccount[]
+    journalTransactions JournalTransaction[]
+
+    @@index([isRoot])
+}
+
+model TenantMembership {
+    id             String           @id @default(cuid())
+    userId         String
+    tenantId       String
+    role           Role             @default(EMPLOYEE)
+    status         MembershipStatus @default(ACTIVE)
+    isDefault      Boolean          @default(false)
+    invitedAt      DateTime?
+    activatedAt    DateTime?
+    suspendedAt    DateTime?
+    suspendedReason String?         @db.Text
+    createdAt      DateTime         @default(now())
+    updatedAt      DateTime         @updatedAt
+
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, tenantId])
+    @@index([tenantId, role])
+    @@index([userId, isDefault])
+    @@index([status])
+}
 
 // Necessary for Next auth
 model Account {
@@ -249,6 +307,8 @@ model User {
     coaCreated ChartOfAccount[] @relation("COACreatedBy")
     coaUpdated ChartOfAccount[] @relation("COAUpdatedBy")
 
+    memberships TenantMembership[]
+
     @@index([employeeId])
     @@index([email])
     @@index([departmentId])
@@ -257,15 +317,18 @@ model User {
 }
 
 model UserRole {
+    tenantId  String?
     userId    String
     role      Role
     createdAt DateTime @default(now())
     createdBy String?
 
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     @@id([userId, role])
     @@index([role])
+    @@index([tenantId])
 }
 
 model VerificationToken {
@@ -282,9 +345,12 @@ model VerificationToken {
 
 model Department {
     id          String  @id @default(cuid())
+    tenantId    String?
     name        String  @db.VarChar(100)
-    code        String  @unique @db.VarChar(20)
+    code        String  @db.VarChar(20)
     description String? @db.Text
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Department hierarchy
     parentId String?
@@ -303,6 +369,9 @@ model Department {
     users User[]
 
     @@index([code])
+    @@unique([tenantId, code])
+    @@index([tenantId])
+    @@index([tenantId, deletedAt])
     @@index([parentId])
     @@index([chiefId])
 }
@@ -313,11 +382,14 @@ model Department {
 
 model ChartOfAccount {
     id          String  @id @default(cuid())
-    code        String  @unique @db.VarChar(20)
+    tenantId    String?
+    code        String  @db.VarChar(20)
     name        String  @db.VarChar(100)
     accountType COAType
     category    String  @db.VarChar(50)
     subcategory String? @db.VarChar(50)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Self-referential hierarchy
     parentId String?
@@ -342,6 +414,9 @@ model ChartOfAccount {
     journalTransactions JournalTransaction[]
 
     @@index([code])
+    @@unique([tenantId, code])
+    @@index([tenantId])
+    @@index([tenantId, isActive])
     @@index([accountType])
     @@index([parentId])
     @@index([isActive])
@@ -353,7 +428,8 @@ model ChartOfAccount {
 
 model Project {
     id          String    @id @default(cuid())
-    code        String    @unique @db.VarChar(30)
+    tenantId    String?
+    code        String    @db.VarChar(30)
     name        String    @db.VarChar(200)
     description String?   @db.Text
     clientName  String?   @db.VarChar(200)
@@ -363,10 +439,14 @@ model Project {
     updatedAt   DateTime  @updatedAt
     salesId     String?   @db.VarChar(50) // e.g. employeeId of the sales lead
     salesLead   User?     @relation("SalesLead", fields: [salesId], references: [employeeId])
+    tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     travelRequests TravelRequest[]
 
     @@index([code])
+    @@unique([tenantId, code])
+    @@index([tenantId])
+    @@index([tenantId, isActive])
     @@index([isActive])
 }
 
@@ -376,7 +456,10 @@ model Project {
 
 model TravelRequest {
     id            String @id @default(cuid())
-    requestNumber String @unique @db.VarChar(50)
+    tenantId      String?
+    requestNumber String @db.VarChar(50)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Requester (must be SALES_EMPLOYEE or SALES_CHIEF)
     requesterId String
@@ -415,6 +498,10 @@ model TravelRequest {
     bailouts     Bailout[]
 
     @@index([requesterId, status])
+    @@unique([tenantId, requestNumber])
+    @@index([tenantId])
+    @@index([tenantId, status])
+    @@index([tenantId, createdAt])
     @@index([status, createdAt])
     @@index([requestNumber])
     @@index([travelType])
@@ -424,8 +511,11 @@ model TravelRequest {
 
 model TravelParticipant {
     id              String        @id @default(cuid())
+    tenantId        String?
     travelRequestId String
     travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     userId String
     user   User   @relation(fields: [userId], references: [id])
@@ -436,6 +526,7 @@ model TravelParticipant {
     createdAt DateTime @default(now())
 
     @@unique([travelRequestId, userId])
+    @@index([tenantId])
     @@index([userId])
 }
 
@@ -445,7 +536,10 @@ model TravelParticipant {
 
 model Bailout {
     id            String @id @default(cuid())
-    bailoutNumber String @unique @db.VarChar(50)
+    tenantId      String?
+    bailoutNumber String @db.VarChar(50)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     travelRequestId String
     travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id])
@@ -507,6 +601,10 @@ model Bailout {
     journalTransactions JournalTransaction[]
 
     @@index([travelRequestId])
+    @@unique([tenantId, bailoutNumber])
+    @@index([tenantId])
+    @@index([tenantId, status])
+    @@index([tenantId, createdAt])
     @@index([requesterId, status])
     @@index([status, createdAt])
     @@index([bailoutNumber])
@@ -543,9 +641,12 @@ model Bailout {
 
 model Approval {
     id             String @id @default(cuid())
+    tenantId       String?
 
     // Business approval number (e.g. APR-2026-00001)
-    approvalNumber String @unique @db.VarChar(50)
+    approvalNumber String @db.VarChar(50)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // ── Entity links (exactly one must be set) ──────────────────────────────
     travelRequestId String?
@@ -576,6 +677,10 @@ model Approval {
     updatedAt  DateTime  @updatedAt
 
     @@index([approvalNumber])
+    @@unique([tenantId, approvalNumber])
+    @@index([tenantId])
+    @@index([tenantId, status])
+    @@index([tenantId, createdAt])
     @@index([travelRequestId, sequence])
     @@index([bailoutId, sequence])
     @@index([claimId, sequence])
@@ -589,7 +694,10 @@ model Approval {
 
 model Claim {
     id          String @id @default(cuid())
-    claimNumber String @unique @db.VarChar(50)
+    tenantId    String?
+    claimNumber String @db.VarChar(50)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     travelRequestId String
     travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id])
@@ -649,6 +757,10 @@ model Claim {
     journalTransactions JournalTransaction[]
 
     @@index([travelRequestId])
+    @@unique([tenantId, claimNumber])
+    @@index([tenantId])
+    @@index([tenantId, status])
+    @@index([tenantId, createdAt])
     @@index([submitterId, status])
     @@index([status, createdAt])
     @@index([claimNumber])
@@ -658,9 +770,12 @@ model Claim {
 }
 
 model Attachment {
-    id      String @id @default(cuid())
-    claimId String
-    claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+    id       String @id @default(cuid())
+    tenantId String?
+    claimId  String
+    claim    Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     filename        String @db.VarChar(255)
     originalName    String @db.VarChar(255)
@@ -676,6 +791,7 @@ model Attachment {
     deletedAt DateTime?
     createdAt DateTime  @default(now())
 
+    @@index([tenantId])
     @@index([claimId])
 }
 
@@ -684,9 +800,12 @@ model Attachment {
 // ============================================================================
 
 model Notification {
-    id     String @id @default(cuid())
-    userId String
-    user   User   @relation(fields: [userId], references: [id])
+    id       String @id @default(cuid())
+    tenantId String?
+    userId   String
+    user     User   @relation(fields: [userId], references: [id])
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Notification content
     title   String              @db.VarChar(255)
@@ -712,6 +831,7 @@ model Notification {
 
     createdAt DateTime @default(now())
 
+    @@index([tenantId])
     @@index([userId, status])
     @@index([status, createdAt])
     @@index([channel])
@@ -722,9 +842,12 @@ model Notification {
 // ============================================================================
 
 model AuditLog {
-    id     String @id @default(cuid())
-    userId String
-    user   User   @relation(fields: [userId], references: [id])
+    id       String @id @default(cuid())
+    tenantId String?
+    userId   String
+    user     User   @relation(fields: [userId], references: [id])
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Action details
     action     AuditAction
@@ -745,6 +868,7 @@ model AuditLog {
 
     createdAt DateTime @default(now())
 
+    @@index([tenantId])
     @@index([userId, createdAt])
     @@index([entityType, entityId])
     @@index([action, createdAt])
@@ -756,9 +880,12 @@ model AuditLog {
 // ============================================================================
 
 model BalanceAccount {
-    id   String @id @default(cuid())
-    code String @unique @db.VarChar(30)
-    name String @db.VarChar(150)
+    id       String @id @default(cuid())
+    tenantId String?
+    code     String @db.VarChar(30)
+    name     String @db.VarChar(150)
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Current running balance (positive = debit-normal, or as defined by usage)
     balance Decimal @default(0) @db.Decimal(19, 4)
@@ -774,12 +901,18 @@ model BalanceAccount {
     journalTransactions JournalTransaction[]
 
     @@index([code])
+    @@unique([tenantId, code])
+    @@index([tenantId])
+    @@index([tenantId, isActive])
     @@index([isActive])
 }
 
 model JournalTransaction {
     id                String @id @default(cuid())
-    transactionNumber String @unique @db.VarChar(50) // e.g. JRN-2026-00001
+    tenantId          String?
+    transactionNumber String @db.VarChar(50) // e.g. JRN-2026-00001
+
+    tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
     // Date of the accounting entry (may differ from createdAt)
     transactionDate DateTime @db.Date
@@ -815,6 +948,9 @@ model JournalTransaction {
     updatedAt DateTime  @updatedAt
 
     @@index([transactionNumber])
+    @@unique([tenantId, transactionNumber])
+    @@index([tenantId])
+    @@index([tenantId, transactionDate])
     @@index([transactionDate])
     @@index([chartOfAccountId])
     @@index([balanceAccountId])

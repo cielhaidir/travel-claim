@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import {
+  MembershipStatus,
   Role,
   type PrismaClient,
   type Prisma,
@@ -34,6 +35,38 @@ function derivePrimary(roles: Role[]): Role {
   return Role.EMPLOYEE;
 }
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantMembershipFilter(
+  ctx: unknown,
+  where: Prisma.UserWhereInput,
+): Prisma.UserWhereInput {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (isRoot || !tenantId) return where;
+  return {
+    AND: [
+      where,
+      {
+        memberships: {
+          some: {
+            tenantId,
+            status: MembershipStatus.ACTIVE,
+          },
+        },
+      },
+    ],
+  };
+}
+
 export const userRouter = createTRPCRouter({
   // Get current user profile
   getMe: protectedProcedure
@@ -49,8 +82,8 @@ export const userRouter = createTRPCRouter({
     .input(z.void())
     .output(z.any())
     .query(async ({ ctx }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: ctx.session.user.id }),
         include: {
           department: true,
           supervisor: {
@@ -103,7 +136,7 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const users = await ctx.db.user.findMany({
-        where: {
+        where: withTenantMembershipFilter(ctx, {
           deletedAt: null,
           ...(input.search
             ? {
@@ -116,7 +149,7 @@ export const userRouter = createTRPCRouter({
                 ],
               }
             : {}),
-        },
+        }),
         select: {
           id: true,
           name: true,
@@ -161,10 +194,10 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const user = await ctx.db.user.findFirst({
-        where: {
+        where: withTenantMembershipFilter(ctx, {
           deletedAt: null,
           phoneNumber: { contains: input.search, mode: "insensitive" },
-        },
+        }),
         select: {
           id: true,
           name: true,
@@ -253,7 +286,7 @@ export const userRouter = createTRPCRouter({
       const users = await ctx.db.user.findMany({
         take: input?.limit ? input.limit + 1 : 51,
         cursor: input?.cursor ? { id: input.cursor } : undefined,
-        where,
+        where: withTenantMembershipFilter(ctx, where),
         include: {
           department: {
             select: {
@@ -312,8 +345,8 @@ export const userRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: input.id },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: input.id }),
         include: {
           department: true,
           supervisor: {
@@ -384,10 +417,10 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx }) => {
       return ctx.db.user.findMany({
-        where: {
+        where: withTenantMembershipFilter(ctx, {
           supervisorId: ctx.session.user.id,
           deletedAt: null,
-        },
+        }),
         include: {
           department: true,
           _count: {
@@ -424,8 +457,8 @@ export const userRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const rootUserId = input?.userId ?? ctx.session.user.id;
 
-      const user = await ctx.db.user.findUnique({
-        where: { id: rootUserId },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: rootUserId }),
         include: {
           department: true,
           directReports: {
@@ -480,8 +513,8 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if email already exists
-      const existing = await ctx.db.user.findUnique({
-        where: { email: input.email },
+      const existing = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { email: input.email }),
       });
 
       if (existing) {
@@ -509,10 +542,13 @@ export const userRouter = createTRPCRouter({
       const hashedPassword = await bcrypt.hash(input.password, 10);
 
       // Resolve roles
-      const allRoles = input.roles && input.roles.length > 0
-        ? input.roles
-        : [input.role ?? Role.EMPLOYEE];
+      const allRoles =
+        input.roles && input.roles.length > 0
+          ? input.roles
+          : [input.role ?? Role.EMPLOYEE];
       const primaryRole = derivePrimary(allRoles);
+
+      const tenantId = getTenantScope(ctx).tenantId;
 
       return ctx.db.user.create({
         data: {
@@ -525,8 +561,21 @@ export const userRouter = createTRPCRouter({
           supervisorId: input.supervisorId,
           phoneNumber: input.phoneNumber,
           userRoles: {
-            create: allRoles.map((r) => ({ role: r })),
+            create: allRoles.map((r) => ({ role: r, tenantId })),
           },
+          memberships: tenantId
+            ? {
+                create: [
+                  {
+                    tenantId,
+                    role: primaryRole,
+                    status: MembershipStatus.ACTIVE,
+                    isDefault: true,
+                    activatedAt: new Date(),
+                  },
+                ],
+              }
+            : undefined,
         },
         include: {
           department: true,
@@ -570,8 +619,8 @@ export const userRouter = createTRPCRouter({
       const { id, roles: inputRoles, ...updateData } = input;
 
       // Check if user exists
-      const user = await ctx.db.user.findUnique({
-        where: { id },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id }),
       });
 
       if (!user) {
@@ -632,9 +681,20 @@ export const userRouter = createTRPCRouter({
       // Sync multi-role table when roles array is provided
       if (inputRoles && inputRoles.length > 0) {
         updateData.role = derivePrimary(inputRoles);
-        await ctx.db.userRole.deleteMany({ where: { userId: id } });
+        await ctx.db.userRole.deleteMany({
+          where: {
+            userId: id,
+            tenantId: getTenantScope(ctx).isRoot
+              ? undefined
+              : getTenantScope(ctx).tenantId,
+          },
+        });
         await ctx.db.userRole.createMany({
-          data: inputRoles.map((r) => ({ userId: id, role: r })),
+          data: inputRoles.map((r) => ({
+            userId: id,
+            role: r,
+            tenantId: getTenantScope(ctx).tenantId,
+          })),
         });
       }
 
@@ -748,7 +808,9 @@ export const userRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), newPassword: z.string().min(8) }))
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({ where: { id: input.id } });
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: input.id }),
+      });
       if (!user) {
         throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       }
@@ -774,8 +836,8 @@ export const userRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: input.id },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: input.id }),
         include: {
           directReports: {
             where: { deletedAt: null },
@@ -811,8 +873,8 @@ export const userRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: input.id },
+      const user = await ctx.db.user.findFirst({
+        where: withTenantMembershipFilter(ctx, { id: input.id }),
       });
 
       if (!user) {
@@ -863,23 +925,46 @@ export const userRouter = createTRPCRouter({
         const email = row.userPrincipalName.toLowerCase().trim();
 
         // Check if email already exists
-        const existing = await ctx.db.user.findUnique({
-          where: { email },
+        const existing = await ctx.db.user.findFirst({
+          where: withTenantMembershipFilter(ctx, { email }),
         });
 
         if (existing) {
-          results.push({ email, status: "skipped", reason: "Email already exists" });
+          results.push({
+            email,
+            status: "skipped",
+            reason: "Email already exists",
+          });
           continue;
         }
 
         const hashedPassword = await bcrypt.hash(input.defaultPassword, 10);
 
+        const tenantId = getTenantScope(ctx).tenantId;
         await ctx.db.user.create({
           data: {
             name: row.displayName.trim(),
             email,
             password: hashedPassword,
             role: Role.EMPLOYEE,
+            memberships: tenantId
+              ? {
+                  create: [
+                    {
+                      tenantId,
+                      role: Role.EMPLOYEE,
+                      status: MembershipStatus.ACTIVE,
+                      isDefault: true,
+                      activatedAt: new Date(),
+                    },
+                  ],
+                }
+              : undefined,
+            userRoles: tenantId
+              ? {
+                  create: [{ role: Role.EMPLOYEE, tenantId }],
+                }
+              : undefined,
           },
         });
 

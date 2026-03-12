@@ -1,11 +1,10 @@
-'use client';
+"use client";
 
-import dynamic from 'next/dynamic';
-import { useEffect } from 'react';
-// @ts-expect-error — no type declarations for CSS side-effect import
-import 'swagger-ui-react/swagger-ui.css';
+import dynamic from "next/dynamic";
+import { useEffect } from "react";
+import "swagger-ui-react/swagger-ui.css";
 
-const SwaggerUI = dynamic(() => import('swagger-ui-react'), { ssr: false });
+const SwaggerUI = dynamic(() => import("swagger-ui-react"), { ssr: false });
 
 export default function ApiDocsPage() {
   // Suppress React 19 lifecycle warnings from swagger-ui-react
@@ -13,8 +12,8 @@ export default function ApiDocsPage() {
     const originalError = console.error;
     console.error = (...args) => {
       if (
-        typeof args[0] === 'string' &&
-        args[0].includes('UNSAFE_componentWillReceiveProps')
+        typeof args[0] === "string" &&
+        args[0].includes("UNSAFE_componentWillReceiveProps")
       ) {
         return;
       }
@@ -30,7 +29,9 @@ export default function ApiDocsPage() {
     <div className="min-h-screen bg-white">
       <div className="container mx-auto py-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">API Documentation</h1>
+          <h1 className="text-3xl font-bold text-gray-900">
+            API Documentation
+          </h1>
           <p className="mt-2 text-gray-600">
             Interactive API documentation powered by Swagger UI
           </p>

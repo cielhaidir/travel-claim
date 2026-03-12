@@ -21,55 +21,132 @@ async function syncUserRoles(users: Array<{ id: string; role: Role }>) {
   }
 }
 
+async function ensureTenantBootstrap() {
+  await prisma.$executeRaw`
+    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+    VALUES (md5(random()::text || clock_timestamp()::text), 'root', 'Root Tenant', true, NOW(), NOW())
+    ON CONFLICT ("slug") DO UPDATE
+    SET "name" = EXCLUDED."name", "isRoot" = true, "updatedAt" = NOW()
+  `;
+
+  await prisma.$executeRaw`
+    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+    VALUES (md5(random()::text || clock_timestamp()::text), 'default', 'Default Tenant', false, NOW(), NOW())
+    ON CONFLICT ("slug") DO UPDATE
+    SET "name" = EXCLUDED."name", "updatedAt" = NOW()
+  `;
+
+  const rows = await prisma.$queryRaw<Array<{ slug: string; id: string }>>`
+    SELECT "slug", "id" FROM "Tenant" WHERE "slug" IN ('root', 'default')
+  `;
+
+  return {
+    rootTenantId: rows.find((row) => row.slug === "root")?.id ?? "",
+    defaultTenantId: rows.find((row) => row.slug === "default")?.id ?? "",
+  };
+}
+
+async function backfillTenantOwnership(defaultTenantId: string) {
+  await prisma.$executeRaw`UPDATE "Department" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Project" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "TravelRequest" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "TravelParticipant" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Bailout" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Approval" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Claim" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Attachment" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "Notification" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "AuditLog" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "BalanceAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "JournalTransaction" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await prisma.$executeRaw`UPDATE "UserRole" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+}
+
+async function upsertDefaultMembership(
+  userId: string,
+  role: string,
+  tenantId: string,
+  isDefault = true,
+) {
+  await prisma.$executeRaw`
+    INSERT INTO "TenantMembership" (
+      "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
+    )
+    VALUES (
+      md5(random()::text || clock_timestamp()::text),
+      ${userId},
+      ${tenantId},
+      ${role}::"Role",
+      'ACTIVE'::"MembershipStatus",
+      ${isDefault},
+      NOW(),
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT ("userId", "tenantId") DO UPDATE
+    SET "role" = ${role}::"Role", "status" = 'ACTIVE', "isDefault" = ${isDefault}, "updatedAt" = NOW()
+  `;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log("🌱 Starting database seeding (master data only)…\n");
 
   const pw = await hash(PASSWORD);
+  const { rootTenantId, defaultTenantId } = await ensureTenantBootstrap();
+  await backfillTenantOwnership(defaultTenantId);
 
   // ── 1. Departments (no chiefId yet — set after users are created) ───────────
   console.log("📂 Creating departments…");
   const deptSales = await prisma.department.upsert({
-    where: { code: "SALES" },
+    where: { tenantId_code: { tenantId: defaultTenantId, code: "SALES" } },
     update: {
       name: "Sales",
       description: "Sales operations and customer relations",
     },
     create: {
+      tenantId: defaultTenantId,
       code: "SALES",
       name: "Sales",
       description: "Sales operations and customer relations",
     },
   });
   const deptEng = await prisma.department.upsert({
-    where: { code: "ENG" },
+    where: { tenantId_code: { tenantId: defaultTenantId, code: "ENG" } },
     update: {
       name: "Engineering",
       description: "Software engineering and technical operations",
     },
     create: {
+      tenantId: defaultTenantId,
       code: "ENG",
       name: "Engineering",
       description: "Software engineering and technical operations",
     },
   });
   const deptFinance = await prisma.department.upsert({
-    where: { code: "FIN" },
-    update: { name: "Finance", description: "Finance and accounting" },
+    where: { tenantId_code: { tenantId: defaultTenantId, code: "FIN" } },
+    update: {
+      name: "Finance",
+      description: "Finance and accounting",
+    },
     create: {
+      tenantId: defaultTenantId,
       code: "FIN",
       name: "Finance",
       description: "Finance and accounting",
     },
   });
   const deptAdmin = await prisma.department.upsert({
-    where: { code: "ADMIN" },
+    where: { tenantId_code: { tenantId: defaultTenantId, code: "ADMIN" } },
     update: {
       name: "Administration",
       description: "Administrative and support operations",
     },
     create: {
+      tenantId: defaultTenantId,
       code: "ADMIN",
       name: "Administration",
       description: "Administrative and support operations",
@@ -100,6 +177,25 @@ async function main() {
 
   // ── 3. Users ─────────────────────────────────────────────────────────────────
   console.log("👤 Creating users…");
+
+  const rootUser = await prisma.user.upsert({
+    where: { email: "root@company.com" },
+    update: {
+      name: "Root User",
+      role: "ROOT" as unknown as Role,
+      employeeId: "ROOT001",
+    },
+    create: {
+      email: "root@company.com",
+      name: "Root User",
+      employeeId: "ROOT001",
+      role: "ROOT" as unknown as Role,
+      password: pw,
+      emailVerified: new Date(),
+      phoneNumber: "+628111999001",
+    },
+  });
+  console.log("  🌐 Root User      : root@company.com        (ROOT001)");
 
   // ── 3a. Executive / C-level (no department, top of hierarchy) ────────────────
   const executive = await prisma.user.upsert({
@@ -382,6 +478,7 @@ async function main() {
   console.log("\n✅ All users created\n");
 
   await syncUserRoles([
+    { id: rootUser.id, role: rootUser.role },
     { id: executive.id, role: executive.role },
     { id: director.id, role: director.role },
     { id: financeChief.id, role: financeChief.role },
@@ -397,6 +494,55 @@ async function main() {
     { id: adminStaff1.id, role: adminStaff1.role },
   ]);
   console.log("  ✅ UserRole rows synchronized from legacy role\n");
+
+  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, true);
+  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, false);
+  await upsertDefaultMembership(executive.id, executive.role, defaultTenantId);
+  await upsertDefaultMembership(director.id, director.role, defaultTenantId);
+  await upsertDefaultMembership(
+    financeChief.id,
+    financeChief.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    financeStaff1.id,
+    financeStaff1.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    financeStaff2.id,
+    financeStaff2.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    salesChief.id,
+    salesChief.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    salesStaff1.id,
+    salesStaff1.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    salesStaff2.id,
+    salesStaff2.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(engChief.id, engChief.role, defaultTenantId);
+  await upsertDefaultMembership(engStaff1.id, engStaff1.role, defaultTenantId);
+  await upsertDefaultMembership(engStaff2.id, engStaff2.role, defaultTenantId);
+  await upsertDefaultMembership(
+    adminChief.id,
+    adminChief.role,
+    defaultTenantId,
+  );
+  await upsertDefaultMembership(
+    adminStaff1.id,
+    adminStaff1.role,
+    defaultTenantId,
+  );
+  console.log("  ✅ TenantMembership rows synchronized\n");
 
   // ── 4. Wire Department.chiefId ────────────────────────────────────────────────
   console.log("🔗 Wiring department chiefs…");
@@ -423,7 +569,8 @@ async function main() {
 
   // ── 5. Chart of Accounts (master data) ───────────────────────────────────────
   console.log("💰 Creating Chart of Accounts…");
-  await createChartOfAccounts(adminChief.id);
+  await createChartOfAccounts(adminChief.id, defaultTenantId);
+  await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
   console.log("  ✅ Chart of Accounts ready\n");
 
   // ── 6. Summary ────────────────────────────────────────────────────────────────
@@ -486,7 +633,7 @@ async function main() {
 
 // ─── Chart of Accounts ───────────────────────────────────────────────────────
 
-async function createChartOfAccounts(createdById: string) {
+async function createChartOfAccounts(createdById: string, tenantId: string) {
   const upsertCoa = (
     code: string,
     name: string,
@@ -496,9 +643,10 @@ async function createChartOfAccounts(createdById: string) {
     description: string,
   ) =>
     prisma.chartOfAccount.upsert({
-      where: { code },
+      where: { tenantId_code: { tenantId, code } },
       update: {},
       create: {
+        tenantId,
         code,
         name,
         accountType: "EXPENSE",

@@ -68,6 +68,31 @@ export async function getAuthSession(_request: NextRequest) {
   return session;
 }
 
+export function requireActiveTenant(
+  session: Awaited<ReturnType<typeof getAuthSession>>,
+): string | null {
+  if (!session?.user) {
+    throw new ApiError("Unauthorized", "UNAUTHORIZED", 401);
+  }
+
+  const roles = normalizeRoles({
+    roles: session.user.roles,
+    role: session.user.role,
+    includeDefault: false,
+  }) as Role[];
+
+  const isRoot = roles.includes("ROOT" as Role);
+  if (isRoot) {
+    return session.user.activeTenantId ?? null;
+  }
+
+  if (!session.user.activeTenantId) {
+    throw new ApiError("Active tenant is required", "FORBIDDEN", 403);
+  }
+
+  return session.user.activeTenantId;
+}
+
 // Custom API Error class
 export class ApiError extends Error {
   constructor(

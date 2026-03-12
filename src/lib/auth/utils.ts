@@ -92,7 +92,7 @@ export async function requireAnyRole(roles: Role[]): Promise<Session> {
  * Check if the current user is an admin
  */
 export async function isAdmin(): Promise<boolean> {
-  return await hasRole("ADMIN");
+  return await hasAnyRole(["ADMIN", "ROOT"]);
 }
 
 /**
@@ -181,6 +181,7 @@ export async function canApproveForUser(
  */
 export function getRoleLevel(role: Role): number {
   const levels: Record<Role, number> = {
+    ROOT: 7,
     EMPLOYEE: 1,
     SUPERVISOR: 2,
     SALES_EMPLOYEE: 2,

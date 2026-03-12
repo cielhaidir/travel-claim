@@ -1,4 +1,5 @@
 export const ROLES = {
+  ROOT: "ROOT",
   EMPLOYEE: "EMPLOYEE",
   SUPERVISOR: "SUPERVISOR",
   MANAGER: "MANAGER",
@@ -12,6 +13,7 @@ export const ROLES = {
 export type Role = (typeof ROLES)[keyof typeof ROLES];
 
 export const ROLE_LABELS: Record<Role, string> = {
+  ROOT: "Root",
   EMPLOYEE: "Employee",
   SUPERVISOR: "Supervisor",
   MANAGER: "Manager",
@@ -25,6 +27,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const DEFAULT_USER_ROLES: Role[] = [ROLES.EMPLOYEE];
 
 export const APPROVER_ROLES: Role[] = [
+  ROLES.ROOT,
   ROLES.SUPERVISOR,
   ROLES.SALES_CHIEF,
   ROLES.MANAGER,
@@ -36,6 +39,7 @@ export const APPROVER_ROLES: Role[] = [
 export const FINANCE_ROLES: Role[] = [ROLES.FINANCE, ROLES.ADMIN];
 
 export const MANAGEMENT_ROLES: Role[] = [
+  ROLES.ROOT,
   ROLES.SUPERVISOR,
   ROLES.MANAGER,
   ROLES.DIRECTOR,
@@ -43,6 +47,7 @@ export const MANAGEMENT_ROLES: Role[] = [
 ];
 
 export const ROLE_PRECEDENCE: Role[] = [
+  ROLES.ROOT,
   ROLES.ADMIN,
   ROLES.FINANCE,
   ROLES.DIRECTOR,
@@ -119,5 +124,5 @@ export function hasFinanceAccess(role: Role): boolean {
 }
 
 export function isAdmin(role: Role): boolean {
-  return role === ROLES.ADMIN;
+  return role === ROLES.ADMIN || role === ROLES.ROOT;
 }

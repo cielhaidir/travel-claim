@@ -8,31 +8,53 @@ import {
   adminProcedure,
 } from "@/server/api/trpc";
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
 export const departmentRouter = createTRPCRouter({
   // Get all departments with optional filters
   getAll: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/departments',
+        method: "GET",
+        path: "/departments",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Get all departments',
-      }
+        tags: ["Departments"],
+        summary: "Get all departments",
+      },
     })
     .input(
       z.object({
         includeDeleted: z.boolean().optional(),
         parentId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
       return ctx.db.department.findMany({
-        where: {
+        where: withTenantWhere(ctx, {
           deletedAt: input.includeDeleted ? undefined : null,
           parentId: input.parentId,
-        },
+        }),
         include: {
           parent: true,
           children: true,
@@ -55,18 +77,18 @@ export const departmentRouter = createTRPCRouter({
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/departments/{id}',
+        method: "GET",
+        path: "/departments/{id}",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Get department by ID',
-      }
+        tags: ["Departments"],
+        summary: "Get department by ID",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const department = await ctx.db.department.findUnique({
-        where: { id: input.id },
+      const department = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           parent: true,
           children: true,
@@ -96,18 +118,18 @@ export const departmentRouter = createTRPCRouter({
   getByCode: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/departments/by-code/{code}',
+        method: "GET",
+        path: "/departments/by-code/{code}",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Get department by code',
-      }
+        tags: ["Departments"],
+        summary: "Get department by code",
+      },
     })
     .input(z.object({ code: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const department = await ctx.db.department.findUnique({
-        where: { code: input.code },
+      const department = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
         include: {
           parent: true,
           children: true,
@@ -129,58 +151,58 @@ export const departmentRouter = createTRPCRouter({
   getHierarchy: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/departments/hierarchy',
+        method: "GET",
+        path: "/departments/hierarchy",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Get department hierarchy tree',
-      }
+        tags: ["Departments"],
+        summary: "Get department hierarchy tree",
+      },
     })
     .input(z.object({}))
     .output(z.any())
     .query(async ({ ctx }) => {
-    // Get all root departments (no parent)
-    const rootDepartments = await ctx.db.department.findMany({
-      where: {
-        parentId: null,
-        deletedAt: null,
-      },
-      include: {
-        children: {
-          include: {
-            children: {
-              include: {
-                children: true,
+      // Get all root departments (no parent)
+      const rootDepartments = await ctx.db.department.findMany({
+        where: withTenantWhere(ctx, {
+          parentId: null,
+          deletedAt: null,
+        }),
+        include: {
+          children: {
+            include: {
+              children: {
+                include: {
+                  children: true,
+                },
               },
             },
           },
-        },
-        users: {
-          select: {
-            id: true,
-            name: true,
-            role: true,
+          users: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+            },
           },
         },
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
+        orderBy: {
+          name: "asc",
+        },
+      });
 
-    return rootDepartments;
-  }),
+      return rootDepartments;
+    }),
 
   // Create department
   create: adminProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/departments',
+        method: "POST",
+        path: "/departments",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Create department',
-      }
+        tags: ["Departments"],
+        summary: "Create department",
+      },
     })
     .input(
       z.object({
@@ -189,13 +211,13 @@ export const departmentRouter = createTRPCRouter({
         description: z.string().optional(),
         parentId: z.string().optional(),
         chiefId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if code already exists
-      const existing = await ctx.db.department.findUnique({
-        where: { code: input.code },
+      const existing = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
       });
 
       if (existing) {
@@ -207,8 +229,8 @@ export const departmentRouter = createTRPCRouter({
 
       // Validate parent exists if provided
       if (input.parentId) {
-        const parent = await ctx.db.department.findUnique({
-          where: { id: input.parentId },
+        const parent = await ctx.db.department.findFirst({
+          where: withTenantWhere(ctx, { id: input.parentId }),
         });
         if (!parent) {
           throw new TRPCError({
@@ -220,6 +242,7 @@ export const departmentRouter = createTRPCRouter({
 
       return ctx.db.department.create({
         data: {
+          tenantId: getTenantScope(ctx).tenantId,
           name: input.name,
           code: input.code,
           description: input.description,
@@ -237,12 +260,12 @@ export const departmentRouter = createTRPCRouter({
   update: adminProcedure
     .meta({
       openapi: {
-        method: 'PUT',
-        path: '/departments/{id}',
+        method: "PUT",
+        path: "/departments/{id}",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Update department',
-      }
+        tags: ["Departments"],
+        summary: "Update department",
+      },
     })
     .input(
       z.object({
@@ -252,15 +275,15 @@ export const departmentRouter = createTRPCRouter({
         description: z.string().optional(),
         parentId: z.string().optional().nullable(),
         chiefId: z.string().optional().nullable(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const { id, ...updateData } = input;
 
       // Check if department exists
-      const department = await ctx.db.department.findUnique({
-        where: { id },
+      const department = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { id }),
       });
 
       if (!department) {
@@ -272,8 +295,8 @@ export const departmentRouter = createTRPCRouter({
 
       // If updating code, check for conflicts
       if (input.code && input.code !== department.code) {
-        const existing = await ctx.db.department.findUnique({
-          where: { code: input.code },
+        const existing = await ctx.db.department.findFirst({
+          where: withTenantWhere(ctx, { code: input.code }),
         });
         if (existing) {
           throw new TRPCError({
@@ -296,7 +319,8 @@ export const departmentRouter = createTRPCRouter({
         const isDescendant = await checkIsDescendant(
           ctx.db,
           id,
-          input.parentId
+          input.parentId,
+          getTenantScope(ctx).tenantId,
         );
         if (isDescendant) {
           throw new TRPCError({
@@ -321,19 +345,19 @@ export const departmentRouter = createTRPCRouter({
   delete: adminProcedure
     .meta({
       openapi: {
-        method: 'DELETE',
-        path: '/departments/{id}',
+        method: "DELETE",
+        path: "/departments/{id}",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Delete department',
-      }
+        tags: ["Departments"],
+        summary: "Delete department",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if department exists
-      const department = await ctx.db.department.findUnique({
-        where: { id: input.id },
+      const department = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           children: true,
           users: true,
@@ -349,7 +373,7 @@ export const departmentRouter = createTRPCRouter({
 
       // Check if department has active children
       const activeChildren = department.children.filter(
-        (child) => !child.deletedAt
+        (child) => !child.deletedAt,
       );
       if (activeChildren.length > 0) {
         throw new TRPCError({
@@ -379,18 +403,18 @@ export const departmentRouter = createTRPCRouter({
   restore: adminProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/departments/{id}/restore',
+        method: "POST",
+        path: "/departments/{id}/restore",
         protect: true,
-        tags: ['Departments'],
-        summary: 'Restore deleted department',
-      }
+        tags: ["Departments"],
+        summary: "Restore deleted department",
+      },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const department = await ctx.db.department.findUnique({
-        where: { id: input.id },
+      const department = await ctx.db.department.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!department) {
@@ -420,10 +444,14 @@ export const departmentRouter = createTRPCRouter({
 async function checkIsDescendant(
   db: PrismaClient,
   ancestorId: string,
-  descendantId: string
+  descendantId: string,
+  tenantId?: string | null,
 ): Promise<boolean> {
-  const descendant = await db.department.findUnique({
-    where: { id: descendantId },
+  const descendant = await db.department.findFirst({
+    where: {
+      id: descendantId,
+      ...(tenantId ? { tenantId } : {}),
+    },
     select: { parentId: true },
   });
 
@@ -435,5 +463,5 @@ async function checkIsDescendant(
     return true;
   }
 
-  return checkIsDescendant(db, ancestorId, descendant.parentId);
+  return checkIsDescendant(db, ancestorId, descendant.parentId, tenantId);
 }

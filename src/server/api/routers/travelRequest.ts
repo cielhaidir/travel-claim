@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import {
   TravelType,
   TravelStatus,
+  BailoutStatus,
   ApprovalLevel,
   ApprovalStatus,
   AuditAction,
@@ -20,7 +21,44 @@ import {
   sendWhatsappPoll,
   buildTravelRequestApprovalPoll,
 } from "@/lib/utils/whatsapp";
+import {
+  generateBailoutNumber,
+  generateRequestNumber,
+} from "@/lib/utils/numberGenerators";
 import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
+function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
+  const scope = getTenantScope(ctx);
+  if (scope.isRoot) return;
+  if (!scope.tenantId || scope.tenantId !== tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cross-tenant access denied",
+    });
+  }
+}
 
 export const travelRequestRouter = createTRPCRouter({
   // Get all travel requests with filters
@@ -53,9 +91,9 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = {
+      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
-      };
+      });
 
       // Non-managers can only see their own requests and their team's requests
       if (
@@ -243,6 +281,7 @@ export const travelRequestRouter = createTRPCRouter({
           { participants: { some: { userId: targetUser.id } } },
         ],
       };
+      withTenantWhere(ctx, where);
 
       if (input?.status) {
         where.status = input.status;
@@ -347,8 +386,8 @@ export const travelRequestRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const request = await ctx.db.travelRequest.findUnique({
-        where: { id: input.id },
+      const request = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           requester: {
             include: {
@@ -456,7 +495,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx }) => {
       return ctx.db.travelRequest.findMany({
-        where: {
+        where: withTenantWhere(ctx, {
           deletedAt: null,
           approvals: {
             some: {
@@ -464,7 +503,7 @@ export const travelRequestRouter = createTRPCRouter({
               status: ApprovalStatus.PENDING,
             },
           },
-        },
+        }),
         include: {
           requester: {
             select: {
@@ -527,33 +566,39 @@ export const travelRequestRouter = createTRPCRouter({
           .transform((v) => (v === "" ? undefined : v)),
         participantIds: z.array(z.string()).optional(),
         // Bailout saat pengajuan awal (sudah berisi kategori + field spesifik)
-        bailouts: z.array(z.object({
-          category: z.enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"]).default("OTHER"),
-          description: z.string().min(10),
-          amount: z.number().positive(),
-          // Transport
-          transportMode: z.string().optional(),
-          carrier: z.string().optional(),
-          departureFrom: z.string().optional(),
-          arrivalTo: z.string().optional(),
-          departureAt: z.coerce.date().optional(),
-          arrivalAt: z.coerce.date().optional(),
-          flightNumber: z.string().optional(),
-          seatClass: z.string().optional(),
-          bookingRef: z.string().optional(),
-          // Hotel
-          hotelName: z.string().optional(),
-          hotelAddress: z.string().optional(),
-          checkIn: z.coerce.date().optional(),
-          checkOut: z.coerce.date().optional(),
-          roomType: z.string().optional(),
-          // Meal
-          mealDate: z.coerce.date().optional(),
-          mealLocation: z.string().optional(),
-          // Finance assignment
-          financeId: z.string().optional(),
-        })).optional(),
-      })
+        bailouts: z
+          .array(
+            z.object({
+              category: z
+                .enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"])
+                .default("OTHER"),
+              description: z.string().min(10),
+              amount: z.number().positive(),
+              // Transport
+              transportMode: z.string().optional(),
+              carrier: z.string().optional(),
+              departureFrom: z.string().optional(),
+              arrivalTo: z.string().optional(),
+              departureAt: z.coerce.date().optional(),
+              arrivalAt: z.coerce.date().optional(),
+              flightNumber: z.string().optional(),
+              seatClass: z.string().optional(),
+              bookingRef: z.string().optional(),
+              // Hotel
+              hotelName: z.string().optional(),
+              hotelAddress: z.string().optional(),
+              checkIn: z.coerce.date().optional(),
+              checkOut: z.coerce.date().optional(),
+              roomType: z.string().optional(),
+              // Meal
+              mealDate: z.coerce.date().optional(),
+              mealLocation: z.string().optional(),
+              // Finance assignment
+              financeId: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -586,37 +631,51 @@ export const travelRequestRouter = createTRPCRouter({
 
       // Generate request number
       const year = new Date().getFullYear();
-      const count = await ctx.db.travelRequest.count({
-        where: { requestNumber: { startsWith: `TR-${year}` } },
-      });
-      const requestNumber = `TR-${year}-${String(count + 1).padStart(5, "0")}`;
+      const tenantId = getTenantScope(ctx).tenantId;
+      const requestNumber = await generateRequestNumber(ctx.db, tenantId, year);
 
       // Prepare bailout number counter — use max existing to avoid conflicts
-      const _lastBailoutCreate = await ctx.db.bailout.findFirst({
-        where: { bailoutNumber: { startsWith: `BLT-${year}` } },
-        orderBy: { bailoutNumber: "desc" },
-        select: { bailoutNumber: true },
-      });
-      let bailoutSeq = _lastBailoutCreate
-        ? parseInt(_lastBailoutCreate.bailoutNumber.split("-")[2] ?? "0", 10)
-        : 0;
+      let bailoutNumberCursor = await generateBailoutNumber(
+        ctx.db,
+        tenantId,
+        year,
+      );
 
       // Create request with nested bailout entries and participants
       const request = await ctx.db.travelRequest.create({
         data: {
+          tenantId,
           requestNumber,
           requesterId: ctx.session.user.id,
           ...requestData,
           participants: participantIds
-            ? { create: participantIds.map((userId) => ({ userId })) }
+            ? {
+                create: participantIds.map((userId) => ({
+                  userId,
+                  tenantId,
+                })),
+              }
             : undefined,
           bailouts: bailouts
             ? {
                 create: bailouts.map((b) => {
-                  bailoutSeq++;
-                  const { category, description, amount, transportMode, ...rest } = b;
+                  const {
+                    category,
+                    description,
+                    amount,
+                    transportMode,
+                    ...rest
+                  } = b;
+                  const nextBailoutNumber = bailoutNumberCursor;
+                  const nextSeq =
+                    Number.parseInt(
+                      nextBailoutNumber.split("-").at(-1) ?? "0",
+                      10,
+                    ) + 1;
+                  bailoutNumberCursor = `BLT-${year}-${String(nextSeq).padStart(5, "0")}`;
                   return {
-                    bailoutNumber: `BLT-${year}-${String(bailoutSeq).padStart(5, "0")}`,
+                    tenantId,
+                    bailoutNumber: nextBailoutNumber,
                     requesterId: ctx.session.user.id,
                     category,
                     description,
@@ -650,6 +709,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "TravelRequest",
@@ -685,29 +745,35 @@ export const travelRequestRouter = createTRPCRouter({
           .optional()
           .transform((v) => (v === "" ? undefined : v)),
         participantIds: z.array(z.string()).optional(),
-        bailouts: z.array(z.object({
-          category: z.enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"]).default("OTHER"),
-          description: z.string().min(10),
-          amount: z.number().positive(),
-          transportMode: z.string().optional(),
-          carrier: z.string().optional(),
-          departureFrom: z.string().optional(),
-          arrivalTo: z.string().optional(),
-          departureAt: z.coerce.date().optional(),
-          arrivalAt: z.coerce.date().optional(),
-          flightNumber: z.string().optional(),
-          seatClass: z.string().optional(),
-          bookingRef: z.string().optional(),
-          hotelName: z.string().optional(),
-          hotelAddress: z.string().optional(),
-          checkIn: z.coerce.date().optional(),
-          checkOut: z.coerce.date().optional(),
-          roomType: z.string().optional(),
-          mealDate: z.coerce.date().optional(),
-          mealLocation: z.string().optional(),
-          financeId: z.string().optional(),
-        })).optional(),
-      })
+        bailouts: z
+          .array(
+            z.object({
+              category: z
+                .enum(["TRANSPORT", "HOTEL", "MEAL", "OTHER"])
+                .default("OTHER"),
+              description: z.string().min(10),
+              amount: z.number().positive(),
+              transportMode: z.string().optional(),
+              carrier: z.string().optional(),
+              departureFrom: z.string().optional(),
+              arrivalTo: z.string().optional(),
+              departureAt: z.coerce.date().optional(),
+              arrivalAt: z.coerce.date().optional(),
+              flightNumber: z.string().optional(),
+              seatClass: z.string().optional(),
+              bookingRef: z.string().optional(),
+              hotelName: z.string().optional(),
+              hotelAddress: z.string().optional(),
+              checkIn: z.coerce.date().optional(),
+              checkOut: z.coerce.date().optional(),
+              roomType: z.string().optional(),
+              mealDate: z.coerce.date().optional(),
+              mealLocation: z.string().optional(),
+              financeId: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -724,6 +790,7 @@ export const travelRequestRouter = createTRPCRouter({
           message: "Travel request not found",
         });
       }
+      assertTenant(ctx, existing.tenantId);
 
       // Only requester can update
       if (existing.requesterId !== ctx.session.user.id) {
@@ -758,42 +825,60 @@ export const travelRequestRouter = createTRPCRouter({
       // Update participants if provided
       if (participantIds) {
         await ctx.db.travelParticipant.deleteMany({
-          where: { travelRequestId: id },
+          where: withTenantWhere(ctx, { travelRequestId: id }),
         });
       }
 
       // Update bailouts if provided: delete existing DRAFT ones and recreate
       if (bailouts !== undefined) {
         await ctx.db.bailout.deleteMany({
-          where: { travelRequestId: id, status: "DRAFT" },
+          where: withTenantWhere(ctx, {
+            travelRequestId: id,
+            status: BailoutStatus.DRAFT,
+          }),
         });
       }
 
       // Prepare bailout number counter — use max existing to avoid conflicts after deletion
       const year = new Date().getFullYear();
-      const _lastBailoutUpdate = await ctx.db.bailout.findFirst({
-        where: { bailoutNumber: { startsWith: `BLT-${year}` } },
-        orderBy: { bailoutNumber: "desc" },
-        select: { bailoutNumber: true },
-      });
-      let bailoutSeq = _lastBailoutUpdate
-        ? parseInt(_lastBailoutUpdate.bailoutNumber.split("-")[2] ?? "0", 10)
-        : 0;
+      let bailoutNumberCursor = await generateBailoutNumber(
+        ctx.db,
+        existing.tenantId,
+        year,
+      );
 
       const updated = await ctx.db.travelRequest.update({
         where: { id },
         data: {
           ...updateData,
           participants: participantIds
-            ? { create: participantIds.map((userId) => ({ userId })) }
+            ? {
+                create: participantIds.map((userId) => ({
+                  userId,
+                  tenantId: existing.tenantId,
+                })),
+              }
             : undefined,
           bailouts: bailouts
             ? {
                 create: bailouts.map((b) => {
-                  bailoutSeq++;
-                  const { category, description, amount, transportMode, ...rest } = b;
+                  const {
+                    category,
+                    description,
+                    amount,
+                    transportMode,
+                    ...rest
+                  } = b;
+                  const nextBailoutNumber = bailoutNumberCursor;
+                  const nextSeq =
+                    Number.parseInt(
+                      nextBailoutNumber.split("-").at(-1) ?? "0",
+                      10,
+                    ) + 1;
+                  bailoutNumberCursor = `BLT-${year}-${String(nextSeq).padStart(5, "0")}`;
                   return {
-                    bailoutNumber: `BLT-${year}-${String(bailoutSeq).padStart(5, "0")}`,
+                    tenantId: existing.tenantId,
+                    bailoutNumber: nextBailoutNumber,
                     requesterId: ctx.session.user.id,
                     category,
                     description,
@@ -827,6 +912,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "TravelRequest",
@@ -852,8 +938,8 @@ export const travelRequestRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const request = await ctx.db.travelRequest.findUnique({
-        where: { id: input.id },
+      const request = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           requester: {
             include: {
@@ -1038,7 +1124,7 @@ export const travelRequestRouter = createTRPCRouter({
       // violation when we try to INSERT new ones whose generated numbers collide.)
       if (request.status === TravelStatus.REVISION) {
         await ctx.db.approval.deleteMany({
-          where: { travelRequestId: input.id },
+          where: withTenantWhere(ctx, { travelRequestId: input.id }),
         });
       }
 
@@ -1048,7 +1134,9 @@ export const travelRequestRouter = createTRPCRouter({
       // race where two concurrent requests read the same MAX before either inserts.
       const year = new Date().getFullYear();
       const lastApproval = await ctx.db.approval.findFirst({
-        where: { approvalNumber: { startsWith: `APR-${year}-` } },
+        where: withTenantWhere(ctx, {
+          approvalNumber: { startsWith: `APR-${year}-` },
+        }),
         orderBy: { approvalNumber: "desc" },
         select: { approvalNumber: true },
       });
@@ -1096,6 +1184,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.SUBMIT,
           entityType: "TravelRequest",
@@ -1166,8 +1255,8 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      const request = await ctx.db.travelRequest.findUnique({
-        where: { id: input.id },
+      const request = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!request) {
@@ -1195,6 +1284,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.LOCK,
           entityType: "TravelRequest",
@@ -1226,8 +1316,8 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      const request = await ctx.db.travelRequest.findUnique({
-        where: { id: input.id },
+      const request = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           claims: {
             where: {
@@ -1272,6 +1362,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CLOSE,
           entityType: "TravelRequest",
@@ -1296,8 +1387,8 @@ export const travelRequestRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const request = await ctx.db.travelRequest.findUnique({
-        where: { id: input.id },
+      const request = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           claims: true,
         },
@@ -1340,6 +1431,7 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "TravelRequest",
@@ -1370,9 +1462,9 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = {
+      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
-      };
+      });
 
       if (input?.departmentId) {
         where.requester = {
