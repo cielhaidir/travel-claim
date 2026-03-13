@@ -2,7 +2,6 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
-// @ts-expect-error — no type declarations for CSS side-effect import
 import 'swagger-ui-react/swagger-ui.css';
 
 const SwaggerUI = dynamic(() => import('swagger-ui-react'), { ssr: false });

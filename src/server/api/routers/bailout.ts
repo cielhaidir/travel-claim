@@ -90,6 +90,65 @@ export const bailoutRouter = createTRPCRouter({
       return { bailouts, nextCursor };
     }),
 
+  repairLegacyTravelStatuses: protectedProcedure
+    .input(z.object({}))
+    .output(z.object({ updatedCount: z.number() }))
+    .mutation(async ({ ctx }) => {
+      if (!userHasAnyRole(ctx.session.user, [Role.FINANCE, Role.ADMIN])) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Hanya Finance atau Admin yang bisa memperbaiki status bailout legacy",
+        });
+      }
+
+      const legacyCandidates = await ctx.db.bailout.findMany({
+        where: {
+          deletedAt: null,
+          status: BailoutStatus.DRAFT,
+          submittedAt: null,
+          travelRequest: {
+            status: {
+              in: ["APPROVED", "LOCKED", "CLOSED"],
+            },
+          },
+          approvals: {
+            none: {},
+          },
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          travelRequest: {
+            select: {
+              createdAt: true,
+              submittedAt: true,
+            },
+          },
+        },
+      });
+
+      const repairableIds = legacyCandidates
+        .filter((bailout) =>
+          bailout.travelRequest.submittedAt
+            ? bailout.createdAt <= bailout.travelRequest.submittedAt
+            : bailout.createdAt <= bailout.travelRequest.createdAt,
+        )
+        .map((bailout) => bailout.id);
+
+      if (repairableIds.length === 0) {
+        return { updatedCount: 0 };
+      }
+
+      await ctx.db.bailout.updateMany({
+        where: { id: { in: repairableIds } },
+        data: {
+          status: BailoutStatus.APPROVED_DIRECTOR,
+        },
+      });
+
+      return { updatedCount: repairableIds.length };
+    }),
+
   // ─── GET BY ID ────────────────────────────────────────────────────────────
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
@@ -443,6 +502,18 @@ export const bailoutRouter = createTRPCRouter({
 
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
+        include: {
+          travelRequest: {
+            select: {
+              status: true,
+              createdAt: true,
+              submittedAt: true,
+            },
+          },
+          approvals: {
+            select: { id: true },
+          },
+        },
       });
 
       if (!bailout) {
@@ -621,6 +692,18 @@ export const bailoutRouter = createTRPCRouter({
 
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
+        include: {
+          travelRequest: {
+            select: {
+              status: true,
+              createdAt: true,
+              submittedAt: true,
+            },
+          },
+          approvals: {
+            select: { id: true },
+          },
+        },
       });
 
       if (!bailout) {
@@ -708,6 +791,18 @@ export const bailoutRouter = createTRPCRouter({
 
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
+        include: {
+          travelRequest: {
+            select: {
+              status: true,
+              createdAt: true,
+              submittedAt: true,
+            },
+          },
+          approvals: {
+            select: { id: true },
+          },
+        },
       });
 
       if (!bailout) {
@@ -717,7 +812,19 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      if (bailout.status !== BailoutStatus.APPROVED_DIRECTOR) {
+      const isLegacyTravelReady =
+        bailout.status === BailoutStatus.DRAFT &&
+        bailout.submittedAt === null &&
+        bailout.approvals.length === 0 &&
+        ["APPROVED", "LOCKED", "CLOSED"].includes(bailout.travelRequest.status) &&
+        (bailout.travelRequest.submittedAt
+          ? bailout.createdAt <= bailout.travelRequest.submittedAt
+          : bailout.createdAt <= bailout.travelRequest.createdAt);
+
+      if (
+        bailout.status !== BailoutStatus.APPROVED_DIRECTOR &&
+        !isLegacyTravelReady
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Bailout harus sudah di-approve Director sebelum dicairkan",

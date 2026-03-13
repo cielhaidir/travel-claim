@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
@@ -34,7 +34,7 @@ interface Bailout {
   disbursedAt: string | Date | null;
   rejectedAt: string | Date | null;
   rejectionReason: string | null;
-  travelRequest: { id: string; requestNumber: string; destination: string };
+  travelRequest: { id: string; requestNumber: string; destination: string; status: string };
   requester: { id: string; name: string | null; employeeId: string | null };
   finance?: { id: string; name: string | null; email: string | null } | null;
   chiefApprover?: { id: string; name: string | null } | null;
@@ -65,6 +65,14 @@ const STATUS_COLORS: Record<BailoutStatus, string> = {
 
 const FIELD_CLS = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 const LABEL_CLS = "block text-xs font-medium text-gray-700 mb-1";
+
+function isLegacyTravelBailoutReady(bailout: Bailout) {
+  return (
+    bailout.status === "DRAFT" &&
+    bailout.submittedAt === null &&
+    ["APPROVED", "LOCKED", "CLOSED"].includes(bailout.travelRequest.status)
+  );
+}
 
 // ─── Create Bailout Form ───────────────────────────────────────────────────────
 
@@ -342,7 +350,7 @@ function CreateBailoutModal({
       <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
         <Button type="button" variant="secondary" onClick={onClose}>Batal</Button>
         <Button type="submit" isLoading={createMutation.isPending}>
-          Simpan sebagai Draft
+          Simpan Draft Manual
         </Button>
       </div>
     </form>
@@ -366,7 +374,6 @@ function ActionModal({
 }) {
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
-  const [showDisburse, setShowDisburse] = useState(false);
   const [disbursementRef, setDisbursementRef] = useState("");
   const [currentStorageUrl, setCurrentStorageUrl] = useState(bailout.storageUrl);
 
@@ -384,6 +391,10 @@ function ActionModal({
   const submit = api.bailout.submit.useMutation({ onSuccess: refresh });
 
   const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending || submit.isPending;
+  const isLegacyReady = isLegacyTravelBailoutReady(bailout);
+  const canFinanceDisburse =
+    financeRoles.includes(userRole) &&
+    (bailout.status === "APPROVED_DIRECTOR" || isLegacyReady);
 
   return (
     <div className="space-y-5">
@@ -448,9 +459,14 @@ function ActionModal({
       )}
 
       {/* Disburse Form */}
-      {showDisburse && (
+      {canFinanceDisburse && (
         <div className="space-y-2 rounded-lg border border-green-200 bg-green-50 p-3">
-          <p className="text-sm font-medium text-green-700">Konfirmasi Pencairan Dana</p>
+          <p className="text-sm font-medium text-green-700">Proses Pembayaran</p>
+          <p className="text-xs text-green-700">
+            {isLegacyReady
+              ? "Bailout legacy dari travel approved ini langsung diperlakukan siap bayar."
+              : "Bailout dari travel yang sudah fully approved bisa langsung diproses pembayaran tanpa approval ulang."}
+          </p>
           <div>
             <label className="text-xs text-gray-500 block mb-1">No. Referensi Transfer (opsional)</label>
             <input
@@ -471,13 +487,12 @@ function ActionModal({
             />
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowDisburse(false)} className="text-xs text-gray-500">Batal</button>
             <Button isLoading={disburse.isPending}
               onClick={() => disburse.mutate({
                 id: bailout.id,
                 disbursementRef: disbursementRef || undefined,
               })}>
-              ✓ Konfirmasi Cairkan
+              Proses Pembayaran
             </Button>
           </div>
         </div>
@@ -507,11 +522,6 @@ function ActionModal({
             ✓ Setujui (Direktur)
           </Button>
         )}
-        {financeRoles.includes(userRole) && bailout.status === "APPROVED_DIRECTOR" && !showDisburse && (
-          <Button isLoading={disburse.isPending} onClick={() => setShowDisburse(true)}>
-            💰 Cairkan Dana
-          </Button>
-        )}
       </div>
     </div>
   );
@@ -536,6 +546,13 @@ export default function BailoutApprovalPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const utils = api.useUtils();
+  const repairLegacyMutation = api.bailout.repairLegacyTravelStatuses.useMutation({
+    onSuccess: (result) => {
+      if (result.updatedCount > 0) {
+        void utils.bailout.getAll.invalidate();
+      }
+    },
+  });
 
   // Single query with no status filter so we always have the full list.
   // „select" uses a stable function reference to avoid infinite re-fetches.
@@ -552,6 +569,12 @@ export default function BailoutApprovalPage() {
     ["SUBMITTED", "APPROVED_CHIEF", "APPROVED_DIRECTOR"].includes(b.status)
   ).length;
 
+  useEffect(() => {
+    if (!["FINANCE", "ADMIN"].includes(userRole)) return;
+    if (repairLegacyMutation.isPending || repairLegacyMutation.isSuccess) return;
+    repairLegacyMutation.mutate({});
+  }, [repairLegacyMutation, userRole]);
+
   const statusFilters: { value: BailoutStatus | "ALL"; label: string }[] = [
     { value: "ALL", label: "Semua" },
     { value: "SUBMITTED", label: "Diajukan" },
@@ -567,7 +590,7 @@ export default function BailoutApprovalPage() {
         title="Bailout Approval"
         description="Kelola dan setujui pengajuan dana talangan perjalanan dinas"
         primaryAction={{
-          label: "Ajukan Bailout",
+          label: "Ajukan Bailout Manual",
           onClick: () => setIsCreateOpen(true),
         }}
       />
@@ -600,7 +623,7 @@ export default function BailoutApprovalPage() {
         <EmptyState
           icon="✅"
           title={statusFilter === "ALL" ? "Belum Ada Bailout" : `Tidak ada bailout berstatus "${STATUS_LABELS[statusFilter]}"`}
-          description="Bailout akan muncul di sini setelah user mengajukannya dari halaman BusTrip."
+          description="Bailout akan muncul di sini dari travel yang sudah di-approve atau dari pengajuan manual."
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -681,7 +704,7 @@ export default function BailoutApprovalPage() {
       <Modal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
-        title="Ajukan Dana Talangan (Bailout)"
+        title="Ajukan Dana Talangan Manual"
         size="lg"
       >
         <CreateBailoutModal
