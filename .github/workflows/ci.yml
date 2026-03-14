@@ -103,9 +103,14 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Pull latest image & restart stack
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
           echo "Deploying image: $IMAGE"
+
+          # Write env file from secret
+          echo "$ENV_FILE" > .env
 
           # Pull fresh image
           docker pull "$IMAGE"
@@ -114,16 +119,6 @@ jobs:
           docker tag "$IMAGE" travel-claim:latest
 
           # Restart only the app service (DB & Redis keep running)
-          docker compose -f docker-compose.yml up -d --no-deps --force-recreate app
-        env:
-          # Pass secrets needed by docker-compose.yml
-          AUTH_SECRET:                ${{ secrets.AUTH_SECRET }}
-          NEXTAUTH_URL:               ${{ secrets.NEXTAUTH_URL }}
-          AZURE_AD_CLIENT_ID:         ${{ secrets.AZURE_AD_CLIENT_ID }}
-          AZURE_AD_CLIENT_SECRET:     ${{ secrets.AZURE_AD_CLIENT_SECRET }}
-          AZURE_AD_TENANT_ID:         ${{ secrets.AZURE_AD_TENANT_ID }}
-          POSTGRES_USER:              ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD:          ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB:                ${{ secrets.POSTGRES_DB }}
-          MCP_API_TOKEN:              ${{ secrets.MCP_API_TOKEN }}
-          MCP_API_TOKEN_USER_EMAIL:   ${{ secrets.MCP_API_TOKEN_USER_EMAIL }}
+          docker compose -f docker-compose.yml --env-file .env up -d --no-deps --force-recreate app
+
+          rm -f .env
