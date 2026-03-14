@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api } from "@/trpc/react";
 import { Button } from "@/components/ui/Button";
 import type { EntertainmentType, NonEntertainmentCategory } from "../../../../generated/prisma";
@@ -54,6 +54,7 @@ interface ClaimFormProps {
   isLoading?: boolean;
   onSubmit: (data: ClaimFormData) => void;
   onCancel: () => void;
+  children?: ReactNode;
 }
 
 const ENTERTAINMENT_TYPES: { value: EntertainmentType; label: string }[] = [
@@ -88,6 +89,7 @@ export function ClaimForm({
   isLoading = false,
   onSubmit,
   onCancel,
+  children,
 }: ClaimFormProps) {
   const [claimType, setClaimType] = useState<ClaimFormType>(
     initialData?.claimType ?? initialType
@@ -231,7 +233,7 @@ export function ClaimForm({
           className={FIELD_CLS}
         >
           {travelRequests.length === 0 && (
-            <option value="">No approved travel requests</option>
+            <option value="">No approved or locked travel requests</option>
           )}
           {travelRequests.map((tr) => (
             <option key={tr.id} value={tr.id}>
@@ -448,6 +450,13 @@ export function ClaimForm({
           className={`${FIELD_CLS} resize-none`}
         />
       </div>
+
+      {children ?? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Save the draft first. You will upload receipts or supporting documents in the next
+          step, and at least one attachment is required before submission.
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex justify-end gap-3 border-t pt-4">

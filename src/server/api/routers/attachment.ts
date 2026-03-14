@@ -159,6 +159,71 @@ export const attachmentRouter = createTRPCRouter({
       return attachment;
     }),
 
+  // Generate a short-lived upload URL for direct browser uploads to R2
+  getUploadUrl: protectedProcedure
+    .input(
+      z.object({
+        claimId: z.string().min(1),
+        filename: z.string().min(1),
+        contentType: z.string().min(1),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const claim = await ctx.db.claim.findUnique({
+        where: { id: input.claimId },
+        include: {
+          travelRequest: {
+            include: {
+              participants: true,
+            },
+          },
+        },
+      });
+
+      if (!claim) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Claim not found",
+        });
+      }
+
+      const isSubmitter = claim.submitterId === ctx.session.user.id;
+      const isRequester =
+        claim.travelRequest.requesterId === ctx.session.user.id;
+      const isParticipant = claim.travelRequest.participants.some(
+        (p) => p.userId === ctx.session.user.id,
+      );
+      const canManage = userHasAnyRole(ctx.session.user, ["ADMIN"]);
+
+      if (!isSubmitter && !isRequester && !isParticipant && !canManage) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Not authorized to upload attachments for this claim",
+        });
+      }
+
+      if (!["DRAFT", "REVISION"].includes(claim.status)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Can only upload attachments for claims in DRAFT or REVISION status",
+        });
+      }
+
+      const { buildStorageKey, getPresignedUploadUrl, getPublicUrl } =
+        await import("@/lib/storage/r2");
+
+      const key = buildStorageKey("attachments", input.claimId, input.filename);
+      const uploadUrl = await getPresignedUploadUrl(key, input.contentType, 900);
+
+      return {
+        uploadUrl,
+        key,
+        publicUrl: getPublicUrl(key),
+      };
+    }),
+
   // Create attachment metadata (actual file upload would be handled separately via upload endpoint)
   create: protectedProcedure
     .meta({
@@ -533,11 +598,17 @@ export const attachmentRouter = createTRPCRouter({
         });
       }
 
-      // TODO: Generate signed URL for secure download
-      // For now, return the storage URL directly
-      // In production, you would generate a time-limited signed URL
+      const storageUrl = attachment.storageUrl;
+      const isDirectUrl = /^https?:\/\//i.test(storageUrl);
+      const url =
+        attachment.storageProvider === "r2" && !isDirectUrl
+          ? await (
+              await import("@/lib/storage/r2")
+            ).getPresignedDownloadUrl(storageUrl, 1800)
+          : storageUrl;
+
       return {
-        url: attachment.storageUrl,
+        url,
         filename: attachment.originalName,
         mimeType: attachment.mimeType,
         expiresIn: 3600, // 1 hour

@@ -486,7 +486,7 @@ export default function FinanceDashboard() {
           if (selectedTravel) lockMutation.mutate({ id: selectedTravel.id });
         }}
         title="Lock Travel Request"
-        message={`Lock travel request ${selectedTravel?.requestNumber ?? ""}? Participants will be able to submit expense claims once locked.`}
+        message={`Lock travel request ${selectedTravel?.requestNumber ?? ""}? This hands the trip over to Finance for settlement and closing.`}
         confirmLabel="Lock"
         isLoading={lockMutation.isPending}
         variant="warning"

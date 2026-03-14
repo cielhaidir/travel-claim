@@ -1383,11 +1383,16 @@ export const approvalRouter = createTRPCRouter({
           })();
         } else if (entityType === "Claim") {
           await ctx.db.approval.updateMany({
-            where: { claimId: approval.claimId as string },
+            where: {
+              claimId: approval.claimId as string,
+              id: { not: resolvedId },
+            },
             data: {
               status: ApprovalStatus.PENDING,
               approvedAt: null,
               rejectedAt: null,
+              comments: null,
+              rejectionReason: null,
             },
           });
 
@@ -2776,11 +2781,16 @@ export const approvalRouter = createTRPCRouter({
       });
 
       await ctx.db.approval.updateMany({
-        where: { claimId: approval.claimId as string },
+        where: {
+          claimId: approval.claimId as string,
+          id: { not: resolvedId },
+        },
         data: {
           status: ApprovalStatus.PENDING,
           approvedAt: null,
           rejectedAt: null,
+          comments: null,
+          rejectionReason: null,
         },
       });
 

@@ -117,6 +117,9 @@ export const claimRouter = createTRPCRouter({
             },
           },
           attachments: {
+            where: {
+              deletedAt: null,
+            },
             select: {
               id: true,
               filename: true,
@@ -193,7 +196,11 @@ export const claimRouter = createTRPCRouter({
               },
             },
           },
-          attachments: true,
+          attachments: {
+            where: {
+              deletedAt: null,
+            },
+          },
           approvals: {
             include: {
               approver: {
@@ -301,6 +308,9 @@ export const claimRouter = createTRPCRouter({
             },
           },
           attachments: {
+            where: {
+              deletedAt: null,
+            },
             select: {
               id: true,
               filename: true,
@@ -675,7 +685,11 @@ export const claimRouter = createTRPCRouter({
             },
           },
           travelRequest: true,
-          attachments: true,
+          attachments: {
+            where: {
+              deletedAt: null,
+            },
+          },
         },
       });
 
@@ -910,11 +924,20 @@ export const claimRouter = createTRPCRouter({
       const seen = new Set<string>();
       const deduped = approvalEntries
         .filter((e) => {
+          if (e.approverId === claim.submitterId) return false;
           if (seen.has(e.approverId)) return false;
           seen.add(e.approverId);
           return true;
         })
         .map((e, idx) => ({ ...e, sequence: idx + 1 })); // resequence after dedup
+
+      if (deduped.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "No approvers are configured for this claim. Please contact an administrator.",
+        });
+      }
 
       // Generate a unique approvalNumber for each approval record
       const approvalsWithNumbers = await Promise.all(
@@ -923,6 +946,14 @@ export const claimRouter = createTRPCRouter({
           approvalNumber: await generateApprovalNumber(ctx.db),
         })),
       );
+
+      if (claim.status === ClaimStatus.REVISION) {
+        await ctx.db.approval.deleteMany({
+          where: {
+            claimId: input.id,
+          },
+        });
+      }
 
       // Update claim and create approvals
       const updated = await ctx.db.claim.update({
@@ -1041,6 +1072,7 @@ export const claimRouter = createTRPCRouter({
           paidAt: new Date(),
           paidBy: input.paidBy ?? ctx.session.user.name,
           paymentReference: input.paymentReference,
+          financeId: ctx.session.user.id,
         },
       });
 
