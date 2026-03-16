@@ -86,6 +86,45 @@ async function getUserRoles(
   });
 }
 
+function hasRootMembership(memberships: AuthTenantMembership[]): boolean {
+  return memberships.some(
+    (membership) => membership.role === "ROOT" || membership.isRootTenant,
+  );
+}
+
+function resolveScopedRoles(input: {
+  memberships: AuthTenantMembership[];
+  activeTenantId: string | null;
+  fallbackRole: Role;
+  isRoot: boolean;
+}): Role[] {
+  const activeMemberships = input.memberships.filter(
+    (membership) => membership.status === "ACTIVE",
+  );
+
+  const currentMembership =
+    activeMemberships.find(
+      (membership) => membership.tenantId === input.activeTenantId,
+    ) ??
+    activeMemberships.find((membership) => membership.isDefault) ??
+    (input.isRoot
+      ? activeMemberships.find((membership) => membership.isRootTenant)
+      : activeMemberships[0]);
+
+  if (currentMembership) {
+    return normalizeRoles({
+      roles: [currentMembership.role],
+      role: currentMembership.role,
+      includeDefault: false,
+    });
+  }
+
+  return normalizeRoles({
+    roles: [],
+    role: input.fallbackRole,
+  });
+}
+
 async function getUserMemberships(
   userId: string,
 ): Promise<AuthTenantMembership[]> {
@@ -314,17 +353,28 @@ export const authConfig = {
             process.env.NODE_ENV !== "production" &&
             credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
           ) {
-            const roles = await getUserRoles(user.id, user.role as Role);
+            await ensureMembershipsForUser({
+              userId: user.id,
+              role: user.role as Role,
+            });
             const memberships = await getUserMemberships(user.id);
-            const isRoot = hasRootAccess(roles);
+            const isRoot =
+              user.role === "ROOT" || hasRootMembership(memberships);
+            const activeTenantId = resolveActiveTenantId({
+              memberships,
+              isRoot,
+            });
+            const roles = resolveScopedRoles({
+              memberships,
+              activeTenantId,
+              fallbackRole: user.role as Role,
+              isRoot,
+            });
             console.log(
               `[auth] authorize: bypass key accepted for ${user.email}.`,
             );
             return {
-              activeTenantId: resolveActiveTenantId({
-                memberships,
-                isRoot,
-              }),
+              activeTenantId,
               isRoot,
               memberships,
               id: user.id,
@@ -362,12 +412,23 @@ export const authConfig = {
             return null;
           }
 
-          const roles = await getUserRoles(user.id, user.role as Role);
+          await ensureMembershipsForUser({
+            userId: user.id,
+            role: user.role as Role,
+          });
+
           const memberships = await getUserMemberships(user.id);
-          const isRoot = hasRootAccess(roles);
+          const isRoot = user.role === "ROOT" || hasRootMembership(memberships);
+          const activeTenantId = resolveActiveTenantId({ memberships, isRoot });
+          const roles = resolveScopedRoles({
+            memberships,
+            activeTenantId,
+            fallbackRole: user.role as Role,
+            isRoot,
+          });
 
           return {
-            activeTenantId: resolveActiveTenantId({ memberships, isRoot }),
+            activeTenantId,
             isRoot,
             memberships,
             id: user.id,
@@ -492,9 +553,13 @@ export const authConfig = {
       }
     },
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async jwt({ token, user, account, profile, trigger }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
       const authToken = token as AuthToken;
+      const sessionUpdate = session as
+        | {
+            activeTenantId?: string | null;
+          }
+        | undefined;
 
       // Initial sign in
       if (user) {
@@ -536,20 +601,23 @@ export const authConfig = {
           if (dbUser) {
             const memberships = await getUserMemberships(dbUser.id);
             authToken.id = dbUser.id;
-            authToken.roles = await getUserRoles(
-              dbUser.id,
-              dbUser.role as Role,
-            );
-            authToken.role = derivePrimaryRole(authToken.roles);
-            authToken.employeeId = dbUser.employeeId;
-            authToken.departmentId = dbUser.departmentId;
-            authToken.memberships = memberships;
-            authToken.isRoot = hasRootAccess(authToken.roles);
+            authToken.isRoot =
+              dbUser.role === "ROOT" || hasRootMembership(memberships);
             authToken.activeTenantId = resolveActiveTenantId({
               memberships,
               currentTenantId: authToken.activeTenantId,
               isRoot: authToken.isRoot,
             });
+            authToken.roles = resolveScopedRoles({
+              memberships,
+              activeTenantId: authToken.activeTenantId,
+              fallbackRole: dbUser.role as Role,
+              isRoot: authToken.isRoot,
+            });
+            authToken.role = derivePrimaryRole(authToken.roles);
+            authToken.employeeId = dbUser.employeeId;
+            authToken.departmentId = dbUser.departmentId;
+            authToken.memberships = memberships;
             authToken.email = dbUser.email ?? undefined;
             authToken.name = dbUser.name;
             authToken.picture = dbUser.image;
@@ -574,17 +642,40 @@ export const authConfig = {
 
         if (dbUser) {
           const memberships = await getUserMemberships(dbUser.id);
-          authToken.roles = await getUserRoles(dbUser.id, dbUser.role as Role);
-          authToken.role = derivePrimaryRole(authToken.roles);
+          const requestedTenantId =
+            typeof sessionUpdate?.activeTenantId === "string" ||
+            sessionUpdate?.activeTenantId === null
+              ? sessionUpdate.activeTenantId
+              : undefined;
+
+          authToken.isRoot =
+            dbUser.role === "ROOT" || hasRootMembership(memberships);
           authToken.employeeId = dbUser.employeeId;
           authToken.departmentId = dbUser.departmentId;
           authToken.memberships = memberships;
-          authToken.isRoot = hasRootAccess(authToken.roles);
-          authToken.activeTenantId = resolveActiveTenantId({
+          if (
+            requestedTenantId !== undefined &&
+            memberships.some(
+              (membership) =>
+                membership.status === "ACTIVE" &&
+                membership.tenantId === requestedTenantId,
+            )
+          ) {
+            authToken.activeTenantId = requestedTenantId;
+          } else {
+            authToken.activeTenantId = resolveActiveTenantId({
+              memberships,
+              currentTenantId: authToken.activeTenantId,
+              isRoot: authToken.isRoot,
+            });
+          }
+          authToken.roles = resolveScopedRoles({
             memberships,
-            currentTenantId: authToken.activeTenantId,
+            activeTenantId: authToken.activeTenantId ?? null,
+            fallbackRole: dbUser.role as Role,
             isRoot: authToken.isRoot,
           });
+          authToken.role = derivePrimaryRole(authToken.roles);
           authToken.email = dbUser.email ?? undefined;
           authToken.name = dbUser.name;
           authToken.picture = dbUser.image;

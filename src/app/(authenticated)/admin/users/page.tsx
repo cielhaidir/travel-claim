@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils/format";
-import type { Role } from "../../../../../generated/prisma";
+import type { MembershipStatus, Role } from "../../../../../generated/prisma";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -32,7 +32,33 @@ interface UserRef {
   department: Department | null;
   supervisor: { id: string; name: string | null; email: string | null } | null;
   userRoles: { role: Role }[];
+  memberships: {
+    tenantId: string;
+    role: Role;
+    status: MembershipStatus;
+    isDefault: boolean;
+    tenant: {
+      id: string;
+      name: string;
+      slug: string;
+      isRoot: boolean;
+    };
+  }[];
   _count: { directReports: number; travelRequests: number; claims: number };
+}
+
+interface TenantOption {
+  id: string;
+  name: string;
+  slug: string;
+  isRoot?: boolean;
+}
+
+interface TenantAccessForm {
+  tenantId: string;
+  role: Role;
+  status: MembershipStatus;
+  isDefault: boolean;
 }
 
 interface UserFormData {
@@ -40,7 +66,7 @@ interface UserFormData {
   email: string;
   password: string;
   employeeId: string;
-  roles: Role[];
+  tenantMemberships: TenantAccessForm[];
   departmentId: string;
   supervisorId: string;
   phoneNumber: string;
@@ -72,30 +98,65 @@ const ROLE_COLORS: Record<Role, string> = {
   SALES_CHIEF: "bg-teal-100 text-teal-700",
 };
 
-const DEFAULT_FORM: UserFormData = {
-  name: "",
-  email: "",
-  password: "",
-  employeeId: "",
-  roles: ["EMPLOYEE"],
-  departmentId: "",
-  supervisorId: "",
-  phoneNumber: "",
-};
+function createTenantAccess(
+  tenantId = "",
+  role: Role = "EMPLOYEE",
+  isDefault = false,
+): TenantAccessForm {
+  return {
+    tenantId,
+    role,
+    status: "ACTIVE",
+    isDefault,
+  };
+}
+
+function buildDefaultForm(defaultTenantId = ""): UserFormData {
+  return {
+    name: "",
+    email: "",
+    password: "",
+    employeeId: "",
+    tenantMemberships: defaultTenantId
+      ? [createTenantAccess(defaultTenantId, "EMPLOYEE", true)]
+      : [createTenantAccess()],
+    departmentId: "",
+    supervisorId: "",
+    phoneNumber: "",
+  };
+}
 
 // ─────────────────────────── Page Shell ───────────────────────────
 
 export default function UserManagementPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const userRole = session?.user?.role ?? "EMPLOYEE";
+  const canAccess =
+    session?.user?.isRoot || userRole === "ADMIN" || userRole === "ROOT";
 
-  if (userRole !== "ADMIN" && userRole !== "ROOT") {
+  if (status === "loading") {
+    return (
+      <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     router.replace("/");
     return null;
   }
 
-  return <UserManagementContent />;
+  return (
+    <UserManagementContent
+      session={session!}
+      canQuery={
+        !!session?.user &&
+        (session.user.isRoot || !!session.user.activeTenantId)
+      }
+    />
+  );
 }
 
 // ─────────────────────────── Main Content ───────────────────────────
@@ -115,7 +176,13 @@ interface ImportResult {
   reason?: string;
 }
 
-function UserManagementContent() {
+function UserManagementContent({
+  canQuery,
+  session,
+}: {
+  canQuery: boolean;
+  session: NonNullable<ReturnType<typeof useSession>["data"]>;
+}) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Role | "ALL">("ALL");
   const [deptFilter, setDeptFilter] = useState("");
@@ -138,7 +205,9 @@ function UserManagementContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form & password state
-  const [form, setForm] = useState<UserFormData>(DEFAULT_FORM);
+  const [form, setForm] = useState<UserFormData>(() =>
+    buildDefaultForm(session.user.activeTenantId ?? ""),
+  );
   const [newPassword, setNewPassword] = useState("");
   const [formError, setFormError] = useState("");
 
@@ -155,20 +224,57 @@ function UserManagementContent() {
       search: search || undefined,
       limit: 100,
     },
-    { refetchOnWindowFocus: false },
+    { refetchOnWindowFocus: false, enabled: canQuery },
   );
   const users = (rawUsers as { users: UserRef[] } | undefined)?.users ?? [];
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const { data: rawDepts } = api.department.getAll.useQuery({});
+  const { data: rawDepts } = api.department.getAll.useQuery(
+    {},
+    { enabled: canQuery, refetchOnWindowFocus: false },
+  );
   const departments = (rawDepts as Department[] | undefined) ?? [];
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const { data: rawTenants } = api.tenant.getAll.useQuery(undefined, {
+    enabled: canQuery && session.user.isRoot,
+    refetchOnWindowFocus: false,
+  });
+  const tenantOptions: TenantOption[] = session.user.isRoot
+    ? (
+        (rawTenants as
+          | Array<{
+              id: string;
+              name: string;
+              slug: string;
+              isRoot: boolean;
+            }>
+          | undefined) ?? []
+      ).map((tenant) => ({
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        isRoot: tenant.isRoot,
+      }))
+    : (session.user.memberships ?? [])
+        .filter((membership) => membership.status === "ACTIVE")
+        .map((membership) => ({
+          id: membership.tenantId,
+          name: membership.tenantName,
+          slug: membership.tenantSlug,
+          isRoot: membership.isRootTenant,
+        }));
 
   // Mutations
   const createMutation = api.user.create.useMutation({
     onSuccess: () => {
       void refetch();
       setIsCreateOpen(false);
-      setForm(DEFAULT_FORM);
+      setForm(
+        buildDefaultForm(
+          session.user.activeTenantId ?? tenantOptions[0]?.id ?? "",
+        ),
+      );
       setFormError("");
     },
     onError: (e) => setFormError(e.message),
@@ -306,7 +412,11 @@ function UserManagementContent() {
 
   // Helpers
   const openCreate = () => {
-    setForm(DEFAULT_FORM);
+    setForm(
+      buildDefaultForm(
+        session.user.activeTenantId ?? tenantOptions[0]?.id ?? "",
+      ),
+    );
     setFormError("");
     setIsCreateOpen(true);
   };
@@ -316,10 +426,21 @@ function UserManagementContent() {
       email: user.email ?? "",
       password: "",
       employeeId: user.employeeId ?? "",
-      roles:
-        (user.userRoles?.length ?? 0) > 0
-          ? user.userRoles.map((r) => r.role)
-          : [user.role],
+      tenantMemberships:
+        user.memberships.length > 0
+          ? user.memberships.map((membership) => ({
+              tenantId: membership.tenantId,
+              role: membership.role,
+              status: membership.status,
+              isDefault: membership.isDefault,
+            }))
+          : [
+              createTenantAccess(
+                session.user.activeTenantId ?? "",
+                user.role,
+                true,
+              ),
+            ],
       departmentId: user.department?.id ?? "",
       supervisorId: user.supervisor?.id ?? "",
       phoneNumber: user.phoneNumber ?? "",
@@ -340,7 +461,7 @@ function UserManagementContent() {
       email: form.email,
       password: form.password,
       employeeId: form.employeeId || undefined,
-      roles: form.roles,
+      tenantMemberships: form.tenantMemberships,
       departmentId: form.departmentId || undefined,
       supervisorId: form.supervisorId || undefined,
       phoneNumber: form.phoneNumber || undefined,
@@ -356,7 +477,7 @@ function UserManagementContent() {
       name: form.name,
       email: form.email,
       employeeId: form.employeeId || undefined,
-      roles: form.roles,
+      tenantMemberships: form.tenantMemberships,
       departmentId: form.departmentId || null,
       supervisorId: form.supervisorId || null,
       phoneNumber: form.phoneNumber || null,
@@ -517,15 +638,29 @@ function UserManagementContent() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {((user.userRoles?.length ?? 0) > 0
-                        ? user.userRoles.map((r) => r.role)
-                        : [user.role]
-                      ).map((r) => (
+                      {(user.memberships.length > 0
+                        ? user.memberships
+                            .filter(
+                              (membership) => membership.status === "ACTIVE",
+                            )
+                            .map((membership) => ({
+                              key: `${membership.tenantId}-${membership.role}`,
+                              label: `${membership.tenant.slug}: ${ROLE_LABELS[membership.role]}`,
+                              role: membership.role,
+                            }))
+                        : [
+                            {
+                              key: user.role,
+                              label: ROLE_LABELS[user.role],
+                              role: user.role,
+                            },
+                          ]
+                      ).map((item) => (
                         <span
-                          key={r}
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
+                          key={item.key}
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[item.role]}`}
                         >
-                          {ROLE_LABELS[r]}
+                          {item.label}
                         </span>
                       ))}
                     </div>
@@ -593,6 +728,8 @@ function UserManagementContent() {
           form={form}
           setForm={setForm}
           departments={departments}
+          tenantOptions={tenantOptions}
+          canManageAllTenants={session.user.isRoot}
           supervisorOptions={users}
           onSubmit={handleCreate}
           onCancel={() => setIsCreateOpen(false)}
@@ -613,6 +750,8 @@ function UserManagementContent() {
           form={form}
           setForm={setForm}
           departments={departments}
+          tenantOptions={tenantOptions}
+          canManageAllTenants={session.user.isRoot}
           supervisorOptions={users.filter((u) => u.id !== editingUser?.id)}
           onSubmit={handleUpdate}
           onCancel={() => setEditingUser(null)}
@@ -970,6 +1109,8 @@ function UserForm({
   form,
   setForm,
   departments,
+  tenantOptions,
+  canManageAllTenants,
   supervisorOptions,
   onSubmit,
   onCancel,
@@ -980,6 +1121,8 @@ function UserForm({
   form: UserFormData;
   setForm: React.Dispatch<React.SetStateAction<UserFormData>>;
   departments: Department[];
+  tenantOptions: TenantOption[];
+  canManageAllTenants: boolean;
   supervisorOptions: UserRef[];
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
@@ -989,6 +1132,53 @@ function UserForm({
 }) {
   const set = (field: keyof UserFormData, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  const updateTenantAccess = (
+    index: number,
+    patch: Partial<TenantAccessForm>,
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      tenantMemberships: prev.tenantMemberships.map((membership, current) =>
+        current === index ? { ...membership, ...patch } : membership,
+      ),
+    }));
+  };
+
+  const addTenantAccess = () => {
+    setForm((prev) => ({
+      ...prev,
+      tenantMemberships: [
+        ...prev.tenantMemberships,
+        createTenantAccess(tenantOptions[0]?.id ?? "", "EMPLOYEE", false),
+      ],
+    }));
+  };
+
+  const removeTenantAccess = (index: number) => {
+    setForm((prev) => {
+      const next = prev.tenantMemberships.filter(
+        (_, current) => current !== index,
+      );
+      if (!next.some((membership) => membership.isDefault) && next[0]) {
+        next[0] = { ...next[0], isDefault: true };
+      }
+      return {
+        ...prev,
+        tenantMemberships: next.length > 0 ? next : [createTenantAccess()],
+      };
+    });
+  };
+
+  const setDefaultTenantAccess = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      tenantMemberships: prev.tenantMemberships.map((membership, current) => ({
+        ...membership,
+        isDefault: current === index,
+      })),
+    }));
+  };
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -1063,83 +1253,122 @@ function UserForm({
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
-        {/* Roles — multi-select checkboxes */}
+
         <div className="col-span-2">
           <label className="block text-xs font-medium text-gray-700">
-            Roles *{" "}
-            <span className="font-normal text-gray-400">
-              (select one or more)
-            </span>
+            Tenant Access *
           </label>
-          <div className="mt-1 grid grid-cols-4 gap-2">
-            {(
-              [
-                { value: "EMPLOYEE", label: "Employee" },
-                { value: "SUPERVISOR", label: "Supervisor" },
-                { value: "MANAGER", label: "Manager" },
-                { value: "DIRECTOR", label: "Director" },
-                { value: "FINANCE", label: "Finance" },
-                { value: "ADMIN", label: "Admin" },
-                { value: "SALES_EMPLOYEE", label: "Sales Employee" },
-                { value: "SALES_CHIEF", label: "Sales Chief" },
-              ] as { value: Role; label: string }[]
-            ).map(({ value, label }) => {
-              const checked = form.roles.includes(value);
-              return (
-                <label
-                  key={value}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
-                    checked
-                      ? `${ROLE_COLORS[value]} border-current`
-                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 accent-current"
-                    checked={checked}
-                    onChange={() =>
-                      setForm((prev) => {
-                        const has = prev.roles.includes(value);
-                        if (has && prev.roles.length === 1) return prev; // keep at least one
-                        return {
-                          ...prev,
-                          roles: has
-                            ? prev.roles.filter((r) => r !== value)
-                            : [...prev.roles, value],
-                        };
-                      })
-                    }
-                  />
-                  {label}
-                </label>
-              );
-            })}
+          <div className="mt-2 space-y-3">
+            {form.tenantMemberships.map((membership, index) => (
+              <div
+                key={`${membership.tenantId}-${index}`}
+                className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+              >
+                <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_auto_auto]">
+                  <div>
+                    <label className="block text-[11px] font-medium tracking-[0.12em] text-gray-500 uppercase">
+                      Tenant
+                    </label>
+                    <select
+                      value={membership.tenantId}
+                      disabled={!canManageAllTenants}
+                      onChange={(e) =>
+                        updateTenantAccess(index, { tenantId: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100"
+                    >
+                      <option value="">Select tenant</option>
+                      {tenantOptions.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.name}
+                          {tenant.isRoot ? " (Root)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium tracking-[0.12em] text-gray-500 uppercase">
+                      Role
+                    </label>
+                    <select
+                      value={membership.role}
+                      onChange={(e) =>
+                        updateTenantAccess(index, {
+                          role: e.target.value as Role,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    >
+                      {(
+                        [
+                          "ROOT",
+                          "ADMIN",
+                          "FINANCE",
+                          "DIRECTOR",
+                          "MANAGER",
+                          "SALES_CHIEF",
+                          "SUPERVISOR",
+                          "SALES_EMPLOYEE",
+                          "EMPLOYEE",
+                        ] as Role[]
+                      ).map((role) => (
+                        <option key={role} value={role}>
+                          {ROLE_LABELS[role]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <label className="flex items-center gap-2 pt-6 text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      name="defaultTenantAccess"
+                      checked={membership.isDefault}
+                      onChange={() => setDefaultTenantAccess(index)}
+                      className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Default
+                  </label>
+
+                  {canManageAllTenants && form.tenantMemberships.length > 1 ? (
+                    <div className="pt-5 text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeTenantAccess(index)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-          {form.roles.length > 0 && (
-            <p className="mt-1 text-xs text-gray-400">
-              Primary role (auto-derived):{" "}
-              <span className="font-medium text-gray-600">
-                {
-                  ROLE_LABELS[
-                    ([
-                      "ADMIN",
-                      "FINANCE",
-                      "DIRECTOR",
-                      "MANAGER",
-                      "SALES_CHIEF",
-                      "SUPERVISOR",
-                      "SALES_EMPLOYEE",
-                      "EMPLOYEE",
-                    ].find((r) => form.roles.includes(r as Role)) as Role) ??
-                      "EMPLOYEE"
-                  ]
-                }
-              </span>
-            </p>
+
+          {canManageAllTenants && (
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={addTenantAccess}
+              >
+                Add Tenant Access
+              </Button>
+            </div>
           )}
+
+          <p className="mt-2 text-xs text-gray-400">
+            The active tenant determines the role used at login. Department
+            stays on the user record in the current schema.
+          </p>
         </div>
-        {/* Department */}
+
         <div>
           <label className="block text-xs font-medium text-gray-700">
             Department
@@ -1157,7 +1386,7 @@ function UserForm({
             ))}
           </select>
         </div>
-        {/* Supervisor */}
+
         <div className="col-span-2">
           <label className="block text-xs font-medium text-gray-700">
             Supervisor

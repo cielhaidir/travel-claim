@@ -73,6 +73,11 @@ const TRANSPORT_MODES: Array<{ value: string; label: string }> = [
   { value: "OTHER", label: "🔄 Lainnya" },
 ];
 
+const FLIGHT_SEAT_CLASS_OPTIONS = [
+  { value: "Economy", label: "Economy" },
+  { value: "Business", label: "Business" },
+] as const;
+
 const DEFAULT_BAILOUT = (category: BailoutCategory = "OTHER"): BailoutItemData => ({
   category,
   description: "",
@@ -256,6 +261,8 @@ function BailoutItemForm({
   const set = (patch: Partial<BailoutItemData>) => onChange(index, patch);
   const transportMode = item.transportMode ?? "FLIGHT";
   const transportConfig = getTransportConfig(transportMode);
+  const seatClassOptions =
+    transportMode === "FLIGHT" ? FLIGHT_SEAT_CLASS_OPTIONS : null;
   const travelerCount = Math.max(1, participantCount + 1);
   const inputCls = (key: string) =>
     `w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -407,13 +414,28 @@ function BailoutItemForm({
             {transportConfig.seatLabel && (
               <div>
                 <label className="mb-1 block text-xs font-medium text-gray-600">{transportConfig.seatLabel}</label>
-                <input
-                  type="text"
-                  className={inputCls(`b${index}_seat`)}
-                  placeholder={transportConfig.seatPlaceholder}
-                  value={item.seatClass ?? ""}
-                  onChange={(e) => set({ seatClass: e.target.value })}
-                />
+                {seatClassOptions ? (
+                  <select
+                    className={inputCls(`b${index}_seat`)}
+                    value={item.seatClass ?? ""}
+                    onChange={(e) => set({ seatClass: e.target.value || undefined })}
+                  >
+                    <option value="">— Pilih Kelas —</option>
+                    {seatClassOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className={inputCls(`b${index}_seat`)}
+                    placeholder={transportConfig.seatPlaceholder}
+                    value={item.seatClass ?? ""}
+                    onChange={(e) => set({ seatClass: e.target.value })}
+                  />
+                )}
               </div>
             )}
           </div>

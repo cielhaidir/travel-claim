@@ -550,9 +550,8 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-<<<<<<< HEAD
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -565,10 +564,6 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
-=======
-      const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
->>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {
@@ -752,9 +747,8 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-<<<<<<< HEAD
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -767,10 +761,6 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
-=======
-      const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
->>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {
@@ -857,9 +847,8 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-<<<<<<< HEAD
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -872,10 +861,6 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
-=======
-      const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
->>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {

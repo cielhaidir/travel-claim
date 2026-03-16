@@ -18,6 +18,7 @@ import { userHasAnyRole } from "@/lib/auth/role-check";
 
 // Role precedence for deriving primary role from a set of roles
 const ROLE_PRECEDENCE_ORDER = [
+  Role.ROOT,
   Role.ADMIN,
   Role.FINANCE,
   Role.DIRECTOR,
@@ -64,6 +65,143 @@ function withTenantMembershipFilter(
         },
       },
     ],
+  };
+}
+
+const tenantMembershipInput = z.object({
+  tenantId: z.string(),
+  role: z.nativeEnum(Role),
+  status: z.nativeEnum(MembershipStatus).default(MembershipStatus.ACTIVE),
+  isDefault: z.boolean().default(false),
+});
+
+type TenantMembershipInput = z.infer<typeof tenantMembershipInput>;
+
+function normalizeTenantMemberships(input: {
+  requested?: TenantMembershipInput[];
+  currentTenantId: string | null;
+  isRoot: boolean;
+  fallbackRole: Role;
+}): TenantMembershipInput[] {
+  const baseMemberships =
+    input.requested && input.requested.length > 0
+      ? input.requested.map((membership) => ({ ...membership }))
+      : input.currentTenantId
+        ? [
+            {
+              tenantId: input.currentTenantId,
+              role: input.fallbackRole,
+              status: MembershipStatus.ACTIVE,
+              isDefault: true,
+            },
+          ]
+        : [];
+
+  if (baseMemberships.length === 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "At least one tenant access entry is required",
+    });
+  }
+
+  const seenTenantIds = new Set<string>();
+  const normalized = baseMemberships.map((membership, index) => {
+    if (!input.isRoot && membership.tenantId !== input.currentTenantId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "You can only manage access for the active tenant",
+      });
+    }
+
+    if (seenTenantIds.has(membership.tenantId)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Duplicate tenant access entries are not allowed",
+      });
+    }
+    seenTenantIds.add(membership.tenantId);
+
+    return {
+      ...membership,
+      isDefault: membership.isDefault,
+      status: membership.status ?? MembershipStatus.ACTIVE,
+      role: membership.role,
+      tenantId: membership.tenantId,
+      _index: index,
+    };
+  });
+
+  const hasDefault = normalized.some((membership) => membership.isDefault);
+  const withDefault = normalized.map((membership, index) => ({
+    tenantId: membership.tenantId,
+    role: membership.role,
+    status: membership.status,
+    isDefault: hasDefault ? membership.isDefault : index === 0,
+  }));
+
+  const defaultCount = withDefault.filter(
+    (membership) => membership.isDefault,
+  ).length;
+  if (defaultCount > 1) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Only one tenant can be marked as default",
+    });
+  }
+
+  return withDefault;
+}
+
+function buildUserRoleRows(memberships: TenantMembershipInput[]) {
+  const rows = new Map<Role, { role: Role; tenantId: string }>();
+
+  for (const membership of memberships) {
+    if (membership.status !== MembershipStatus.ACTIVE) continue;
+    if (!rows.has(membership.role)) {
+      rows.set(membership.role, {
+        role: membership.role,
+        tenantId: membership.tenantId,
+      });
+    }
+  }
+
+  return [...rows.values()];
+}
+
+function derivePrimaryFromMemberships(
+  memberships: TenantMembershipInput[],
+): Role {
+  const activeRoles = memberships
+    .filter((membership) => membership.status === MembershipStatus.ACTIVE)
+    .map((membership) => membership.role);
+
+  return derivePrimary(activeRoles);
+}
+
+async function assertTenantRecordsExist(
+  db: PrismaClient,
+  tenantIds: string[],
+): Promise<void> {
+  const existing = await db.tenant.count({
+    where: {
+      id: { in: tenantIds },
+      deletedAt: null,
+    },
+  });
+
+  if (existing !== tenantIds.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "One or more tenant access entries are invalid",
+    });
+  }
+}
+
+function membershipTimestamps(status: MembershipStatus) {
+  return {
+    invitedAt: status === MembershipStatus.INVITED ? new Date() : null,
+    activatedAt: status === MembershipStatus.ACTIVE ? new Date() : null,
+    suspendedAt: status === MembershipStatus.SUSPENDED ? new Date() : null,
   };
 }
 
@@ -267,7 +405,16 @@ export const userRouter = createTRPCRouter({
       };
 
       if (input?.role) {
-        where.role = input.role;
+        const tenantScope = getTenantScope(ctx);
+        where.memberships = {
+          some: {
+            role: input.role,
+            status: MembershipStatus.ACTIVE,
+            ...(!tenantScope.isRoot && tenantScope.tenantId
+              ? { tenantId: tenantScope.tenantId }
+              : {}),
+          },
+        };
       }
 
       if (input?.departmentId) {
@@ -304,6 +451,19 @@ export const userRouter = createTRPCRouter({
           },
           userRoles: {
             select: { role: true },
+          },
+          memberships: {
+            include: {
+              tenant: {
+                select: {
+                  id: true,
+                  name: true,
+                  slug: true,
+                  isRoot: true,
+                },
+              },
+            },
+            orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
           },
           _count: {
             select: {
@@ -505,6 +665,7 @@ export const userRouter = createTRPCRouter({
         employeeId: z.string().optional(),
         role: z.nativeEnum(Role).optional(),
         roles: z.array(z.nativeEnum(Role)).min(1).optional(),
+        tenantMemberships: z.array(tenantMembershipInput).min(1).optional(),
         departmentId: z.string().optional(),
         supervisorId: z.string().optional(),
         phoneNumber: z.string().optional(),
@@ -546,9 +707,19 @@ export const userRouter = createTRPCRouter({
         input.roles && input.roles.length > 0
           ? input.roles
           : [input.role ?? Role.EMPLOYEE];
-      const primaryRole = derivePrimary(allRoles);
-
-      const tenantId = getTenantScope(ctx).tenantId;
+      const tenantScope = getTenantScope(ctx);
+      const tenantMemberships = normalizeTenantMemberships({
+        requested: input.tenantMemberships,
+        currentTenantId: tenantScope.tenantId,
+        isRoot: tenantScope.isRoot,
+        fallbackRole: derivePrimary(allRoles),
+      });
+      await assertTenantRecordsExist(
+        ctx.db,
+        tenantMemberships.map((membership) => membership.tenantId),
+      );
+      const primaryRole = derivePrimaryFromMemberships(tenantMemberships);
+      const userRoleRows = buildUserRoleRows(tenantMemberships);
 
       return ctx.db.user.create({
         data: {
@@ -561,21 +732,17 @@ export const userRouter = createTRPCRouter({
           supervisorId: input.supervisorId,
           phoneNumber: input.phoneNumber,
           userRoles: {
-            create: allRoles.map((r) => ({ role: r, tenantId })),
+            create: userRoleRows,
           },
-          memberships: tenantId
-            ? {
-                create: [
-                  {
-                    tenantId,
-                    role: primaryRole,
-                    status: MembershipStatus.ACTIVE,
-                    isDefault: true,
-                    activatedAt: new Date(),
-                  },
-                ],
-              }
-            : undefined,
+          memberships: {
+            create: tenantMemberships.map((membership) => ({
+              tenantId: membership.tenantId,
+              role: membership.role,
+              status: membership.status,
+              isDefault: membership.isDefault,
+              ...membershipTimestamps(membership.status),
+            })),
+          },
         },
         include: {
           department: true,
@@ -609,6 +776,7 @@ export const userRouter = createTRPCRouter({
         employeeId: z.string().optional(),
         role: z.nativeEnum(Role).optional(),
         roles: z.array(z.nativeEnum(Role)).min(1).optional(),
+        tenantMemberships: z.array(tenantMembershipInput).min(1).optional(),
         departmentId: z.string().optional().nullable(),
         supervisorId: z.string().optional().nullable(),
         phoneNumber: z.string().optional().nullable(),
@@ -616,11 +784,26 @@ export const userRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const { id, roles: inputRoles, ...updateData } = input;
+      const {
+        id,
+        roles: inputRoles,
+        tenantMemberships: inputTenantMemberships,
+        ...updateData
+      } = input;
 
       // Check if user exists
       const user = await ctx.db.user.findFirst({
         where: withTenantMembershipFilter(ctx, { id }),
+        include: {
+          memberships: {
+            select: {
+              tenantId: true,
+              role: true,
+              status: true,
+              isDefault: true,
+            },
+          },
+        },
       });
 
       if (!user) {
@@ -678,39 +861,69 @@ export const userRouter = createTRPCRouter({
         }
       }
 
-      // Sync multi-role table when roles array is provided
-      if (inputRoles && inputRoles.length > 0) {
-        updateData.role = derivePrimary(inputRoles);
-        await ctx.db.userRole.deleteMany({
-          where: {
-            userId: id,
-            tenantId: getTenantScope(ctx).isRoot
-              ? undefined
-              : getTenantScope(ctx).tenantId,
-          },
+      const tenantScope = getTenantScope(ctx);
+      const fallbackRole =
+        inputRoles && inputRoles.length > 0
+          ? derivePrimary(inputRoles)
+          : user.role;
+
+      const nextMemberships = normalizeTenantMemberships({
+        requested: inputTenantMemberships,
+        currentTenantId: tenantScope.tenantId,
+        isRoot: tenantScope.isRoot,
+        fallbackRole,
+      });
+      await assertTenantRecordsExist(
+        ctx.db,
+        nextMemberships.map((membership) => membership.tenantId),
+      );
+      updateData.role = derivePrimaryFromMemberships(nextMemberships);
+
+      return ctx.db.$transaction(async (tx) => {
+        await tx.tenantMembership.deleteMany({
+          where: { userId: id },
         });
-        await ctx.db.userRole.createMany({
-          data: inputRoles.map((r) => ({
+
+        await tx.tenantMembership.createMany({
+          data: nextMemberships.map((membership) => ({
             userId: id,
-            role: r,
-            tenantId: getTenantScope(ctx).tenantId,
+            tenantId: membership.tenantId,
+            role: membership.role,
+            status: membership.status,
+            isDefault: membership.isDefault,
+            ...membershipTimestamps(membership.status),
           })),
         });
-      }
 
-      return ctx.db.user.update({
-        where: { id },
-        data: updateData,
-        include: {
-          department: true,
-          supervisor: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
+        await tx.userRole.deleteMany({
+          where: { userId: id },
+        });
+
+        const userRoleRows = buildUserRoleRows(nextMemberships);
+        if (userRoleRows.length > 0) {
+          await tx.userRole.createMany({
+            data: userRoleRows.map((row) => ({
+              userId: id,
+              role: row.role,
+              tenantId: row.tenantId,
+            })),
+          });
+        }
+
+        return tx.user.update({
+          where: { id },
+          data: updateData,
+          include: {
+            department: true,
+            supervisor: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
             },
           },
-        },
+        });
       });
     }),
 

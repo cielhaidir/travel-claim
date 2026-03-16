@@ -79,7 +79,11 @@ export default function FinanceDashboard() {
   const router = useRouter();
 
   const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN";
+  const isAllowed =
+    session?.user?.isRoot === true ||
+    userRole === "FINANCE" ||
+    userRole === "ADMIN" ||
+    userRole === "ROOT";
 
   useEffect(() => {
     if (session && !isAllowed) {
