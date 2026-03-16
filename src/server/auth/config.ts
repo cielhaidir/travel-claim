@@ -453,6 +453,7 @@ export const authConfig = {
           MicrosoftEntraID({
             clientId: env.AZURE_AD_CLIENT_ID,
             clientSecret: env.AZURE_AD_CLIENT_SECRET,
+            allowDangerousEmailAccountLinking: true,
             issuer: `https://login.microsoftonline.com/${env.AZURE_AD_TENANT_ID}/v2.0`,
             authorization: {
               params: {
