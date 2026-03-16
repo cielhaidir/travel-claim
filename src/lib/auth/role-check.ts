@@ -3,6 +3,14 @@ import { normalizeRoles } from "@/lib/constants/roles";
 type SessionUserLike = {
   roles?: string[] | null;
   role?: string | null;
+  isRoot?: boolean | null;
+  memberships?:
+    | Array<{
+        role?: string | null;
+        status?: string | null;
+        isRootTenant?: boolean | null;
+      }>
+    | null;
 };
 
 export function getSessionUserRoles(user: SessionUserLike): string[] {
@@ -12,14 +20,38 @@ export function getSessionUserRoles(user: SessionUserLike): string[] {
   });
 }
 
+function hasRootSessionAccess(user: SessionUserLike): boolean {
+  if (user.isRoot === true) {
+    return true;
+  }
+
+  if (getSessionUserRoles(user).includes("ROOT")) {
+    return true;
+  }
+
+  return (user.memberships ?? []).some(
+    (membership) =>
+      membership.status === "ACTIVE" &&
+      (membership.isRootTenant === true || membership.role === "ROOT"),
+  );
+}
+
 export function userHasAnyRole(
   user: SessionUserLike,
   allowedRoles: readonly string[],
 ): boolean {
+  if (hasRootSessionAccess(user)) {
+    return true;
+  }
+
   const roles = getSessionUserRoles(user);
   return allowedRoles.some((role) => roles.includes(role));
 }
 
 export function userHasRole(user: SessionUserLike, role: string): boolean {
+  if (hasRootSessionAccess(user)) {
+    return true;
+  }
+
   return getSessionUserRoles(user).includes(role);
 }

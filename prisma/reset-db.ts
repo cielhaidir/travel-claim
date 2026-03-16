@@ -181,10 +181,10 @@ async function main() {
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
   );
-  console.log("  Admin user:");
+  console.log("  Root user:");
   console.log("    Email    : admin@company.com");
   console.log("    Password : password123");
-  console.log("    Role     : ADMIN");
+  console.log("    Role     : ROOT");
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
   );

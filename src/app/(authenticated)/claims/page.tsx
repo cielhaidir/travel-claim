@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { ClaimForm, type ClaimFormData } from "@/components/features/claims/ClaimForm";
+import { ClaimAttachments } from "@/components/features/claims/ClaimAttachments";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { ClaimType, ClaimStatus, TravelType, TravelStatus } from "../../../../generated/prisma";
 
@@ -44,6 +45,7 @@ interface Claim {
   expenseDate: string | Date | null;
   expenseDestination: string | null;
   customerName: string | null;
+  coaId?: string | null;
   submitter: { id: string; name: string | null; employeeId: string | null };
   travelRequest: TravelRequestRef;
   approvals: Array<{
@@ -70,6 +72,15 @@ function toDateInput(date: string | Date | null | undefined): string {
   if (!date) return "";
   const d = new Date(date);
   return d.toISOString().split("T")[0] ?? "";
+}
+
+function toEditableClaim(raw: Claim): Claim {
+  return {
+    ...raw,
+    approvals: raw.approvals ?? [],
+    notes: raw.notes ?? null,
+    coaId: raw.coaId ?? null,
+  };
 }
 
 export default function ClaimsPage() {
@@ -100,24 +111,42 @@ export default function ClaimsPage() {
   const claimsData = rawClaims as { claims: Claim[] } | undefined;
   const claims = claimsData?.claims ?? [];
 
-  // Fetch locked travel requests for the dropdown
+  // Fetch travel requests that are currently eligible for claims
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawTR } = api.travelRequest.getAll.useQuery(
     { limit: 100 },
     { refetchOnWindowFocus: false }
   );
   const trData = rawTR as { requests: TravelRequestRef[] } | undefined;
-  const lockedTravelRequests = (trData?.requests ?? []).filter(
-    (tr) => tr.status === "LOCKED"
+  const eligibleTravelRequests = (trData?.requests ?? []).filter(
+    (tr) => tr.status === "APPROVED" || tr.status === "LOCKED"
   );
 
   // Mutations
   const createEntMutation = api.claim.createEntertainment.useMutation({
-    onSuccess: () => { void refetch(); setIsFormOpen(false); },
+    onSuccess: (created) => {
+      void refetch();
+      setIsFormOpen(false);
+      setEditingClaim(
+        toEditableClaim({
+          ...(created as Claim),
+          approvals: [],
+        }),
+      );
+    },
     onError: (err) => alert(`Error: ${err.message}`),
   });
   const createNonEntMutation = api.claim.createNonEntertainment.useMutation({
-    onSuccess: () => { void refetch(); setIsFormOpen(false); },
+    onSuccess: (created) => {
+      void refetch();
+      setIsFormOpen(false);
+      setEditingClaim(
+        toEditableClaim({
+          ...(created as Claim),
+          approvals: [],
+        }),
+      );
+    },
     onError: (err) => alert(`Error: ${err.message}`),
   });
   const updateMutation = api.claim.update.useMutation({
@@ -170,6 +199,7 @@ export default function ClaimsPage() {
     if (formData.claimType === "ENTERTAINMENT") {
       updateMutation.mutate({
         id: editingClaim.id,
+        entertainmentType: formData.entertainmentType,
         entertainmentDate: new Date(formData.entertainmentDate),
         entertainmentLocation: formData.entertainmentLocation,
         entertainmentAddress: formData.entertainmentAddress || undefined,
@@ -185,6 +215,7 @@ export default function ClaimsPage() {
     } else {
       updateMutation.mutate({
         id: editingClaim.id,
+        expenseCategory: formData.expenseCategory,
         expenseDate: new Date(formData.expenseDate),
         expenseDestination: formData.expenseDestination || undefined,
         customerName: formData.customerName || undefined,
@@ -299,7 +330,7 @@ export default function ClaimsPage() {
                       )}
                       {canEdit(c) && (
                         <button
-                          onClick={() => setEditingClaim(c)}
+                          onClick={() => setEditingClaim(toEditableClaim(c))}
                           className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
                         >
                           Edit
@@ -325,7 +356,7 @@ export default function ClaimsPage() {
       {/* Create Modal */}
       <Modal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} title="New Expense Claim" size="lg">
         <ClaimForm
-          travelRequests={lockedTravelRequests}
+          travelRequests={eligibleTravelRequests}
           isLoading={isCreateLoading}
           onSubmit={handleCreate}
           onCancel={() => setIsFormOpen(false)}
@@ -341,7 +372,7 @@ export default function ClaimsPage() {
       >
         {editingClaim && (
           <ClaimForm
-            travelRequests={lockedTravelRequests}
+            travelRequests={eligibleTravelRequests}
             initialType={editingClaim.claimType === "ENTERTAINMENT" ? "ENTERTAINMENT" : "NON_ENTERTAINMENT"}
             initialData={
               editingClaim.claimType === "ENTERTAINMENT"
@@ -359,6 +390,7 @@ export default function ClaimsPage() {
                     amount: String(editingClaim.amount),
                     description: editingClaim.description,
                     notes: editingClaim.notes ?? "",
+                    coaId: editingClaim.coaId ?? "",
                   }
                 : {
                     claimType: "NON_ENTERTAINMENT",
@@ -370,12 +402,15 @@ export default function ClaimsPage() {
                     amount: String(editingClaim.amount),
                     description: editingClaim.description,
                     notes: editingClaim.notes ?? "",
+                    coaId: editingClaim.coaId ?? "",
                   }
             }
             isLoading={updateMutation.isPending}
             onSubmit={handleUpdate}
             onCancel={() => setEditingClaim(null)}
-          />
+          >
+            <ClaimAttachments claimId={editingClaim.id} canManage={canEdit(editingClaim)} />
+          </ClaimForm>
         )}
       </Modal>
 
@@ -387,15 +422,21 @@ export default function ClaimsPage() {
         size="xl"
       >
         {viewingClaim && (
-          <ClaimDetail
-            claim={viewingClaim}
-            onEdit={() => { setEditingClaim(viewingClaim); setViewingClaim(null); }}
-            onSubmit={() => { setSubmittingClaim(viewingClaim); setViewingClaim(null); }}
-            onDelete={() => { setDeletingClaim(viewingClaim); setViewingClaim(null); }}
-            canEdit={canEdit(viewingClaim)}
-            canDelete={canDelete(viewingClaim)}
-            canSubmit={canSubmit(viewingClaim)}
-          />
+          <div className="space-y-4">
+            <ClaimDetail
+              claim={viewingClaim}
+              onEdit={() => { setEditingClaim(toEditableClaim(viewingClaim)); setViewingClaim(null); }}
+              onSubmit={() => { setSubmittingClaim(viewingClaim); setViewingClaim(null); }}
+              onDelete={() => { setDeletingClaim(viewingClaim); setViewingClaim(null); }}
+              canEdit={canEdit(viewingClaim)}
+              canDelete={canDelete(viewingClaim)}
+              canSubmit={canSubmit(viewingClaim)}
+            />
+            <ClaimAttachments
+              claimId={viewingClaim.id}
+              canManage={canEdit(viewingClaim)}
+            />
+          </div>
         )}
       </Modal>
 

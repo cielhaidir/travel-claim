@@ -43,6 +43,8 @@ interface TravelRequest {
     description: string;
     amount: number | string;
     category?: string | null;
+    storageUrl?: string | null;
+    disbursedAt?: string | Date | null;
     transportMode?: string | null;
     carrier?: string | null;
     departureFrom?: string | null;
@@ -69,6 +71,7 @@ interface TravelRequest {
     status: string;
     approver: { id: string; name: string | null; role: string };
     comments: string | null;
+    rejectionReason: string | null;
     approvedAt: string | Date | null;
     rejectedAt: string | Date | null;
   }>;
@@ -92,6 +95,32 @@ function toDateInput(date: string | Date | null | undefined): string {
   if (!date) return "";
   const d = new Date(date);
   return d.toISOString().split("T")[0] ?? "";
+}
+
+function toDateTimeInput(date: string | Date | null | undefined): string {
+  if (!date) return "";
+  const d = new Date(date);
+  const offset = d.getTimezoneOffset();
+  const localDate = new Date(d.getTime() - offset * 60 * 1000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function getTravelDecisionReason(request: TravelRequest): string | null {
+  if (request.status === "REJECTED") {
+    return (
+      request.approvals.find((approval) => approval.status === "REJECTED")
+        ?.rejectionReason ?? null
+    );
+  }
+
+  if (request.status === "REVISION") {
+    return (
+      request.approvals.find((approval) => approval.status === "REVISION_REQUESTED")
+        ?.comments ?? null
+    );
+  }
+
+  return null;
 }
 
 // ─────────────── Main Page ───────────────
@@ -137,11 +166,11 @@ function PengajuanTab() {
   const requests = data?.requests ?? [];
 
   const createMutation = api.travelRequest.create.useMutation({
-    onSuccess: () => { void refetch(); setIsFormOpen(false); },
+    onSuccess: () => { void refetch(); },
     onError: (err) => alert(`Error: ${err.message}`),
   });
   const updateMutation = api.travelRequest.update.useMutation({
-    onSuccess: () => { void refetch(); setEditingRequest(null); },
+    onSuccess: () => { void refetch(); },
     onError: (err) => alert(`Error: ${err.message}`),
   });
   const deleteMutation = api.travelRequest.delete.useMutation({
@@ -153,75 +182,67 @@ function PengajuanTab() {
     onError: (err) => alert(`Error: ${err.message}`),
   });
 
+  const mapTravelFormToPayload = (formData: TravelRequestFormData) => ({
+    purpose: formData.purpose,
+    destination: formData.destination,
+    travelType: formData.travelType,
+    startDate: new Date(formData.startDate),
+    endDate: new Date(formData.endDate),
+    projectId: formData.projectId ?? undefined,
+    participantIds: formData.participantIds ?? [],
+    bailouts: formData.bailouts?.filter((b) => b.description?.trim().length >= 5 && b.amount > 0).map((b) => ({
+      description: b.description.trim(),
+      amount: b.amount,
+      category: b.category,
+      transportMode: b.transportMode ?? undefined,
+      carrier: b.carrier ?? undefined,
+      departureFrom: b.departureFrom ?? undefined,
+      arrivalTo: b.arrivalTo ?? undefined,
+      departureAt: b.departureAt ? new Date(b.departureAt) : undefined,
+      arrivalAt: b.arrivalAt ? new Date(b.arrivalAt) : undefined,
+      flightNumber: b.flightNumber ?? undefined,
+      seatClass: b.seatClass ?? undefined,
+      hotelName: b.hotelName ?? undefined,
+      hotelAddress: b.hotelAddress ?? undefined,
+      checkIn: b.checkIn ? new Date(b.checkIn) : undefined,
+      checkOut: b.checkOut ? new Date(b.checkOut) : undefined,
+      roomType: b.roomType ?? undefined,
+      mealDate: b.mealDate ? new Date(b.mealDate) : undefined,
+      mealLocation: b.mealLocation ?? undefined,
+      financeId: b.financeId ?? undefined,
+    })),
+  });
+
   const handleCreate = (formData: TravelRequestFormData) => {
-    createMutation.mutate({
-      purpose: formData.purpose,
-      destination: formData.destination,
-      travelType: formData.travelType,
-      startDate: new Date(formData.startDate),
-      endDate: new Date(formData.endDate),
-      projectId: formData.projectId ?? undefined,
-      participantIds: formData.participantIds ?? [],
-      bailouts: formData.bailouts?.filter((b) => b.description?.trim().length >= 5 && b.amount > 0).map((b) => ({
-        description: b.description.trim(),
-        amount: b.amount,
-        category: b.category,
-        transportMode: b.transportMode ?? undefined,
-        carrier: b.carrier ?? undefined,
-        departureFrom: b.departureFrom ?? undefined,
-        arrivalTo: b.arrivalTo ?? undefined,
-        departureAt: b.departureAt ? new Date(b.departureAt) : undefined,
-        arrivalAt: b.arrivalAt ? new Date(b.arrivalAt) : undefined,
-        flightNumber: b.flightNumber ?? undefined,
-        seatClass: b.seatClass ?? undefined,
-        bookingRef: b.bookingRef ?? undefined,
-        hotelName: b.hotelName ?? undefined,
-        hotelAddress: b.hotelAddress ?? undefined,
-        checkIn: b.checkIn ? new Date(b.checkIn) : undefined,
-        checkOut: b.checkOut ? new Date(b.checkOut) : undefined,
-        roomType: b.roomType ?? undefined,
-        mealDate: b.mealDate ? new Date(b.mealDate) : undefined,
-        mealLocation: b.mealLocation ?? undefined,
-        financeId: b.financeId ?? undefined,
-      })),
+    createMutation.mutate(mapTravelFormToPayload(formData), {
+      onSuccess: () => setIsFormOpen(false),
     });
   };
 
+  const handleCreateAndSubmit = async (formData: TravelRequestFormData) => {
+    const created = await createMutation.mutateAsync(mapTravelFormToPayload(formData)) as { id: string };
+    await submitMutation.mutateAsync({ id: created.id });
+    setIsFormOpen(false);
+  };
 
-  const handleUpdate = (formData: TravelRequestFormData) => {
+  const handleUpdate = async (formData: TravelRequestFormData) => {
     if (!editingRequest) return;
-    updateMutation.mutate({
+    await updateMutation.mutateAsync({
       id: editingRequest.id,
-      purpose: formData.purpose,
-      destination: formData.destination,
-      travelType: formData.travelType,
-      startDate: new Date(formData.startDate),
-      endDate: new Date(formData.endDate),
-      projectId: formData.projectId ?? undefined,
-      participantIds: formData.participantIds ?? [],
-      bailouts: formData.bailouts?.filter((b) => b.description?.trim().length >= 5 && b.amount > 0).map((b) => ({
-        description: b.description.trim(),
-        amount: b.amount,
-        category: b.category,
-        transportMode: b.transportMode ?? undefined,
-        carrier: b.carrier ?? undefined,
-        departureFrom: b.departureFrom ?? undefined,
-        arrivalTo: b.arrivalTo ?? undefined,
-        departureAt: b.departureAt ? new Date(b.departureAt) : undefined,
-        arrivalAt: b.arrivalAt ? new Date(b.arrivalAt) : undefined,
-        flightNumber: b.flightNumber ?? undefined,
-        seatClass: b.seatClass ?? undefined,
-        bookingRef: b.bookingRef ?? undefined,
-        hotelName: b.hotelName ?? undefined,
-        hotelAddress: b.hotelAddress ?? undefined,
-        checkIn: b.checkIn ? new Date(b.checkIn) : undefined,
-        checkOut: b.checkOut ? new Date(b.checkOut) : undefined,
-        roomType: b.roomType ?? undefined,
-        mealDate: b.mealDate ? new Date(b.mealDate) : undefined,
-        mealLocation: b.mealLocation ?? undefined,
-        financeId: b.financeId ?? undefined,
-      })),
+      ...mapTravelFormToPayload(formData),
     });
+    setEditingRequest(null);
+  };
+
+  const handleUpdateAndSubmit = async (formData: TravelRequestFormData) => {
+    if (!editingRequest) return;
+    const requestId = editingRequest.id;
+    await updateMutation.mutateAsync({
+      id: requestId,
+      ...mapTravelFormToPayload(formData),
+    });
+    await submitMutation.mutateAsync({ id: requestId });
+    setEditingRequest(null);
   };
 
   const canEdit = (req: TravelRequest) =>
@@ -359,8 +380,9 @@ function PengajuanTab() {
       {/* Create Modal */}
       <Modal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} title="New Business Trip Request" size="lg">
         <TravelRequestForm
-          isLoading={createMutation.isPending}
+          isLoading={createMutation.isPending || submitMutation.isPending}
           onSubmit={handleCreate}
+          onSubmitAndSubmit={handleCreateAndSubmit}
           onCancel={() => setIsFormOpen(false)}
         />
       </Modal>
@@ -390,11 +412,10 @@ function PengajuanTab() {
                 carrier: b.carrier ?? undefined,
                 departureFrom: b.departureFrom ?? undefined,
                 arrivalTo: b.arrivalTo ?? undefined,
-                departureAt: toDateInput(b.departureAt),
-                arrivalAt: toDateInput(b.arrivalAt),
+                departureAt: toDateTimeInput(b.departureAt),
+                arrivalAt: toDateTimeInput(b.arrivalAt),
                 flightNumber: b.flightNumber ?? undefined,
                 seatClass: b.seatClass ?? undefined,
-                bookingRef: b.bookingRef ?? undefined,
                 hotelName: b.hotelName ?? undefined,
                 hotelAddress: b.hotelAddress ?? undefined,
                 checkIn: toDateInput(b.checkIn),
@@ -405,8 +426,10 @@ function PengajuanTab() {
                 financeId: b.financeId ?? undefined,
               })) ?? [],
             }}
-            isLoading={updateMutation.isPending}
+            isLoading={updateMutation.isPending || submitMutation.isPending}
             onSubmit={handleUpdate}
+            onSubmitAndSubmit={editingRequest.status === "REVISION" ? handleUpdateAndSubmit : undefined}
+            submitAndSubmitLabel={editingRequest.status === "REVISION" ? "Submit Revisi" : "Submit Travel"}
             onCancel={() => setEditingRequest(null)}
           />
         )}
@@ -496,6 +519,7 @@ function TravelRequestDetail({
 
   const bailoutCount = request.bailouts?.length ?? 0;
   const approvalCount = request.approvals.length;
+  const decisionReason = getTravelDecisionReason(request);
 
   const tabs = [
     { key: "info" as const, label: "📋 Info & Project" },
@@ -556,13 +580,11 @@ function TravelRequestDetail({
               }`}>
                 {request.status === "REJECTED" ? "❌ Permohonan Ditolak" : "↩️ Perlu Revisi"}
               </p>
-              {/* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */}
-              {(request as any).rejectionReason && (
+              {decisionReason && (
                 <p className={`mt-1 text-sm ${
                   request.status === "REJECTED" ? "text-red-700" : "text-yellow-700"
                 }`}>
-                  {/* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */}
-                  {(request as any).rejectionReason as string}
+                  {decisionReason}
                 </p>
               )}
             </div>
@@ -661,6 +683,17 @@ function TravelRequestDetail({
                     ) : (
                       <p className="text-xs text-gray-400 italic">💳 Finance belum ditugaskan</p>
                     )}
+                    <div className="mt-2 space-y-1">
+                      <p className="text-xs text-gray-600">
+                        📁 <span className="font-medium text-gray-700">File Pencairan:</span>
+                      </p>
+                      <BailoutAttachmentLink bailoutId={b.id} storageUrl={b.storageUrl} />
+                      {b.disbursedAt && (
+                        <p className="text-xs text-green-700">
+                          Dana dicairkan pada {formatDate(b.disbursedAt)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -690,7 +723,7 @@ function TravelRequestDetail({
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-gray-700">{a.approver.name ?? "—"} <span className="text-gray-400">({a.approver.role})</span></p>
-                {a.comments && <p className="mt-1.5 text-xs italic text-gray-500">&quot;{a.comments}&quot;</p>}
+                {(a.rejectionReason ?? a.comments) && <p className="mt-1.5 text-xs italic text-gray-500">&quot;{a.rejectionReason ?? a.comments}&quot;</p>}
                 {a.approvedAt && <p className="mt-1 text-xs text-gray-400">Disetujui: {formatDate(a.approvedAt)}</p>}
                 {a.rejectedAt && <p className="mt-1 text-xs text-gray-400">Ditolak: {formatDate(a.rejectedAt)}</p>}
               </div>
@@ -720,5 +753,40 @@ function Field({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-medium text-gray-500">{label}</p>
       <p className="mt-0.5 text-sm text-gray-900">{value}</p>
     </div>
+  );
+}
+
+function BailoutAttachmentLink({
+  bailoutId,
+  storageUrl,
+}: {
+  bailoutId: string;
+  storageUrl?: string | null;
+}) {
+  const fileUrlQuery = api.bailout.getFileUrl.useQuery(
+    { id: bailoutId },
+    { enabled: !!storageUrl, staleTime: 25 * 60 * 1000 }
+  );
+
+  if (!storageUrl) {
+    return <p className="text-xs text-gray-400 italic">Belum ada file bukti pencairan</p>;
+  }
+
+  const fileName = storageUrl.split("/").pop() ?? "Buka file";
+  const downloadUrl = (fileUrlQuery.data as { url: string | null } | undefined)?.url ?? null;
+
+  if (!downloadUrl) {
+    return <p className="text-xs text-gray-500">Memuat file bukti pencairan...</p>;
+  }
+
+  return (
+    <a
+      href={downloadUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+    >
+      📎 {fileName}
+    </a>
   );
 }

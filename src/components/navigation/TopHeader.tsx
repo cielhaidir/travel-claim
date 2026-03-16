@@ -2,6 +2,7 @@
 
 import type { Session } from "next-auth";
 import { signOut } from "next-auth/react";
+import { TenantSwitcher } from "@/components/navigation/TenantSwitcher";
 
 interface TopHeaderProps {
   session: Session;
@@ -33,15 +34,15 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
       </button>
 
       {/* Search bar - desktop */}
-      <div className="hidden flex-1 max-w-2xl lg:block">
+      <div className="hidden max-w-2xl flex-1 lg:block">
         <div className="relative">
           <input
             type="search"
             placeholder="Search business trip requests, claims..."
-            className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-gray-300 py-2 pr-4 pl-10 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
           <svg
-            className="absolute left-3 top-2.5 h-5 w-5 text-gray-400"
+            className="absolute top-2.5 left-3 h-5 w-5 text-gray-400"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -57,7 +58,9 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
       </div>
 
       {/* Right side actions */}
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center gap-4 pl-6">
+        <TenantSwitcher session={session} />
+
         {/* Notifications */}
         <button
           className="relative rounded-lg p-2 text-gray-600 hover:bg-gray-100"
@@ -77,7 +80,7 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
             />
           </svg>
           {/* Notification badge */}
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" />
         </button>
 
         {/* User menu */}
@@ -86,7 +89,7 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
             className="flex items-center space-x-3 rounded-lg p-2 hover:bg-gray-100"
             aria-label="User menu"
           >
-            <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-semibold">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
               {session.user.name?.charAt(0) ?? "U"}
             </div>
             <span className="hidden text-sm font-medium text-gray-700 lg:block">

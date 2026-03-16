@@ -83,7 +83,13 @@ const navigationItems: NavItem[] = [
     roles: ["ADMIN"],
   },
   {
-    label: "Profil",
+    label: "Master Tenant",
+    href: "/admin/tenants",
+    icon: "🏢",
+    roles: ["ROOT"],
+  },
+  {
+    label: "Profile",
     href: "/profile",
     icon: "👤",
   },
@@ -105,9 +111,13 @@ export function SidebarNav({
     roles: session.user.roles,
     role: userRole,
   });
+  const canAccessAsRoot = session.user.isRoot === true;
 
   const allowedItems = navigationItems.filter(
-    (item) => !item.roles || hasAnyRole(userRoles, item.roles),
+    (item) =>
+      !item.roles ||
+      canAccessAsRoot ||
+      hasAnyRole(userRoles, [...item.roles, "ROOT"]),
   );
 
   return (

@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
 import type { ApprovalStatus } from "../../../../generated/prisma";
 import {
   APPROVER_ROLES,
@@ -24,7 +24,7 @@ interface TravelRequestRef {
   status: string;
   startDate: string | Date;
   endDate: string | Date;
-  estimatedBudget: number | null;
+  estimatedBudget?: number | null;
   requester: {
     id: string;
     name: string | null;
@@ -32,6 +32,74 @@ interface TravelRequestRef {
     department?: { name: string } | null;
   };
   purpose: string;
+  project?: {
+    id: string;
+    code: string;
+    name: string;
+    clientName: string | null;
+  } | null;
+  participants: Array<{
+    userId: string;
+    user: {
+      id: string;
+      name: string | null;
+      email: string | null;
+      employeeId: string | null;
+      department?: { name: string } | null;
+    };
+  }>;
+  bailouts: Array<{
+    id: string;
+    description: string;
+    amount: number | string;
+    category: string;
+    transportMode?: string | null;
+    carrier?: string | null;
+    departureFrom?: string | null;
+    arrivalTo?: string | null;
+    departureAt?: string | Date | null;
+    arrivalAt?: string | Date | null;
+    flightNumber?: string | null;
+    seatClass?: string | null;
+    hotelName?: string | null;
+    hotelAddress?: string | null;
+    checkIn?: string | Date | null;
+    checkOut?: string | Date | null;
+    roomType?: string | null;
+    mealDate?: string | Date | null;
+    mealLocation?: string | null;
+    finance?: {
+      id: string;
+      name: string | null;
+      email: string | null;
+      employeeId: string | null;
+    } | null;
+  }>;
+  approvals: Array<{
+    id: string;
+    level: string;
+    status: string;
+    comments: string | null;
+    rejectionReason: string | null;
+    approvedAt: string | Date | null;
+    rejectedAt: string | Date | null;
+    approver: { id: string; name: string | null; role: string };
+  }>;
+}
+
+function getApprovalStatusBadgeClass(status: ApprovalStatus) {
+  if (status === "APPROVED") return "bg-green-100 text-green-800";
+  if (status === "REJECTED") return "bg-red-100 text-red-800";
+  if (status === "REVISION_REQUESTED") return "bg-yellow-100 text-yellow-800";
+  return "bg-orange-100 text-orange-800";
+}
+
+function getTravelProgressBadgeClass(status: string) {
+  if (status === "APPROVED") return "bg-emerald-100 text-emerald-800";
+  if (status === "REJECTED") return "bg-red-100 text-red-800";
+  if (status === "REVISION") return "bg-amber-100 text-amber-800";
+  if (status.startsWith("APPROVED_L")) return "bg-blue-100 text-blue-800";
+  return "bg-gray-100 text-gray-700";
 }
 
 interface ClaimRef {
@@ -59,6 +127,13 @@ interface Approval {
   claim: ClaimRef | null;
 }
 
+function getBailoutCategoryLabel(category: string) {
+  if (category === "TRANSPORT") return "Transportasi";
+  if (category === "HOTEL") return "Penginapan";
+  if (category === "MEAL") return "Uang Makan";
+  return "Lainnya";
+}
+
 export default function ApprovalsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -82,7 +157,7 @@ export default function ApprovalsPage() {
 
 function ApprovalsContent() {
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "ALL">(
-    "PENDING",
+    "ALL",
   );
   const [entityFilter, setEntityFilter] = useState<
     "ALL" | "TravelRequest" | "Claim"
@@ -294,19 +369,20 @@ function ApprovalsContent() {
                       {formatDate(a.createdAt)}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                          a.status === "APPROVED"
-                            ? "bg-green-100 text-green-800"
-                            : a.status === "REJECTED"
-                              ? "bg-red-100 text-red-800"
-                              : a.status === "REVISION_REQUESTED"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-orange-100 text-orange-800"
-                        }`}
-                      >
-                        {a.status.replace(/_/g, " ")}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getApprovalStatusBadgeClass(a.status)}`}
+                        >
+                          {a.status.replace(/_/g, " ")}
+                        </span>
+                        {isTravel && a.travelRequest && (
+                          <span
+                            className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getTravelProgressBadgeClass(a.travelRequest.status)}`}
+                          >
+                            {a.travelRequest.status.replace(/_/g, " ")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
@@ -356,7 +432,7 @@ function ApprovalsContent() {
         size="xl"
       >
         {viewingApproval && (
-          <ApprovalDetail
+          <RichApprovalDetail
             approval={viewingApproval}
             onApprove={() => {
               openAction(viewingApproval, "approve");
@@ -433,6 +509,321 @@ function ApprovalsContent() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function RichApprovalDetail({
+  approval,
+  onApprove,
+  onReject,
+  onRevision,
+}: {
+  approval: Approval;
+  onApprove: () => void;
+  onReject: () => void;
+  onRevision: () => void;
+}) {
+  const isTravel = !!approval.travelRequest;
+  const tr = approval.travelRequest;
+  const claim = approval.claim;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-lg font-bold text-gray-900">
+            {isTravel ? tr?.requestNumber : claim?.claimNumber}
+          </p>
+          <p className="text-sm text-gray-500">
+            {approval.level.replace(/_/g, " ")} -{" "}
+            {isTravel ? "Travel Request" : "Claim"}
+          </p>
+        </div>
+        <span
+          className={`rounded-full px-3 py-1 text-sm font-semibold ${
+            approval.status === "APPROVED"
+              ? "bg-green-100 text-green-800"
+              : approval.status === "REJECTED"
+                ? "bg-red-100 text-red-800"
+                : approval.status === "REVISION_REQUESTED"
+                  ? "bg-yellow-100 text-yellow-800"
+                  : "bg-orange-100 text-orange-800"
+          }`}
+        >
+          {approval.status.replace(/_/g, " ")}
+        </span>
+      </div>
+
+      {isTravel && tr && (
+        <div className="space-y-4">
+          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+            <p className="text-sm font-semibold text-gray-700">
+              Trip Request Details
+            </p>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <Field label="Request Number" value={tr.requestNumber} />
+              <Field
+                label="Status Perjalanan"
+                value={tr.status.replace(/_/g, " ")}
+              />
+              <Field label="Destination" value={tr.destination} />
+              <Field label="Type" value={tr.travelType.replace(/_/g, " ")} />
+              <Field
+                label="Dates"
+                value={`${formatDate(tr.startDate)} - ${formatDate(tr.endDate)}`}
+              />
+              <Field
+                label="Requester"
+                value={`${tr.requester.name ?? "—"} (${tr.requester.employeeId ?? "—"})`}
+              />
+              {tr.requester.department && (
+                <Field label="Department" value={tr.requester.department.name} />
+              )}
+              <Field
+                label="Total Bailout"
+                value={formatCurrency(
+                  tr.bailouts.reduce(
+                    (sum, bailout) => sum + Number(bailout.amount),
+                    0,
+                  ),
+                  "IDR",
+                )}
+              />
+            </div>
+            <Field label="Purpose" value={tr.purpose} />
+          </div>
+
+          {tr.project && (
+            <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50 p-4">
+              <p className="text-sm font-semibold text-blue-800">Project</p>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <Field label="Kode Project" value={tr.project.code} />
+                <Field label="Nama Project" value={tr.project.name} />
+                <Field label="Client" value={tr.project.clientName ?? "—"} />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+            <p className="text-sm font-semibold text-gray-700">Peserta</p>
+            {tr.participants.length === 0 ? (
+              <p className="text-sm text-gray-500">Tidak ada peserta tambahan.</p>
+            ) : (
+              <div className="grid gap-2">
+                {tr.participants.map((participant) => (
+                  <div
+                    key={participant.userId}
+                    className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm"
+                  >
+                    <p className="font-medium text-gray-900">
+                      {participant.user.name ?? "—"}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {participant.user.employeeId ?? "—"}
+                      {participant.user.department?.name
+                        ? ` - ${participant.user.department.name}`
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+            <p className="text-sm font-semibold text-gray-700">
+              Bailout / Biaya
+            </p>
+            {tr.bailouts.length === 0 ? (
+              <p className="text-sm text-gray-500">Belum ada dana talangan.</p>
+            ) : (
+              <div className="space-y-3">
+                {tr.bailouts.map((bailout) => (
+                  <div
+                    key={bailout.id}
+                    className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {getBailoutCategoryLabel(bailout.category)}
+                        </p>
+                        <p className="text-sm text-gray-700">
+                          {bailout.description}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold text-amber-700">
+                        {formatCurrency(Number(bailout.amount), "IDR")}
+                      </p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <Field
+                        label="Finance"
+                        value={
+                          bailout.finance?.name ??
+                          bailout.finance?.employeeId ??
+                          bailout.finance?.email ??
+                          "Belum ditentukan"
+                        }
+                      />
+                      <Field
+                        label="Kategori"
+                        value={getBailoutCategoryLabel(bailout.category)}
+                      />
+                      {bailout.transportMode && (
+                        <Field
+                          label="Mode Transport"
+                          value={bailout.transportMode.replace(/_/g, " ")}
+                        />
+                      )}
+                      {(bailout.departureFrom ?? bailout.arrivalTo) && (
+                        <Field
+                          label="Rute"
+                          value={`${bailout.departureFrom ?? "—"} - ${bailout.arrivalTo ?? "—"}`}
+                        />
+                      )}
+                      {bailout.departureAt && (
+                        <Field
+                          label="Berangkat"
+                          value={formatDateTime(bailout.departureAt)}
+                        />
+                      )}
+                      {bailout.arrivalAt && (
+                        <Field
+                          label="Tiba"
+                          value={formatDateTime(bailout.arrivalAt)}
+                        />
+                      )}
+                      {bailout.carrier && (
+                        <Field label="Operator" value={bailout.carrier} />
+                      )}
+                      {bailout.flightNumber && (
+                        <Field label="Nomor" value={bailout.flightNumber} />
+                      )}
+                      {bailout.seatClass && (
+                        <Field
+                          label="Kelas / Tipe"
+                          value={bailout.seatClass}
+                        />
+                      )}
+                      {bailout.hotelName && (
+                        <Field label="Hotel" value={bailout.hotelName} />
+                      )}
+                      {bailout.hotelAddress && (
+                        <Field
+                          label="Alamat Hotel"
+                          value={bailout.hotelAddress}
+                        />
+                      )}
+                      {(bailout.checkIn ?? bailout.checkOut) && (
+                        <Field
+                          label="Check-in / Check-out"
+                          value={`${bailout.checkIn ? formatDate(bailout.checkIn) : "—"} - ${bailout.checkOut ? formatDate(bailout.checkOut) : "—"}`}
+                        />
+                      )}
+                      {bailout.roomType && (
+                        <Field label="Tipe Kamar" value={bailout.roomType} />
+                      )}
+                      {bailout.mealDate && (
+                        <Field
+                          label="Tanggal Makan"
+                          value={formatDate(bailout.mealDate)}
+                        />
+                      )}
+                      {bailout.mealLocation && (
+                        <Field
+                          label="Lokasi Makan"
+                          value={bailout.mealLocation}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+            <p className="text-sm font-semibold text-gray-700">
+              Riwayat Approval
+            </p>
+            <div className="space-y-2">
+              {tr.approvals.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-gray-900">
+                      {item.level.replace(/_/g, " ")} -{" "}
+                      {item.approver.name ?? "—"}
+                    </p>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${getApprovalStatusBadgeClass(item.status as ApprovalStatus)}`}
+                    >
+                      {item.status.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  {(item.rejectionReason ?? item.comments) && (
+                    <p className="mt-1 text-xs text-gray-600">
+                      {item.rejectionReason ?? item.comments}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isTravel && claim && (
+        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <p className="text-sm font-semibold text-gray-700">Claim Details</p>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <Field label="Claim #" value={claim.claimNumber} />
+            <Field label="Type" value={claim.claimType.replace("_", " ")} />
+            <Field
+              label="Amount"
+              value={formatCurrency(Number(claim.amount), "IDR")}
+            />
+            <Field
+              label="Trip Request"
+              value={`${claim.travelRequest.requestNumber} — ${claim.travelRequest.destination}`}
+            />
+            <Field
+              label="Submitter"
+              value={`${claim.submitter.name ?? "—"} (${claim.submitter.employeeId ?? "—"})`}
+            />
+            <Field label="Description" value={claim.description} />
+          </div>
+        </div>
+      )}
+
+      {(approval.comments ?? approval.rejectionReason) && (
+        <div className="rounded-lg border border-yellow-100 bg-yellow-50 p-3">
+          <p className="mb-1 text-xs font-semibold text-yellow-800">
+            Previous Comments
+          </p>
+          <p className="text-sm text-yellow-900">
+            {approval.comments ?? approval.rejectionReason}
+          </p>
+        </div>
+      )}
+
+      {approval.status === "PENDING" && (
+        <div className="flex justify-end gap-3 border-t pt-4">
+          <Button variant="destructive" size="sm" onClick={onReject}>
+            Reject
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onRevision}>
+            Request Revision
+          </Button>
+          <Button size="sm" onClick={onApprove}>
+            Approve
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

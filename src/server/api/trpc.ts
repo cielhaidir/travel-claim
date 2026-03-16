@@ -31,6 +31,75 @@ import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { normalizeRoles } from "@/lib/constants/roles";
 
+function hasRootSessionAccess(ctx: {
+  session?: {
+    user?: {
+      role?: string;
+      roles?: string[];
+      isRoot?: boolean;
+      memberships?: Array<{
+        status: string;
+        isRootTenant: boolean;
+      }>;
+    };
+  } | null;
+}): boolean {
+  const user = ctx.session?.user;
+  if (!user) return false;
+
+  const userRoles = normalizeRoles({
+    roles: user.roles,
+    role: user.role,
+    includeDefault: false,
+  });
+
+  return (
+    user.isRoot === true ||
+    userRoles.includes("ROOT" as Role) ||
+    (user.memberships ?? []).some(
+      (membership) => membership.status === "ACTIVE" && membership.isRootTenant,
+    )
+  );
+}
+
+function resolveSessionTenantId(ctx: {
+  session?: {
+    user?: {
+      activeTenantId?: string | null;
+      memberships?: Array<{
+        tenantId: string;
+        status: string;
+        isDefault?: boolean;
+      }>;
+    };
+  } | null;
+}): string | null {
+  const user = ctx.session?.user;
+  if (!user) return null;
+
+  const activeMemberships = (user.memberships ?? []).filter(
+    (membership) => membership.status === "ACTIVE",
+  );
+
+  if (
+    user.activeTenantId &&
+    activeMemberships.some(
+      (membership) => membership.tenantId === user.activeTenantId,
+    )
+  ) {
+    return user.activeTenantId;
+  }
+
+  const defaultMembership = activeMemberships.find(
+    (membership) => membership.isDefault,
+  );
+  if (defaultMembership) {
+    return defaultMembership.tenantId;
+  }
+
+  return activeMemberships[0]?.tenantId ?? null;
+}
+
 /**
  * 1. CONTEXT
  *
@@ -159,13 +228,8 @@ const enforceTenantContext = t.middleware(({ ctx, next }) => {
     });
   }
 
-  const userRoles = normalizeRoles({
-    roles: ctx.session.user.roles,
-    role: ctx.session.user.role,
-    includeDefault: false,
-  });
-  const isRoot = userRoles.includes("ROOT" as Role);
-  const tenantId = ctx.session.user.activeTenantId;
+  const isRoot = hasRootSessionAccess(ctx);
+  const tenantId = resolveSessionTenantId(ctx);
 
   if (!isRoot && !tenantId) {
     throw new TRPCError({
@@ -203,8 +267,9 @@ const enforceRole = (allowedRoles: Role[]) => {
       role: ctx.session.user.role,
       includeDefault: false,
     });
+    const isRoot = hasRootSessionAccess(ctx);
 
-    if (userRoles.includes("ROOT" as Role)) {
+    if (isRoot) {
       return next({
         ctx: {
           ...ctx,

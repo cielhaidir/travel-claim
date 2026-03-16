@@ -620,6 +620,25 @@ export const approvalRouter = createTRPCRouter({
             data: { status: newStatus },
           });
 
+          if (newStatus === TravelStatus.APPROVED) {
+            await ctx.db.bailout.updateMany({
+              where: {
+                travelRequestId: approval.travelRequestId as string,
+                deletedAt: null,
+                status: {
+                  in: [
+                    BailoutStatus.DRAFT,
+                    BailoutStatus.SUBMITTED,
+                    BailoutStatus.APPROVED_CHIEF,
+                  ],
+                },
+              },
+              data: {
+                status: BailoutStatus.APPROVED_DIRECTOR,
+              },
+            });
+          }
+
           await ctx.db.auditLog.create({
             data: {
               userId: ctx.session.user.id,
@@ -1406,11 +1425,16 @@ export const approvalRouter = createTRPCRouter({
           })();
         } else if (entityType === "Claim") {
           await ctx.db.approval.updateMany({
-            where: { claimId: approval.claimId as string },
+            where: {
+              claimId: approval.claimId as string,
+              id: { not: resolvedId },
+            },
             data: {
               status: ApprovalStatus.PENDING,
               approvedAt: null,
               rejectedAt: null,
+              comments: null,
+              rejectionReason: null,
             },
           });
 
@@ -1567,6 +1591,53 @@ export const approvalRouter = createTRPCRouter({
                   employeeId: true,
                   department: { select: { name: true } },
                 },
+              },
+              participants: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                      employeeId: true,
+                      department: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+              bailouts: {
+                where: { deletedAt: null },
+                include: {
+                  finance: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                      employeeId: true,
+                    },
+                  },
+                },
+                orderBy: { createdAt: "asc" },
+              },
+              project: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  clientName: true,
+                },
+              },
+              approvals: {
+                include: {
+                  approver: {
+                    select: {
+                      id: true,
+                      name: true,
+                      role: true,
+                    },
+                  },
+                },
+                orderBy: { createdAt: "asc" },
               },
             },
           },
@@ -2806,11 +2877,16 @@ export const approvalRouter = createTRPCRouter({
       });
 
       await ctx.db.approval.updateMany({
-        where: { claimId: approval.claimId as string },
+        where: {
+          claimId: approval.claimId as string,
+          id: { not: resolvedId },
+        },
         data: {
           status: ApprovalStatus.PENDING,
           approvedAt: null,
           rejectedAt: null,
+          comments: null,
+          rejectionReason: null,
         },
       });
 

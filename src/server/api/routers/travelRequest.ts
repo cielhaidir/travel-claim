@@ -1192,6 +1192,18 @@ export const travelRequestRouter = createTRPCRouter({
         },
       });
 
+      await ctx.db.bailout.updateMany({
+        where: {
+          travelRequestId: input.id,
+          deletedAt: null,
+          status: "DRAFT",
+        },
+        data: {
+          status: "SUBMITTED",
+          submittedAt: new Date(),
+        },
+      });
+
       // Send poll notification only to the FIRST approver (sequence = 1).
       // Subsequent approvers are notified sequentially as each level approves
       // (handled in approval.approveTravelRequest).
