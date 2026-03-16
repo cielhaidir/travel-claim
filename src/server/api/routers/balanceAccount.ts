@@ -77,6 +77,11 @@ export const balanceAccountRouter = createTRPCRouter({
         take: input.limit + 1,
         cursor: input.cursor ? { id: input.cursor } : undefined,
         where,
+        include: {
+          defaultChartOfAccount: {
+            select: { id: true, code: true, name: true, accountType: true },
+          },
+        },
         orderBy: { code: "asc" },
       });
 
@@ -112,6 +117,9 @@ export const balanceAccountRouter = createTRPCRouter({
       const ba = await ctx.db.balanceAccount.findFirst({
         where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
         include: {
+          defaultChartOfAccount: {
+            select: { id: true, code: true, name: true, accountType: true },
+          },
           journalTransactions: {
             where: withTenantWhere(ctx, { deletedAt: null }),
             orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }],
@@ -203,6 +211,7 @@ export const balanceAccountRouter = createTRPCRouter({
         code: z.string().min(1).max(30),
         name: z.string().min(1).max(150),
         balance: z.number().default(0),
+        defaultChartOfAccountId: z.string().optional(),
         description: z.string().optional(),
         isActive: z.boolean().default(true),
       }),
@@ -233,8 +242,14 @@ export const balanceAccountRouter = createTRPCRouter({
           code: input.code,
           name: input.name,
           balance: input.balance,
+          defaultChartOfAccountId: input.defaultChartOfAccountId,
           description: input.description,
           isActive: input.isActive,
+        },
+        include: {
+          defaultChartOfAccount: {
+            select: { id: true, code: true, name: true, accountType: true },
+          },
         },
       });
 
@@ -250,6 +265,7 @@ export const balanceAccountRouter = createTRPCRouter({
               code: ba.code,
               name: ba.name,
               balance: ba.balance.toString(),
+              defaultChartOfAccountId: ba.defaultChartOfAccountId,
             },
           },
         },
@@ -279,6 +295,7 @@ export const balanceAccountRouter = createTRPCRouter({
       z.object({
         id: z.string().min(1),
         name: z.string().min(1).max(150).optional(),
+        defaultChartOfAccountId: z.string().nullable().optional(),
         description: z.string().optional(),
         isActive: z.boolean().optional(),
       }),
@@ -308,6 +325,11 @@ export const balanceAccountRouter = createTRPCRouter({
       const updated = await ctx.db.balanceAccount.update({
         where: { id },
         data,
+        include: {
+          defaultChartOfAccount: {
+            select: { id: true, code: true, name: true, accountType: true },
+          },
+        },
       });
 
       await ctx.db.auditLog.create({

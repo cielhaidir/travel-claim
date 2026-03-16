@@ -13,12 +13,18 @@ ALTER TABLE "Approval" ADD COLUMN "approvalNumber" VARCHAR(50);
 -- Step 2: back-fill existing rows with a unique placeholder
 --   Pattern: APR-0000-<row_number_padded_to_5_digits>
 --   This guarantees uniqueness across pre-existing rows.
-UPDATE "Approval"
+WITH numbered AS (
+    SELECT "id", ROW_NUMBER() OVER (ORDER BY "createdAt") AS rn
+    FROM "Approval"
+    WHERE "approvalNumber" IS NULL
+)
+UPDATE "Approval" a
 SET "approvalNumber" = CONCAT(
     'APR-0000-',
-    LPAD(CAST(ROW_NUMBER() OVER (ORDER BY "createdAt") AS TEXT), 5, '0')
+    LPAD(CAST(numbered.rn AS TEXT), 5, '0')
 )
-WHERE "approvalNumber" IS NULL;
+FROM numbered
+WHERE a."id" = numbered."id";
 
 -- Step 3: enforce NOT NULL constraint
 ALTER TABLE "Approval" ALTER COLUMN "approvalNumber" SET NOT NULL;

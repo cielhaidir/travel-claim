@@ -178,3 +178,25 @@ export async function generateJournalTransactionNumber(
     parseSuffix(last?.transactionNumber ?? "") + 1,
   );
 }
+
+export async function generateJournalEntryNumber(
+  db: PrismaClient,
+  tenantId: string | null,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("JE", year)}-`;
+  const last = await db.journalEntry.findFirst({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      journalNumber: { startsWith: prefix },
+    },
+    orderBy: { journalNumber: "desc" },
+    select: { journalNumber: true },
+  });
+
+  return toBusinessNumber(
+    "JE",
+    year,
+    parseSuffix(last?.journalNumber ?? "") + 1,
+  );
+}

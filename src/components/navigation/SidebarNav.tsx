@@ -13,34 +13,34 @@ interface NavItem {
 
 const navigationItems: NavItem[] = [
   {
-    label: "Dashboard",
+    label: "Dasbor",
     href: "/dashboard",
     icon: "📊",
   },
   {
-    label: "Business Trip Requests",
+    label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
     icon: "✈️",
   },
   {
-    label: "Projects",
+    label: "Proyek",
     href: "/projects",
     icon: "📁",
     roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
   },
   {
-    label: "Bailout Approval",
+    label: "Persetujuan Bailout",
     href: "/bailout",
     icon: "💼",
     roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
   },
   {
-    label: "Claims",
+    label: "Klaim",
     href: "/claims",
     icon: "💰",
   },
   {
-    label: "Approvals",
+    label: "Persetujuan",
     href: "/approvals",
     icon: "✅",
     roles: [
@@ -53,25 +53,37 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    label: "Finance",
+    label: "Keuangan",
     href: "/finance",
     icon: "💵",
     roles: ["FINANCE", "ADMIN"],
   },
   {
-    label: "Chart of Accounts",
+    label: "Jurnal",
+    href: "/journal",
+    icon: "🧾",
+    roles: ["FINANCE", "ADMIN"],
+  },
+  {
+    label: "Akuntansi Perusahaan",
+    href: "/accounting",
+    icon: "🏦",
+    roles: ["FINANCE", "ADMIN"],
+  },
+  {
+    label: "Bagan Akun",
     href: "/chart-of-accounts",
     icon: "📋",
     roles: ["FINANCE", "ADMIN"],
   },
   {
-    label: "User Management",
+    label: "Manajemen Pengguna",
     href: "/admin/users",
     icon: "👥",
     roles: ["ADMIN"],
   },
   {
-    label: "Profile",
+    label: "Profil",
     href: "/profile",
     icon: "👤",
   },

@@ -13,6 +13,7 @@ import { projectRouter } from "@/server/api/routers/project";
 import { bailoutRouter } from "@/server/api/routers/bailout";
 import { financeRouter } from "@/server/api/routers/finance";
 import { journalTransactionRouter } from "@/server/api/routers/journalTransaction";
+import { journalEntryRouter } from "@/server/api/routers/journalEntry";
 import { balanceAccountRouter } from "@/server/api/routers/balanceAccount";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
@@ -37,6 +38,7 @@ export const appRouter = createTRPCRouter({
   bailout: bailoutRouter,
   finance: financeRouter,
   journalTransaction: journalTransactionRouter,
+  journalEntry: journalEntryRouter,
   balanceAccount: balanceAccountRouter,
 });
 

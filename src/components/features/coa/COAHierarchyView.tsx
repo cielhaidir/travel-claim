@@ -91,11 +91,11 @@ function HierarchyNode({
               {account.accountType}
             </span>
             <Badge variant={account.isActive ? "success" : "default"} className="text-xs">
-              {account.isActive ? "Active" : "Inactive"}
+              {account.isActive ? "Aktif" : "Nonaktif"}
             </Badge>
             {account._count && account._count.claims > 0 && (
               <span className="text-xs text-gray-500">
-                {account._count.claims} claims
+                {account._count.claims} klaim
               </span>
             )}
           </div>
@@ -109,7 +109,7 @@ function HierarchyNode({
               size="sm"
               variant="ghost"
               onClick={() => onEdit(account)}
-              title="Edit account"
+              title="Ubah akun"
             >
               ✏️
             </Button>
@@ -117,7 +117,7 @@ function HierarchyNode({
               size="sm"
               variant="ghost"
               onClick={() => onToggleActive(account)}
-              title={account.isActive ? "Deactivate" : "Activate"}
+              title={account.isActive ? "Nonaktifkan" : "Aktifkan"}
             >
               {account.isActive ? "⏸️" : "▶️"}
             </Button>
@@ -157,7 +157,7 @@ export function COAHierarchyView({
     return (
       <div className="rounded-lg border bg-white p-12 text-center">
         <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-        <p className="mt-4 text-sm text-gray-600">Loading hierarchy...</p>
+        <p className="mt-4 text-sm text-gray-600">Memuat hierarki akun...</p>
       </div>
     );
   }
@@ -166,7 +166,7 @@ export function COAHierarchyView({
     return (
       <div className="rounded-lg border bg-white p-12 text-center">
         <div className="text-6xl mb-4">🌳</div>
-        <p className="text-sm text-gray-600">No accounts to display</p>
+        <p className="text-sm text-gray-600">Tidak ada akun untuk ditampilkan</p>
       </div>
     );
   }

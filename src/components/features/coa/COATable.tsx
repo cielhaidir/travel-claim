@@ -93,7 +93,7 @@ export function COATable({
       <div className="rounded-lg border bg-white overflow-hidden">
         <div className="p-12 text-center">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-          <p className="mt-4 text-sm text-gray-600">Loading accounts...</p>
+          <p className="mt-4 text-sm text-gray-600">Memuat akun...</p>
         </div>
       </div>
     );
@@ -110,7 +110,7 @@ export function COATable({
                 onClick={() => handleSort("code")}
               >
                 <div className="flex items-center gap-1">
-                  Code
+                  Kode
                   {sortField === "code" && (
                     <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
                   )}
@@ -121,7 +121,7 @@ export function COATable({
                 onClick={() => handleSort("name")}
               >
                 <div className="flex items-center gap-1">
-                  Name
+                  Nama
                   {sortField === "name" && (
                     <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
                   )}
@@ -132,24 +132,24 @@ export function COATable({
                 onClick={() => handleSort("accountType")}
               >
                 <div className="flex items-center gap-1">
-                  Type
+                  Jenis
                   {sortField === "accountType" && (
                     <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
                   )}
                 </div>
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Category
+                Kategori
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Usage
+                Penggunaan
               </th>
               {isAdmin && (
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
+                  Aksi
                 </th>
               )}
             </tr>
@@ -169,7 +169,7 @@ export function COATable({
                   <div className="text-sm text-gray-900">{account.name}</div>
                   {account.parent && (
                     <div className="text-xs text-gray-500">
-                      Parent: {account.parent.code}
+                      Induk: {account.parent.code}
                     </div>
                   )}
                 </td>
@@ -188,15 +188,15 @@ export function COATable({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <Badge variant={account.isActive ? "success" : "default"}>
-                    {account.isActive ? "Active" : "Inactive"}
+                    {account.isActive ? "Aktif" : "Nonaktif"}
                   </Badge>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-600">
-                    {account._count?.claims ?? 0} claims
+                    {account._count?.claims ?? 0} klaim
                     {account._count && account._count.children > 0 && (
                       <span className="ml-2 text-gray-400">
-                        • {account._count.children} children
+                        • {account._count.children} akun turunan
                       </span>
                     )}
                   </div>
@@ -208,7 +208,7 @@ export function COATable({
                         size="sm"
                         variant="ghost"
                         onClick={() => onEdit(account)}
-                        title="Edit account"
+                        title="Ubah akun"
                       >
                         ✏️
                       </Button>
@@ -216,7 +216,7 @@ export function COATable({
                         size="sm"
                         variant="ghost"
                         onClick={() => onToggleActive(account)}
-                        title={account.isActive ? "Deactivate" : "Activate"}
+                        title={account.isActive ? "Nonaktifkan" : "Aktifkan"}
                       >
                         {account.isActive ? "⏸️" : "▶️"}
                       </Button>
@@ -224,7 +224,7 @@ export function COATable({
                         size="sm"
                         variant="ghost"
                         onClick={() => onDelete(account)}
-                        title="Delete account"
+                        title="Hapus akun"
                         disabled={
                           (account._count?.claims ?? 0) > 0 ||
                           (account._count?.children ?? 0) > 0

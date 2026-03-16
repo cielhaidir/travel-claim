@@ -1,5 +1,6 @@
-﻿-- Fix BailoutStatus enum
+-- Fix BailoutStatus enum
+-- Fresh databases created from current migration history already have
+-- APPROVED_CHIEF and APPROVED_DIRECTOR in the enum from an earlier migration.
+-- Keep this migration idempotent and safe.
 ALTER TYPE "BailoutStatus" ADD VALUE IF NOT EXISTS 'APPROVED_CHIEF';
 ALTER TYPE "BailoutStatus" ADD VALUE IF NOT EXISTS 'APPROVED_DIRECTOR';
-UPDATE "Bailout" SET "status" = 'APPROVED_CHIEF' WHERE "status" = 'APPROVED_L1';
-UPDATE "Bailout" SET "status" = 'APPROVED_DIRECTOR' WHERE "status" IN ('APPROVED_L2','APPROVED_L3','APPROVED_L4','APPROVED_L5','APPROVED');

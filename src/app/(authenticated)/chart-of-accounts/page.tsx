@@ -76,10 +76,10 @@ export default function ChartOfAccountsPage() {
       void refetchHierarchy();
       setIsFormOpen(false);
       setEditingAccount(null);
-      alert("Account created successfully!");
+      alert("Akun berhasil ditambahkan!");
     },
     onError: (error) => {
-      alert(`Error creating account: ${error.message}`);
+      alert(`Gagal menambahkan akun: ${error.message}`);
     },
   });
 
@@ -89,10 +89,10 @@ export default function ChartOfAccountsPage() {
       void refetchHierarchy();
       setIsFormOpen(false);
       setEditingAccount(null);
-      alert("Account updated successfully!");
+      alert("Akun berhasil diperbarui!");
     },
     onError: (error) => {
-      alert(`Error updating account: ${error.message}`);
+      alert(`Gagal memperbarui akun: ${error.message}`);
     },
   });
 
@@ -100,10 +100,10 @@ export default function ChartOfAccountsPage() {
     onSuccess: (data: { message?: string }) => {
       void refetchAccounts();
       void refetchHierarchy();
-      alert(data.message ?? "Account deleted successfully!");
+      alert(data.message ?? "Akun berhasil dihapus!");
     },
     onError: (error) => {
-      alert(`Error deleting account: ${error.message}`);
+      alert(`Gagal menghapus akun: ${error.message}`);
     },
   });
 
@@ -111,10 +111,10 @@ export default function ChartOfAccountsPage() {
     onSuccess: (data: { isActive: boolean }) => {
       void refetchAccounts();
       void refetchHierarchy();
-      alert(`Account ${data.isActive ? "activated" : "deactivated"} successfully!`);
+      alert(`Akun berhasil ${data.isActive ? "diaktifkan" : "dinonaktifkan"}!`);
     },
     onError: (error) => {
-      alert(`Error toggling account status: ${error.message}`);
+      alert(`Gagal mengubah status akun: ${error.message}`);
     },
   });
 
@@ -153,14 +153,14 @@ export default function ChartOfAccountsPage() {
     const hasClaims = (account._count?.claims ?? 0) > 0;
 
     if (hasChildren) {
-      alert("Cannot delete account with child accounts. Please delete or reassign child accounts first.");
+      alert("Akun dengan akun turunan tidak dapat dihapus. Hapus atau pindahkan akun turunannya terlebih dahulu.");
       return;
     }
 
-    let confirmMessage = `Are you sure you want to delete account "${account.code} - ${account.name}"?`;
-    
+    let confirmMessage = `Yakin ingin menghapus akun "${account.code} - ${account.name}"?`;
+
     if (hasClaims) {
-      confirmMessage = `This account has ${account._count?.claims} associated claim(s). It will be deactivated instead of deleted. Continue?`;
+      confirmMessage = `Akun ini memiliki ${account._count?.claims} klaim terkait. Akun akan dinonaktifkan, bukan dihapus. Lanjutkan?`;
     }
 
     if (confirm(confirmMessage)) {
@@ -173,8 +173,8 @@ export default function ChartOfAccountsPage() {
 
   const handleToggleActive = (account: COAAccount) => {
     const message = account.isActive
-      ? `Deactivating this account will also deactivate all its child accounts. Continue?`
-      : `Are you sure you want to activate account "${account.code} - ${account.name}"?`;
+      ? `Menonaktifkan akun ini juga akan menonaktifkan semua akun turunannya. Lanjutkan?`
+      : `Yakin ingin mengaktifkan akun "${account.code} - ${account.name}"?`;
 
     if (confirm(message)) {
       toggleActiveMutation.mutate({ id: account.id });
@@ -215,12 +215,12 @@ export default function ChartOfAccountsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Chart of Accounts"
-        description="Manage your financial account structure for expense tracking"
+        title="Bagan Akun"
+        description="Kelola struktur akun keuangan untuk pencatatan pengeluaran"
         primaryAction={
           isAdmin
             ? {
-                label: "Create Account",
+                label: "Tambah Akun",
                 onClick: handleCreateNew,
               }
             : undefined
@@ -234,14 +234,14 @@ export default function ChartOfAccountsPage() {
           variant={viewMode === "table" ? "primary" : "secondary"}
           onClick={() => setViewMode("table")}
         >
-          📊 Table View
+          📊 Tampilan Tabel
         </Button>
         <Button
           size="sm"
           variant={viewMode === "hierarchy" ? "primary" : "secondary"}
           onClick={() => setViewMode("hierarchy")}
         >
-          🌳 Hierarchy View
+          🌳 Tampilan Hierarki
         </Button>
       </div>
 
@@ -265,7 +265,7 @@ export default function ChartOfAccountsPage() {
             />
             <div className="relative w-full max-w-3xl rounded-lg bg-white p-6 shadow-xl">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                {editingAccount ? "Edit Account" : "Create New Account"}
+                {editingAccount ? "Ubah Akun" : "Tambah Akun Baru"}
               </h2>
               <COAForm
                 initialData={editingAccount ? {
@@ -293,22 +293,22 @@ export default function ChartOfAccountsPage() {
       {isLoading ? (
         <div className="rounded-lg border bg-white p-12 text-center">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-          <p className="mt-4 text-sm text-gray-600">Loading accounts...</p>
+          <p className="mt-4 text-sm text-gray-600">Memuat akun...</p>
         </div>
       ) : filteredAccounts.length === 0 && !searchQuery ? (
         <div className="rounded-lg border bg-white">
           <EmptyState
             icon="💼"
-            title="No chart of accounts yet"
+            title="Belum ada bagan akun"
             description={
               isAdmin
-                ? "Create your first account to start organizing financial data"
-                : "No accounts available. Contact your administrator."
+                ? "Tambahkan akun pertama untuk mulai mengelola data keuangan"
+                : "Belum ada akun yang tersedia. Hubungi administrator Anda."
             }
             action={
               isAdmin
                 ? {
-                    label: "Create First Account",
+                    label: "Tambah Akun Pertama",
                     onClick: handleCreateNew,
                   }
                 : undefined
@@ -319,8 +319,8 @@ export default function ChartOfAccountsPage() {
         <div className="rounded-lg border bg-white">
           <EmptyState
             icon="🔍"
-            title="No accounts found"
-            description={`No accounts match "${searchQuery}". Try a different search term.`}
+            title="Akun tidak ditemukan"
+            description={`Tidak ada akun yang cocok dengan "${searchQuery}". Coba kata kunci lain.`}
           />
         </div>
       ) : viewMode === "table" ? (
@@ -346,25 +346,25 @@ export default function ChartOfAccountsPage() {
       {filteredAccounts.length > 0 && (
         <div className="grid gap-6 md:grid-cols-4">
           <div className="rounded-lg border bg-white p-6">
-            <p className="text-sm text-gray-600">Total Accounts</p>
+            <p className="text-sm text-gray-600">Total Akun</p>
             <p className="mt-2 text-3xl font-bold text-gray-900">
               {filteredAccounts.length}
             </p>
           </div>
           <div className="rounded-lg border bg-green-50 p-6">
-            <p className="text-sm text-green-900">Active</p>
+            <p className="text-sm text-green-900">Aktif</p>
             <p className="mt-2 text-3xl font-bold text-green-900">
               {filteredAccounts.filter((a: COAAccount) => a.isActive).length}
             </p>
           </div>
           <div className="rounded-lg border bg-gray-50 p-6">
-            <p className="text-sm text-gray-700">Inactive</p>
+            <p className="text-sm text-gray-700">Nonaktif</p>
             <p className="mt-2 text-3xl font-bold text-gray-700">
               {filteredAccounts.filter((a: COAAccount) => !a.isActive).length}
             </p>
           </div>
           <div className="rounded-lg border bg-blue-50 p-6">
-            <p className="text-sm text-blue-900">With Claims</p>
+            <p className="text-sm text-blue-900">Dipakai di Klaim</p>
             <p className="mt-2 text-3xl font-bold text-blue-900">
               {filteredAccounts.filter((a: COAAccount) => (a._count?.claims ?? 0) > 0).length}
             </p>

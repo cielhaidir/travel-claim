@@ -1,5 +1,26 @@
-import { PrismaClient, type Role } from "../generated/prisma/index.js";
+import {
+  PrismaClient,
+  ApprovalLevel,
+  ApprovalStatus,
+  BailoutCategory,
+  BailoutStatus,
+  ClaimStatus,
+  ClaimType,
+  JournalSourceType,
+  JournalStatus,
+  TravelStatus,
+  TravelType,
+  type Role,
+} from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
+import {
+  generateApprovalNumber,
+  generateBailoutNumber,
+  generateClaimNumber,
+  generateJournalEntryNumber,
+  generateJournalTransactionNumber,
+  generateRequestNumber,
+} from "../src/lib/utils/numberGenerators";
 
 const prisma = new PrismaClient();
 
@@ -573,7 +594,18 @@ async function main() {
   await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
   console.log("  ✅ Chart of Accounts ready\n");
 
-  // ── 6. Summary ────────────────────────────────────────────────────────────────
+  // ── 6. Balance accounts, projects, travel, claims, bailouts, journals ───────
+  console.log("📚 Creating accounting and transaction sample data…");
+  await createSampleBusinessData({
+    tenantId: defaultTenantId,
+    adminUserId: adminChief.id,
+    financeUserId: financeStaff1.id,
+    salesRequesterId: salesStaff1.id,
+    engineerRequesterId: engStaff1.id,
+  });
+  console.log("  ✅ Sample accounting and transaction data ready\n");
+
+  // ── 7. Summary ────────────────────────────────────────────────────────────────
   console.log("🎉 Seeding completed!\n");
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -631,12 +663,493 @@ async function main() {
   ];
 }
 
-// ─── Chart of Accounts ───────────────────────────────────────────────────────
+// ─── Chart of Accounts & Sample Data ───────────────────────────────────────
+
+async function findCoaByCode(tenantId: string, code: string) {
+  const coa = await prisma.chartOfAccount.findFirst({
+    where: { tenantId, code, isActive: true },
+  });
+
+  if (!coa) {
+    throw new Error(`COA ${code} tidak ditemukan saat seeding`);
+  }
+
+  return coa;
+}
+
+async function createSampleBusinessData(input: {
+  tenantId: string;
+  adminUserId: string;
+  financeUserId: string;
+  salesRequesterId: string;
+  engineerRequesterId: string;
+}) {
+  const { tenantId, adminUserId, financeUserId, salesRequesterId, engineerRequesterId } = input;
+
+  const [cashCoa, bankCoa, advanceCoa, equityCoa, airfareCoa, accommodationCoa] =
+    await Promise.all([
+      findCoaByCode(tenantId, "1110"),
+      findCoaByCode(tenantId, "1120"),
+      findCoaByCode(tenantId, "1130"),
+      findCoaByCode(tenantId, "3100"),
+      findCoaByCode(tenantId, "6110"),
+      findCoaByCode(tenantId, "6130"),
+    ]);
+
+  const bankOps = await prisma.balanceAccount.upsert({
+    where: { tenantId_code: { tenantId, code: "BANK-OPS" } },
+    update: {
+      name: "Rekening Operasional Utama",
+      balance: 46650000,
+      defaultChartOfAccountId: bankCoa.id,
+      description: "Rekening bank operasional utama perusahaan",
+      isActive: true,
+    },
+    create: {
+      tenantId,
+      code: "BANK-OPS",
+      name: "Rekening Operasional Utama",
+      balance: 46650000,
+      defaultChartOfAccountId: bankCoa.id,
+      description: "Rekening bank operasional utama perusahaan",
+      isActive: true,
+    },
+  });
+
+  const pettyCash = await prisma.balanceAccount.upsert({
+    where: { tenantId_code: { tenantId, code: "KAS-KECIL" } },
+    update: {
+      name: "Kas Kecil Kantor",
+      balance: 5000000,
+      defaultChartOfAccountId: cashCoa.id,
+      description: "Kas kecil untuk kebutuhan operasional harian",
+      isActive: true,
+    },
+    create: {
+      tenantId,
+      code: "KAS-KECIL",
+      name: "Kas Kecil Kantor",
+      balance: 5000000,
+      defaultChartOfAccountId: cashCoa.id,
+      description: "Kas kecil untuk kebutuhan operasional harian",
+      isActive: true,
+    },
+  });
+
+  const project = await prisma.project.upsert({
+    where: { tenantId_code: { tenantId, code: "PRJ-SALES-001" } },
+    update: {
+      name: "Ekspansi Klien Nasional",
+      description: "Proyek penjualan untuk kunjungan klien nasional.",
+      clientName: "PT Nusantara Digital",
+      isActive: true,
+    },
+    create: {
+      tenantId,
+      code: "PRJ-SALES-001",
+      name: "Ekspansi Klien Nasional",
+      description: "Proyek penjualan untuk kunjungan klien nasional.",
+      clientName: "PT Nusantara Digital",
+      isActive: true,
+      salesId: "EMP020",
+    },
+  });
+
+  const approvedTravelNumber = "TR-2026-00001";
+  const lockedTravelNumber = "TR-2026-00002";
+
+  const approvedTravel = await prisma.travelRequest.upsert({
+    where: { tenantId_requestNumber: { tenantId, requestNumber: approvedTravelNumber } },
+    update: {},
+    create: {
+      tenantId,
+      requestNumber: approvedTravelNumber,
+      requesterId: salesRequesterId,
+      purpose: "Kunjungan prospek dan presentasi solusi ke klien baru.",
+      destination: "Surabaya",
+      travelType: TravelType.SALES,
+      startDate: new Date("2026-03-20"),
+      endDate: new Date("2026-03-22"),
+      projectId: project.id,
+      status: TravelStatus.APPROVED,
+      submittedAt: new Date("2026-03-15"),
+    },
+  });
+
+  const lockedTravel = await prisma.travelRequest.upsert({
+    where: { tenantId_requestNumber: { tenantId, requestNumber: lockedTravelNumber } },
+    update: {},
+    create: {
+      tenantId,
+      requestNumber: lockedTravelNumber,
+      requesterId: engineerRequesterId,
+      purpose: "Implementasi sistem dan pendampingan user di lokasi proyek.",
+      destination: "Bandung",
+      travelType: TravelType.OPERATIONAL,
+      startDate: new Date("2026-03-10"),
+      endDate: new Date("2026-03-12"),
+      status: TravelStatus.LOCKED,
+      submittedAt: new Date("2026-03-05"),
+      lockedAt: new Date("2026-03-13"),
+    },
+  });
+
+  await prisma.travelParticipant.upsert({
+    where: {
+      travelRequestId_userId: {
+        travelRequestId: approvedTravel.id,
+        userId: salesRequesterId,
+      },
+    },
+    update: {},
+    create: {
+      tenantId,
+      travelRequestId: approvedTravel.id,
+      userId: salesRequesterId,
+      role: "Presenter",
+    },
+  });
+
+  await prisma.travelParticipant.upsert({
+    where: {
+      travelRequestId_userId: {
+        travelRequestId: lockedTravel.id,
+        userId: engineerRequesterId,
+      },
+    },
+    update: {},
+    create: {
+      tenantId,
+      travelRequestId: lockedTravel.id,
+      userId: engineerRequesterId,
+      role: "Implementor",
+    },
+  });
+
+  const approvedBailoutNumber = "BLT-2026-00001";
+  const disbursedBailoutNumber = "BLT-2026-00002";
+
+  await prisma.bailout.upsert({
+    where: { tenantId_bailoutNumber: { tenantId, bailoutNumber: approvedBailoutNumber } },
+    update: {},
+    create: {
+      tenantId,
+      bailoutNumber: approvedBailoutNumber,
+      travelRequestId: approvedTravel.id,
+      requesterId: salesRequesterId,
+      category: BailoutCategory.HOTEL,
+      description: "Uang muka hotel dan transport lokal untuk kunjungan sales.",
+      amount: 3500000,
+      status: BailoutStatus.APPROVED_DIRECTOR,
+      submittedAt: new Date("2026-03-16"),
+    },
+  });
+
+  const disbursedBailout = await prisma.bailout.upsert({
+    where: { tenantId_bailoutNumber: { tenantId, bailoutNumber: disbursedBailoutNumber } },
+    update: {},
+    create: {
+      tenantId,
+      bailoutNumber: disbursedBailoutNumber,
+      travelRequestId: lockedTravel.id,
+      requesterId: engineerRequesterId,
+      category: BailoutCategory.TRANSPORT,
+      description: "Uang muka tiket pesawat dan akomodasi implementasi Bandung.",
+      amount: 2500000,
+      status: BailoutStatus.DISBURSED,
+      submittedAt: new Date("2026-03-07"),
+      disbursedAt: new Date("2026-03-08"),
+      disbursementRef: "BANK-TFR-20260308",
+      financeId: financeUserId,
+      storageUrl: "https://example.com/bailout-proof-bandung.pdf",
+    },
+  });
+
+  const approvedClaimNumber = "CLM-2026-00001";
+  const paidClaimNumber = "CLM-2026-00002";
+
+  await prisma.claim.upsert({
+    where: { tenantId_claimNumber: { tenantId, claimNumber: approvedClaimNumber } },
+    update: {},
+    create: {
+      tenantId,
+      claimNumber: approvedClaimNumber,
+      travelRequestId: lockedTravel.id,
+      submitterId: engineerRequesterId,
+      claimType: ClaimType.NON_ENTERTAINMENT,
+      status: ClaimStatus.APPROVED,
+      expenseCategory: "ACCOMMODATION",
+      expenseDate: new Date("2026-03-12"),
+      expenseDestination: "Bandung",
+      amount: 1250000,
+      description: "Biaya hotel implementasi di Bandung.",
+      coaId: accommodationCoa.id,
+    },
+  });
+
+  const paidClaim = await prisma.claim.upsert({
+    where: { tenantId_claimNumber: { tenantId, claimNumber: paidClaimNumber } },
+    update: {},
+    create: {
+      tenantId,
+      claimNumber: paidClaimNumber,
+      travelRequestId: lockedTravel.id,
+      submitterId: engineerRequesterId,
+      claimType: ClaimType.NON_ENTERTAINMENT,
+      status: ClaimStatus.PAID,
+      expenseCategory: "TRANSPORT",
+      expenseDate: new Date("2026-03-11"),
+      expenseDestination: "Bandung",
+      amount: 850000,
+      description: "Tiket pesawat dan transport bandara untuk implementasi.",
+      coaId: airfareCoa.id,
+      isPaid: true,
+      paidAt: new Date("2026-03-14"),
+      paidBy: "Finance Staff 1",
+      paymentReference: "BANK-TFR-20260314",
+      financeId: financeUserId,
+    },
+  });
+
+  const openingNumber = "JE-2026-00001";
+  await prisma.journalEntry.upsert({
+    where: { tenantId_journalNumber: { tenantId, journalNumber: openingNumber } },
+    update: {},
+    create: {
+      tenantId,
+      journalNumber: openingNumber,
+      transactionDate: new Date("2026-03-01"),
+      description: "Saldo awal rekening operasional",
+      sourceType: JournalSourceType.FUNDING,
+      status: JournalStatus.POSTED,
+      createdById: adminUserId,
+      postedById: adminUserId,
+      postedAt: new Date("2026-03-01"),
+      lines: {
+        create: [
+          {
+            lineNumber: 1,
+            chartOfAccountId: bankCoa.id,
+            balanceAccountId: bankOps.id,
+            description: "Saldo awal bank operasional",
+            debitAmount: 50000000,
+            creditAmount: 0,
+          },
+          {
+            lineNumber: 2,
+            chartOfAccountId: equityCoa.id,
+            description: "Modal awal",
+            debitAmount: 0,
+            creditAmount: 50000000,
+          },
+        ],
+      },
+    },
+  });
+
+  const pettyCashNumber = "JE-2026-00002";
+  await prisma.journalEntry.upsert({
+    where: { tenantId_journalNumber: { tenantId, journalNumber: pettyCashNumber } },
+    update: {},
+    create: {
+      tenantId,
+      journalNumber: pettyCashNumber,
+      transactionDate: new Date("2026-03-02"),
+      description: "Pembentukan kas kecil",
+      sourceType: JournalSourceType.FUNDING,
+      status: JournalStatus.POSTED,
+      createdById: adminUserId,
+      postedById: adminUserId,
+      postedAt: new Date("2026-03-02"),
+      lines: {
+        create: [
+          {
+            lineNumber: 1,
+            chartOfAccountId: cashCoa.id,
+            balanceAccountId: pettyCash.id,
+            description: "Kas kecil kantor",
+            debitAmount: 5000000,
+            creditAmount: 0,
+          },
+          {
+            lineNumber: 2,
+            chartOfAccountId: bankCoa.id,
+            balanceAccountId: bankOps.id,
+            description: "Transfer dari rekening operasional",
+            debitAmount: 0,
+            creditAmount: 5000000,
+          },
+        ],
+      },
+    },
+  });
+
+  const disbursementJeNumber = "JE-2026-00003";
+  await prisma.journalEntry.upsert({
+    where: { tenantId_journalNumber: { tenantId, journalNumber: disbursementJeNumber } },
+    update: {},
+    create: {
+      tenantId,
+      journalNumber: disbursementJeNumber,
+      transactionDate: new Date("2026-03-08"),
+      description: `Pencairan bailout ${disbursedBailout.bailoutNumber}`,
+      sourceType: JournalSourceType.BAILOUT,
+      sourceId: disbursedBailout.id,
+      bailoutId: disbursedBailout.id,
+      referenceNumber: disbursedBailout.disbursementRef,
+      status: JournalStatus.POSTED,
+      createdById: financeUserId,
+      postedById: financeUserId,
+      postedAt: new Date("2026-03-08"),
+      lines: {
+        create: [
+          {
+            lineNumber: 1,
+            chartOfAccountId: advanceCoa.id,
+            description: "Uang muka perjalanan Bandung",
+            debitAmount: 2500000,
+            creditAmount: 0,
+          },
+          {
+            lineNumber: 2,
+            chartOfAccountId: bankCoa.id,
+            balanceAccountId: bankOps.id,
+            description: "Pencairan dari rekening operasional",
+            debitAmount: 0,
+            creditAmount: 2500000,
+          },
+        ],
+      },
+    },
+  });
+
+  const claimPaymentJeNumber = "JE-2026-00004";
+  await prisma.journalEntry.upsert({
+    where: { tenantId_journalNumber: { tenantId, journalNumber: claimPaymentJeNumber } },
+    update: {},
+    create: {
+      tenantId,
+      journalNumber: claimPaymentJeNumber,
+      transactionDate: new Date("2026-03-14"),
+      description: `Pembayaran klaim ${paidClaim.claimNumber}`,
+      sourceType: JournalSourceType.CLAIM,
+      sourceId: paidClaim.id,
+      claimId: paidClaim.id,
+      referenceNumber: paidClaim.paymentReference,
+      status: JournalStatus.POSTED,
+      createdById: financeUserId,
+      postedById: financeUserId,
+      postedAt: new Date("2026-03-14"),
+      lines: {
+        create: [
+          {
+            lineNumber: 1,
+            chartOfAccountId: airfareCoa.id,
+            description: "Beban tiket pesawat implementasi",
+            debitAmount: 850000,
+            creditAmount: 0,
+          },
+          {
+            lineNumber: 2,
+            chartOfAccountId: bankCoa.id,
+            balanceAccountId: bankOps.id,
+            description: "Pembayaran dari rekening operasional",
+            debitAmount: 0,
+            creditAmount: 850000,
+          },
+        ],
+      },
+    },
+  });
+
+  const settlementJeNumber = "JE-2026-00005";
+  await prisma.journalEntry.upsert({
+    where: { tenantId_journalNumber: { tenantId, journalNumber: settlementJeNumber } },
+    update: {},
+    create: {
+      tenantId,
+      journalNumber: settlementJeNumber,
+      transactionDate: new Date("2026-03-15"),
+      description: `Settlement bailout ${disbursedBailout.bailoutNumber}`,
+      sourceType: JournalSourceType.SETTLEMENT,
+      sourceId: disbursedBailout.id,
+      bailoutId: disbursedBailout.id,
+      referenceNumber: "STL-BLT-20260315",
+      status: JournalStatus.POSTED,
+      createdById: financeUserId,
+      postedById: financeUserId,
+      postedAt: new Date("2026-03-15"),
+      lines: {
+        create: [
+          {
+            lineNumber: 1,
+            chartOfAccountId: accommodationCoa.id,
+            description: "Pengakuan beban hotel dari uang muka",
+            debitAmount: 2500000,
+            creditAmount: 0,
+          },
+          {
+            lineNumber: 2,
+            chartOfAccountId: advanceCoa.id,
+            description: "Penutupan uang muka perjalanan",
+            debitAmount: 0,
+            creditAmount: 2500000,
+          },
+        ],
+      },
+    },
+  });
+
+  const legacySamples = [
+    {
+      date: new Date("2026-03-08"),
+      description: `Beban bailout: ${disbursedBailout.bailoutNumber}`,
+      amount: 2500000,
+      entryType: "DEBIT" as const,
+      bailoutId: disbursedBailout.id,
+      chartOfAccountId: advanceCoa.id,
+      balanceAccountId: bankOps.id,
+      referenceNumber: disbursedBailout.disbursementRef ?? undefined,
+    },
+    {
+      date: new Date("2026-03-14"),
+      description: `Beban klaim: ${paidClaim.claimNumber}`,
+      amount: 850000,
+      entryType: "DEBIT" as const,
+      claimId: paidClaim.id,
+      chartOfAccountId: airfareCoa.id,
+      balanceAccountId: bankOps.id,
+      referenceNumber: paidClaim.paymentReference ?? undefined,
+    },
+  ];
+
+  for (const sample of legacySamples) {
+    const transactionNumber = sample.referenceNumber?.startsWith("BANK-TFR-20260308") ? "JRN-2026-00001" : "JRN-2026-00002";
+    await prisma.journalTransaction.upsert({
+      where: { tenantId_transactionNumber: { tenantId, transactionNumber } },
+      update: {},
+      create: {
+        tenantId,
+        transactionNumber,
+        transactionDate: sample.date,
+        description: sample.description,
+        amount: sample.amount,
+        entryType: sample.entryType,
+        bailoutId: sample.bailoutId,
+        claimId: sample.claimId,
+        chartOfAccountId: sample.chartOfAccountId,
+        balanceAccountId: sample.balanceAccountId,
+        referenceNumber: sample.referenceNumber,
+      },
+    });
+  }
+}
 
 async function createChartOfAccounts(createdById: string, tenantId: string) {
   const upsertCoa = (
     code: string,
     name: string,
+    accountType: "ASSET" | "EQUITY" | "EXPENSE",
     category: string,
     subcategory: string | null,
     parentId: string | null,
@@ -649,7 +1162,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
         tenantId,
         code,
         name,
-        accountType: "EXPENSE",
+        accountType,
         category,
         subcategory: subcategory ?? undefined,
         parentId: parentId ?? undefined,
@@ -660,10 +1173,69 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
       },
     });
 
+  const assetsRoot = await upsertCoa(
+    "1000",
+    "Kas dan Setara Kas",
+    "ASSET",
+    "Assets",
+    null,
+    null,
+    "Akun aset kas dan bank",
+  );
+  console.log(`    1000 Kas dan Setara Kas`);
+  await upsertCoa(
+    "1110",
+    "Kas Kecil",
+    "ASSET",
+    "Assets",
+    "Cash",
+    assetsRoot.id,
+    "Akun kas kecil kantor",
+  );
+  await upsertCoa(
+    "1120",
+    "Bank Operasional",
+    "ASSET",
+    "Assets",
+    "Bank",
+    assetsRoot.id,
+    "Akun bank operasional utama",
+  );
+  await upsertCoa(
+    "1130",
+    "Uang Muka Perjalanan",
+    "ASSET",
+    "Assets",
+    "Advance",
+    assetsRoot.id,
+    "Akun uang muka untuk bailout perjalanan dinas",
+  );
+
+  const equityRoot = await upsertCoa(
+    "3000",
+    "Ekuitas",
+    "EQUITY",
+    "Equity",
+    null,
+    null,
+    "Kelompok akun ekuitas",
+  );
+  console.log(`    3000 Ekuitas`);
+  await upsertCoa(
+    "3100",
+    "Saldo Awal",
+    "EQUITY",
+    "Equity",
+    "Opening Balance",
+    equityRoot.id,
+    "Akun saldo awal modal/ekuitas",
+  );
+
   // Root
   const root = await upsertCoa(
     "6000",
     "Operating Expenses",
+    "EXPENSE",
     "Operating",
     null,
     null,
@@ -675,6 +1247,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const travel = await upsertCoa(
     "6100",
     "Travel & Transportation",
+    "EXPENSE",
     "Travel",
     null,
     root.id,
@@ -684,6 +1257,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6110",
     "Airfare",
+    "EXPENSE",
     "Travel",
     "Transportation",
     travel.id,
@@ -692,6 +1266,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6120",
     "Ground Transportation",
+    "EXPENSE",
     "Travel",
     "Transportation",
     travel.id,
@@ -700,6 +1275,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6130",
     "Accommodation",
+    "EXPENSE",
     "Travel",
     "Lodging",
     travel.id,
@@ -710,6 +1286,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const meals = await upsertCoa(
     "6200",
     "Meals & Entertainment",
+    "EXPENSE",
     "Entertainment",
     null,
     root.id,
@@ -719,6 +1296,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6210",
     "Business Meals",
+    "EXPENSE",
     "Entertainment",
     "Meals",
     meals.id,
@@ -727,6 +1305,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6220",
     "Client Entertainment",
+    "EXPENSE",
     "Entertainment",
     "Hospitality",
     meals.id,
@@ -737,6 +1316,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const comm = await upsertCoa(
     "6300",
     "Communication Expenses",
+    "EXPENSE",
     "Communication",
     null,
     root.id,
@@ -746,6 +1326,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6310",
     "Phone & Mobile",
+    "EXPENSE",
     "Communication",
     "Telecommunications",
     comm.id,
@@ -756,6 +1337,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const office = await upsertCoa(
     "6400",
     "Office & Supplies",
+    "EXPENSE",
     "Office",
     null,
     root.id,
@@ -765,6 +1347,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6410",
     "Stationery & Supplies",
+    "EXPENSE",
     "Office",
     "Supplies",
     office.id,
@@ -775,6 +1358,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const benefits = await upsertCoa(
     "6500",
     "Employee Benefits",
+    "EXPENSE",
     "Benefits",
     null,
     root.id,
@@ -784,6 +1368,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6510",
     "BPJS & Health Insurance",
+    "EXPENSE",
     "Benefits",
     "Insurance",
     benefits.id,
@@ -792,6 +1377,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6520",
     "Overtime Meals",
+    "EXPENSE",
     "Benefits",
     "Meals",
     benefits.id,
@@ -802,6 +1388,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   const vehicle = await upsertCoa(
     "6600",
     "Vehicle Expenses",
+    "EXPENSE",
     "Vehicle",
     null,
     root.id,
@@ -811,6 +1398,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6610",
     "Vehicle Maintenance",
+    "EXPENSE",
     "Vehicle",
     "Maintenance",
     vehicle.id,
@@ -821,6 +1409,7 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   await upsertCoa(
     "6900",
     "Other Expenses",
+    "EXPENSE",
     "Miscellaneous",
     null,
     root.id,
@@ -828,8 +1417,6 @@ async function createChartOfAccounts(createdById: string, tenantId: string) {
   );
   console.log(`    6900 Other Expenses`);
 }
-
-// ─── Entry ────────────────────────────────────────────────────────────────────
 
 main()
   .catch((e) => {

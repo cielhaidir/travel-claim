@@ -61,16 +61,32 @@ interface TravelRequest {
   requester: { id: string; name: string | null; employeeId: string | null };
 }
 
-interface BalanceAccount {
+interface COAOption {
+  id: string;
+  code: string;
+  name: string;
+  accountType: string;
+  category: string;
+  subcategory: string | null;
+  parentId: string | null;
+}
+
+interface BalanceAccountOption {
   id: string;
   code: string;
   name: string;
   balance: number;
   isActive: boolean;
-  description: string | null;
+  defaultChartOfAccountId?: string | null;
+  defaultChartOfAccount?: {
+    id: string;
+    code: string;
+    name: string;
+    accountType: string;
+  } | null;
 }
 
-type ActiveTab = "bailouts" | "claims" | "travel" | "accounts";
+type ActiveTab = "bailouts" | "claims" | "travel" | "settlement";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -93,11 +109,26 @@ export default function FinanceDashboard() {
   const [disburseOpen, setDisburseOpen] = useState(false);
   const [selectedBailout, setSelectedBailout] = useState<Bailout | null>(null);
   const [disbursementRef, setDisbursementRef] = useState("");
+  const [bailoutStorageUrl, setBailoutStorageUrl] = useState("");
+  const [bailoutExpenseCoaId, setBailoutExpenseCoaId] = useState("");
+  const [bailoutOffsetCoaId, setBailoutOffsetCoaId] = useState("");
+  const [bailoutBalanceAccountId, setBailoutBalanceAccountId] = useState("");
 
   // ── Mark paid modal state ──────────────────────────────────────────────────
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [paymentRef, setPaymentRef] = useState("");
+  const [claimStorageUrl, setClaimStorageUrl] = useState("");
+  const [claimExpenseCoaId, setClaimExpenseCoaId] = useState("");
+  const [claimOffsetCoaId, setClaimOffsetCoaId] = useState("");
+  const [claimBalanceAccountId, setClaimBalanceAccountId] = useState("");
+
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [selectedSettlementBailout, setSelectedSettlementBailout] =
+    useState<Bailout | null>(null);
+  const [settlementExpenseCoaId, setSettlementExpenseCoaId] = useState("");
+  const [settlementAdvanceCoaId, setSettlementAdvanceCoaId] = useState("");
+  const [settlementRef, setSettlementRef] = useState("");
 
   // ── Lock / Close confirm state ────────────────────────────────────────────
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
@@ -119,6 +150,18 @@ export default function FinanceDashboard() {
   );
   const bailouts =
     (bailoutsRaw as { bailouts: Bailout[] } | undefined)?.bailouts ?? [];
+
+  const {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    data: bailoutSettlementsRaw,
+    isLoading: loadingBailoutSettlements,
+    refetch: refetchBailoutSettlements,
+  } = api.bailout.getAll.useQuery(
+    { status: "DISBURSED", limit: 50 },
+    { enabled: isAllowed },
+  );
+  const bailoutSettlements =
+    (bailoutSettlementsRaw as { bailouts: Bailout[] } | undefined)?.bailouts ?? [];
 
   const {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -159,19 +202,37 @@ export default function FinanceDashboard() {
     (travelLockedRaw as { requests: TravelRequest[] } | undefined)?.requests ??
     [];
 
-  const {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    data: accountsRaw,
-    isLoading: loadingAccounts,
-    refetch: refetchAccounts,
-  } = api.finance.listBalanceAccounts.useQuery(
-    { limit: 100 },
-    { enabled: isAllowed },
+  const { data: activeCoasRaw } = api.chartOfAccount.getActiveAccounts.useQuery(
+    {},
+    { enabled: isAllowed, refetchOnWindowFocus: false },
   );
-  const accounts =
-    (
-      accountsRaw as { balanceAccounts: BalanceAccount[] } | undefined
-    )?.balanceAccounts ?? [];
+  const activeCoas = (activeCoasRaw as COAOption[] | undefined) ?? [];
+
+  const { data: balanceAccountsRaw } = api.balanceAccount.list.useQuery(
+    { isActive: true, limit: 100 },
+    { enabled: isAllowed, refetchOnWindowFocus: false },
+  );
+  const balanceAccounts =
+    (balanceAccountsRaw as { balanceAccounts: BalanceAccountOption[] } | undefined)
+      ?.balanceAccounts ?? [];
+
+  const { data: settlementJournalsRaw, refetch: refetchSettlementJournals } =
+    api.journalEntry.list.useQuery(
+      {
+        sourceType: "SETTLEMENT",
+        status: "POSTED",
+        limit: 100,
+      },
+      { enabled: isAllowed, refetchOnWindowFocus: false },
+    );
+  const settlementJournals =
+    (settlementJournalsRaw as { journalEntries: Array<{ bailout?: { id: string } | null }> } | undefined)
+      ?.journalEntries ?? [];
+  const settledBailoutIds = new Set(
+    settlementJournals
+      .map((journal) => journal.bailout?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
 
   const {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -191,24 +252,49 @@ export default function FinanceDashboard() {
     claims.length;
   const pendingPaymentAmount =
     (stats?.totalAmount ?? 0) - (stats?.paidAmount ?? 0);
+  const unsettledBailouts = bailoutSettlements.filter(
+    (bailout) => !settledBailoutIds.has(bailout.id),
+  );
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
-  const disburseMutation = api.bailout.disburse.useMutation({
+  const disburseMutation = api.bailout.disburse.useMutation();
+  const processBailoutMutation = api.finance.processBailoutTransaction.useMutation({
     onSuccess: () => {
       void refetchBailouts();
       setDisburseOpen(false);
       setSelectedBailout(null);
       setDisbursementRef("");
+      setBailoutStorageUrl("");
+      setBailoutExpenseCoaId("");
+      setBailoutOffsetCoaId("");
+      setBailoutBalanceAccountId("");
     },
   });
 
-  const markPaidMutation = api.claim.markAsPaid.useMutation({
+  const markPaidMutation = api.claim.markAsPaid.useMutation();
+  const processClaimMutation = api.finance.processClaimTransaction.useMutation({
     onSuccess: () => {
       void refetchClaims();
       setMarkPaidOpen(false);
       setSelectedClaim(null);
       setPaymentRef("");
+      setClaimStorageUrl("");
+      setClaimExpenseCoaId("");
+      setClaimOffsetCoaId("");
+      setClaimBalanceAccountId("");
+    },
+  });
+
+  const settlementMutation = api.finance.settleBailoutTransaction.useMutation({
+    onSuccess: () => {
+      void refetchBailoutSettlements();
+      void refetchSettlementJournals();
+      setSettlementOpen(false);
+      setSelectedSettlementBailout(null);
+      setSettlementExpenseCoaId("");
+      setSettlementAdvanceCoaId("");
+      setSettlementRef("");
     },
   });
 
@@ -233,13 +319,45 @@ export default function FinanceDashboard() {
   function openDisburse(b: Bailout) {
     setSelectedBailout(b);
     setDisbursementRef("");
+    setBailoutStorageUrl("");
+    setBailoutExpenseCoaId(
+      activeCoas.find((coa) => coa.accountType === "ASSET")?.id ?? "",
+    );
+    setBailoutOffsetCoaId(
+      balanceAccounts[0]?.defaultChartOfAccountId ??
+        activeCoas.find((coa) => coa.accountType === "ASSET")?.id ??
+        "",
+    );
+    setBailoutBalanceAccountId(balanceAccounts[0]?.id ?? "");
     setDisburseOpen(true);
   }
 
   function openMarkPaid(c: Claim) {
     setSelectedClaim(c);
     setPaymentRef("");
+    setClaimStorageUrl("");
+    setClaimExpenseCoaId(
+      activeCoas.find((coa) => coa.accountType === "EXPENSE")?.id ?? "",
+    );
+    setClaimOffsetCoaId(
+      balanceAccounts[0]?.defaultChartOfAccountId ??
+        activeCoas.find((coa) => coa.accountType === "ASSET")?.id ??
+        "",
+    );
+    setClaimBalanceAccountId(balanceAccounts[0]?.id ?? "");
     setMarkPaidOpen(true);
+  }
+
+  function openSettlement(b: Bailout) {
+    setSelectedSettlementBailout(b);
+    setSettlementExpenseCoaId(
+      activeCoas.find((coa) => coa.accountType === "EXPENSE")?.id ?? "",
+    );
+    setSettlementAdvanceCoaId(
+      activeCoas.find((coa) => coa.accountType === "ASSET")?.id ?? "",
+    );
+    setSettlementRef("");
+    setSettlementOpen(true);
   }
 
   function openLock(t: TravelRequest) {
@@ -255,47 +373,78 @@ export default function FinanceDashboard() {
   if (!session || !isAllowed) return null;
 
   const tabs: Array<{ id: ActiveTab; label: string; badge?: number }> = [
-    { id: "bailouts", label: "Bailout Disbursements", badge: bailouts.length },
-    { id: "claims", label: "Claim Payments", badge: claims.length },
+    { id: "bailouts", label: "Pencairan Bailout", badge: bailouts.length },
+    { id: "claims", label: "Pembayaran Klaim", badge: claims.length },
+    { id: "settlement", label: "Settlement Bailout", badge: unsettledBailouts.length },
     {
       id: "travel",
-      label: "Travel Requests",
+      label: "Perjalanan Dinas",
       badge: travelApproved.length + travelLocked.length,
     },
-    { id: "accounts", label: "Balance Accounts" },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Finance Dashboard"
-        description="Manage disbursements, claim payments, and travel request lifecycle"
+        title="Dasbor Keuangan"
+        description="Kelola pencairan bailout, pembayaran klaim, dan siklus perjalanan dinas"
+        primaryAction={{
+          label: "Lihat Jurnal",
+          href: "/journal",
+        }}
+        secondaryAction={{
+          label: "Akuntansi Perusahaan",
+          href: "/accounting",
+        }}
       />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
-          label="Pending Disbursements"
+          label="Pencairan Tertunda"
           value={bailouts.length}
-          unit="bailouts"
+          unit="bailout"
           color="yellow"
         />
         <SummaryCard
-          label="Approved Claims"
+          label="Bailout Belum Settlement"
+          value={unsettledBailouts.length}
+          unit="siap diproses"
+          color="gray"
+        />
+        <SummaryCard
+          label="Klaim Disetujui"
           value={pendingClaimsCount}
-          unit="awaiting payment"
+          unit="menunggu pembayaran"
           color="blue"
         />
         <SummaryCard
-          label="Travel Requests to Lock"
+          label="Perjalanan Siap Dikunci"
           value={travelApproved.length}
-          unit="approved"
+          unit="disetujui"
           color="purple"
         />
         <SummaryCard
-          label="Pending Payment Amount"
+          label="Nominal Pembayaran Tertunda"
           value={formatCurrency(pendingPaymentAmount)}
           color="green"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <QuickLinkCard
+          title="Jurnal"
+          description="Lihat seluruh transaksi debit dan kredit yang sudah tercatat."
+          href="/journal"
+          cta="Buka Jurnal"
+          icon="🧾"
+        />
+        <QuickLinkCard
+          title="Akuntansi Perusahaan"
+          description="Kelola akun saldo perusahaan dan lakukan penyesuaian saldo."
+          href="/accounting"
+          cta="Buka Halaman Akuntansi"
+          icon="🏦"
         />
       </div>
 
@@ -338,6 +487,13 @@ export default function FinanceDashboard() {
           onMarkPaid={openMarkPaid}
         />
       )}
+      {activeTab === "settlement" && (
+        <BailoutSettlementTab
+          bailouts={unsettledBailouts}
+          isLoading={loadingBailoutSettlements}
+          onSettle={openSettlement}
+        />
+      )}
       {activeTab === "travel" && (
         <TravelTab
           approved={travelApproved}
@@ -347,19 +503,11 @@ export default function FinanceDashboard() {
           onClose={openClose}
         />
       )}
-      {activeTab === "accounts" && (
-        <AccountsTab
-          accounts={accounts}
-          isLoading={loadingAccounts}
-          onRefresh={() => void refetchAccounts()}
-        />
-      )}
-
       {/* ── Disburse Bailout Modal ───────────────────────────────────────── */}
       <Modal
         isOpen={disburseOpen}
         onClose={() => setDisburseOpen(false)}
-        title="Disburse Bailout"
+        title="Cairkan Bailout"
       >
         {selectedBailout && (
           <div className="space-y-4">
@@ -377,38 +525,105 @@ export default function FinanceDashboard() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
-                Disbursement Reference{" "}
-                <span className="text-gray-400">(optional)</span>
+                Referensi Pencairan <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 value={disbursementRef}
                 onChange={(e) => setDisbursementRef(e.target.value)}
-                placeholder="e.g. BANK-TFR-20260225"
+                placeholder="contoh: BANK-TFR-20260225"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            {disburseMutation.error && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Tautan Bukti Pencairan <span className="text-red-500">*</span>
+              </label>
+              <p className="mb-1 text-xs text-gray-500">
+                Bailout dicatat sebagai uang muka perjalanan. Pilih akun aset untuk uang muka dan akun aset kas/bank sebagai lawannya.
+              </p>
+              <input
+                type="url"
+                value={bailoutStorageUrl}
+                onChange={(e) => setBailoutStorageUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <SelectField
+              label="Bagan Akun Uang Muka"
+              value={bailoutExpenseCoaId}
+              onChange={setBailoutExpenseCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "ASSET")
+                .map((coa) => ({
+                  value: coa.id,
+                  label: `${coa.code} - ${coa.name}`,
+                }))}
+            />
+            <SelectField
+              label="Bagan Akun Kas/Bank"
+              value={bailoutOffsetCoaId}
+              onChange={setBailoutOffsetCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "ASSET")
+                .map((coa) => ({
+                  value: coa.id,
+                  label: `${coa.code} - ${coa.name}`,
+                }))}
+            />
+            <SelectField
+              label="Akun Saldo"
+              value={bailoutBalanceAccountId}
+              onChange={(value) => {
+                setBailoutBalanceAccountId(value);
+                const selected = balanceAccounts.find((account) => account.id === value);
+                if (selected?.defaultChartOfAccountId) {
+                  setBailoutOffsetCoaId(selected.defaultChartOfAccountId);
+                }
+              }}
+              options={balanceAccounts.map((account) => ({
+                value: account.id,
+                label: `${account.code} - ${account.name}`,
+              }))}
+            />
+            {(disburseMutation.error || processBailoutMutation.error) && (
               <p className="text-sm text-red-600">
-                {disburseMutation.error.message}
+                {disburseMutation.error?.message ?? processBailoutMutation.error?.message}
               </p>
             )}
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setDisburseOpen(false)}>
-                Cancel
+                Batal
               </Button>
               <Button
                 variant="primary"
-                isLoading={disburseMutation.isPending}
-                onClick={() => {
+                isLoading={disburseMutation.isPending || processBailoutMutation.isPending}
+                disabled={
+                  !disbursementRef.trim() ||
+                  !bailoutStorageUrl.trim() ||
+                  !bailoutExpenseCoaId ||
+                  !bailoutOffsetCoaId ||
+                  !bailoutBalanceAccountId
+                }
+                onClick={async () => {
                   if (!selectedBailout) return;
-                  disburseMutation.mutate({
+                  await disburseMutation.mutateAsync({
                     id: selectedBailout.id,
-                    disbursementRef: disbursementRef.trim() || undefined,
+                    disbursementRef: disbursementRef.trim(),
+                    storageUrl: bailoutStorageUrl.trim(),
+                  });
+                  await processBailoutMutation.mutateAsync({
+                    bailoutId: selectedBailout.id,
+                    storageUrl: bailoutStorageUrl.trim(),
+                    chartOfAccountId: bailoutExpenseCoaId,
+                    offsetChartOfAccountId: bailoutOffsetCoaId,
+                    balanceAccountId: bailoutBalanceAccountId,
+                    referenceNumber: disbursementRef.trim(),
                   });
                 }}
               >
-                Confirm Disbursement
+                Cairkan Uang Muka & Posting Jurnal
               </Button>
             </div>
           </div>
@@ -419,7 +634,7 @@ export default function FinanceDashboard() {
       <Modal
         isOpen={markPaidOpen}
         onClose={() => setMarkPaidOpen(false)}
-        title="Mark Claim as Paid"
+        title="Tandai Klaim Sudah Dibayar"
       >
         {selectedClaim && (
           <div className="space-y-4">
@@ -437,19 +652,68 @@ export default function FinanceDashboard() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
-                Payment Reference <span className="text-red-500">*</span>
+                Referensi Pembayaran <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 value={paymentRef}
                 onChange={(e) => setPaymentRef(e.target.value)}
-                placeholder="e.g. BANK-TFR-20260225"
+                placeholder="contoh: BANK-TFR-20260225"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            {markPaidMutation.error && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Tautan Bukti Pembayaran <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="url"
+                value={claimStorageUrl}
+                onChange={(e) => setClaimStorageUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <SelectField
+              label="Bagan Akun Beban"
+              value={claimExpenseCoaId}
+              onChange={setClaimExpenseCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "EXPENSE")
+                .map((coa) => ({
+                  value: coa.id,
+                  label: `${coa.code} - ${coa.name}`,
+                }))}
+            />
+            <SelectField
+              label="Bagan Akun Kas/Bank"
+              value={claimOffsetCoaId}
+              onChange={setClaimOffsetCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "ASSET")
+                .map((coa) => ({
+                  value: coa.id,
+                  label: `${coa.code} - ${coa.name}`,
+                }))}
+            />
+            <SelectField
+              label="Akun Saldo"
+              value={claimBalanceAccountId}
+              onChange={(value) => {
+                setClaimBalanceAccountId(value);
+                const selected = balanceAccounts.find((account) => account.id === value);
+                if (selected?.defaultChartOfAccountId) {
+                  setClaimOffsetCoaId(selected.defaultChartOfAccountId);
+                }
+              }}
+              options={balanceAccounts.map((account) => ({
+                value: account.id,
+                label: `${account.code} - ${account.name}`,
+              }))}
+            />
+            {(markPaidMutation.error || processClaimMutation.error) && (
               <p className="text-sm text-red-600">
-                {markPaidMutation.error.message}
+                {markPaidMutation.error?.message ?? processClaimMutation.error?.message}
               </p>
             )}
             <div className="flex justify-end gap-3">
@@ -457,21 +721,109 @@ export default function FinanceDashboard() {
                 variant="secondary"
                 onClick={() => setMarkPaidOpen(false)}
               >
-                Cancel
+                Batal
               </Button>
               <Button
                 variant="primary"
-                isLoading={markPaidMutation.isPending}
-                disabled={!paymentRef.trim()}
-                onClick={() => {
+                isLoading={markPaidMutation.isPending || processClaimMutation.isPending}
+                disabled={
+                  !paymentRef.trim() ||
+                  !claimStorageUrl.trim() ||
+                  !claimExpenseCoaId ||
+                  !claimOffsetCoaId ||
+                  !claimBalanceAccountId
+                }
+                onClick={async () => {
                   if (!selectedClaim || !paymentRef.trim()) return;
-                  markPaidMutation.mutate({
+                  await markPaidMutation.mutateAsync({
                     id: selectedClaim.id,
                     paymentReference: paymentRef.trim(),
                   });
+                  await processClaimMutation.mutateAsync({
+                    claimId: selectedClaim.id,
+                    storageUrl: claimStorageUrl.trim(),
+                    chartOfAccountId: claimExpenseCoaId,
+                    offsetChartOfAccountId: claimOffsetCoaId,
+                    balanceAccountId: claimBalanceAccountId,
+                    referenceNumber: paymentRef.trim(),
+                  });
                 }}
               >
-                Mark as Paid
+                Bayar & Posting Jurnal
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={settlementOpen}
+        onClose={() => setSettlementOpen(false)}
+        title="Settlement Bailout"
+      >
+        {selectedSettlementBailout && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-gray-50 p-4 text-sm">
+              <p className="font-semibold text-gray-900">
+                {selectedSettlementBailout.requester.name ?? "—"}
+              </p>
+              <p className="text-gray-500">
+                {selectedSettlementBailout.travelRequest.requestNumber} · {selectedSettlementBailout.travelRequest.destination}
+              </p>
+              <p className="mt-1 font-mono text-gray-500">Settlement untuk bailout yang sudah dicairkan</p>
+              <p className="mt-2 text-lg font-bold text-blue-700">
+                {formatCurrency(selectedSettlementBailout.amount)}
+              </p>
+            </div>
+            <SelectField
+              label="Bagan Akun Beban"
+              value={settlementExpenseCoaId}
+              onChange={setSettlementExpenseCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "EXPENSE")
+                .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }))}
+            />
+            <SelectField
+              label="Bagan Akun Uang Muka"
+              value={settlementAdvanceCoaId}
+              onChange={setSettlementAdvanceCoaId}
+              options={activeCoas
+                .filter((coa) => coa.accountType === "ASSET")
+                .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }))}
+            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Nomor Referensi <span className="text-gray-400">(opsional)</span>
+              </label>
+              <input
+                type="text"
+                value={settlementRef}
+                onChange={(e) => setSettlementRef(e.target.value)}
+                placeholder="contoh: STL-BLT-20260316"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            {settlementMutation.error && (
+              <p className="text-sm text-red-600">{settlementMutation.error.message}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setSettlementOpen(false)}>
+                Batal
+              </Button>
+              <Button
+                isLoading={settlementMutation.isPending}
+                disabled={!settlementExpenseCoaId || !settlementAdvanceCoaId}
+                onClick={() => {
+                  if (!selectedSettlementBailout) return;
+                  settlementMutation.mutate({
+                    bailoutId: selectedSettlementBailout.id,
+                    expenseChartOfAccountId: settlementExpenseCoaId,
+                    advanceChartOfAccountId: settlementAdvanceCoaId,
+                    referenceNumber: settlementRef.trim() || undefined,
+                  });
+                }}
+              >
+                Posting Settlement
               </Button>
             </div>
           </div>
@@ -485,9 +837,9 @@ export default function FinanceDashboard() {
         onConfirm={() => {
           if (selectedTravel) lockMutation.mutate({ id: selectedTravel.id });
         }}
-        title="Lock Travel Request"
-        message={`Lock travel request ${selectedTravel?.requestNumber ?? ""}? Participants will be able to submit expense claims once locked.`}
-        confirmLabel="Lock"
+        title="Kunci Perjalanan Dinas"
+        message={`Kunci perjalanan dinas ${selectedTravel?.requestNumber ?? ""}? Peserta akan dapat mengajukan klaim biaya setelah dikunci.`}
+        confirmLabel="Kunci"
         isLoading={lockMutation.isPending}
         variant="warning"
       />
@@ -499,9 +851,9 @@ export default function FinanceDashboard() {
         onConfirm={() => {
           if (selectedTravel) closeMutation.mutate({ id: selectedTravel.id });
         }}
-        title="Close Travel Request"
-        message={`Close travel request ${selectedTravel?.requestNumber ?? ""}? All unsettled claims will block this action — only PAID or REJECTED claims are accepted.`}
-        confirmLabel="Close Request"
+        title="Tutup Perjalanan Dinas"
+        message={`Tutup perjalanan dinas ${selectedTravel?.requestNumber ?? ""}? Semua klaim yang belum selesai akan memblokir aksi ini — hanya klaim PAID atau REJECTED yang diperbolehkan.`}
+        confirmLabel="Tutup Perjalanan"
         isLoading={closeMutation.isPending}
         variant="danger"
       />
@@ -510,6 +862,36 @@ export default function FinanceDashboard() {
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+function QuickLinkCard({
+  title,
+  description,
+  href,
+  cta,
+  icon,
+}: {
+  title: string;
+  description: string;
+  href: string;
+  cta: string;
+  icon: string;
+}) {
+  return (
+    <a
+      href={href}
+      className="rounded-xl border border-gray-200 bg-white p-5 transition hover:border-blue-300 hover:shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-2xl">{icon}</p>
+          <h3 className="mt-3 text-lg font-semibold text-gray-900">{title}</h3>
+          <p className="mt-1 text-sm text-gray-600">{description}</p>
+          <p className="mt-4 text-sm font-semibold text-blue-600">{cta} →</p>
+        </div>
+      </div>
+    </a>
+  );
+}
 
 function SummaryCard({
   label,
@@ -562,8 +944,8 @@ function BailoutsTab({
   if (bailouts.length === 0)
     return (
       <EmptyState
-        title="No pending disbursements"
-        description="All Director-approved bailouts have been disbursed."
+        title="Tidak ada pencairan tertunda"
+        description="Semua bailout yang disetujui direktur sudah dicairkan."
       />
     );
 
@@ -573,22 +955,22 @@ function BailoutsTab({
         <thead className="bg-gray-50">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Requester
+              Pemohon
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Travel Request
+              No. Perjalanan
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Destination
+              Tujuan
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Amount
+              Nominal
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Submitted
+              Diajukan
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Action
+              Aksi
             </th>
           </tr>
         </thead>
@@ -612,7 +994,7 @@ function BailoutsTab({
               </td>
               <td className="px-4 py-3 text-right">
                 <Button size="sm" variant="primary" onClick={() => onDisburse(b)}>
-                  Disburse
+                  Cairkan
                 </Button>
               </td>
             </tr>
@@ -636,8 +1018,8 @@ function ClaimsTab({
   if (claims.length === 0)
     return (
       <EmptyState
-        title="No approved claims pending payment"
-        description="All approved claims have been paid."
+        title="Tidak ada klaim yang menunggu pembayaran"
+        description="Semua klaim yang disetujui sudah dibayar."
       />
     );
 
@@ -647,25 +1029,25 @@ function ClaimsTab({
         <thead className="bg-gray-50">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Claim #
+              No. Klaim
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Submitter
+              Pengaju
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Travel Request
+              No. Perjalanan
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Type
+              Jenis
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Amount
+              Nominal
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Date
+              Tanggal
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Action
+              Aksi
             </th>
           </tr>
         </thead>
@@ -681,8 +1063,8 @@ function ClaimsTab({
               </td>
               <td className="px-4 py-3 text-gray-600">
                 {c.claimType === "ENTERTAINMENT"
-                  ? "Entertainment"
-                  : "Non-Entertainment"}
+                  ? "Hiburan"
+                  : "Non-Hiburan"}
               </td>
               <td className="px-4 py-3 text-right font-semibold">
                 {formatCurrency(c.amount)}
@@ -696,7 +1078,63 @@ function ClaimsTab({
                   variant="primary"
                   onClick={() => onMarkPaid(c)}
                 >
-                  Mark Paid
+                  Bayar Klaim
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BailoutSettlementTab({
+  bailouts,
+  isLoading,
+  onSettle,
+}: {
+  bailouts: Bailout[];
+  isLoading: boolean;
+  onSettle: (b: Bailout) => void;
+}) {
+  if (isLoading) return <Skeleton />;
+  if (bailouts.length === 0)
+    return (
+      <EmptyState
+        title="Tidak ada bailout untuk settlement"
+        description="Semua bailout yang sudah dicairkan sudah diselesaikan atau belum tersedia untuk settlement."
+      />
+    );
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <table className="min-w-full divide-y divide-gray-200 text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pemohon</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">No. Perjalanan</th>
+            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Tujuan</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Nominal</th>
+            <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 bg-white">
+          {bailouts.map((b) => (
+            <tr key={b.id} className="hover:bg-gray-50">
+              <td className="px-4 py-3 font-medium">{b.requester.name ?? "—"}</td>
+              <td className="px-4 py-3 font-mono text-gray-600">{b.travelRequest.requestNumber}</td>
+              <td className="px-4 py-3 text-gray-600">{b.travelRequest.destination}</td>
+              <td className="px-4 py-3 text-right font-semibold">{formatCurrency(b.amount)}</td>
+              <td className="px-4 py-3 text-center">
+                <span className="inline-flex rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
+                  Siap Settlement
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <Button size="sm" variant="primary" onClick={() => onSettle(b)}>
+                  Settlement
                 </Button>
               </td>
             </tr>
@@ -730,8 +1168,8 @@ function TravelTab({
   if (allRows.length === 0)
     return (
       <EmptyState
-        title="No travel requests pending action"
-        description="All approved travel requests have been locked or closed."
+        title="Tidak ada perjalanan dinas yang menunggu aksi"
+        description="Semua perjalanan dinas yang disetujui sudah dikunci atau ditutup."
       />
     );
 
@@ -741,22 +1179,22 @@ function TravelTab({
         <thead className="bg-gray-50">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Request #
+              No. Perjalanan
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Requester
+              Pemohon
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Destination
+              Tujuan
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Period
+              Periode
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
               Status
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Action
+              Aksi
             </th>
           </tr>
         </thead>
@@ -777,7 +1215,7 @@ function TravelTab({
               <td className="px-4 py-3 text-right">
                 {r.action === "lock" ? (
                   <Button size="sm" variant="primary" onClick={() => onLock(r)}>
-                    Lock
+                    Kunci
                   </Button>
                 ) : (
                   <Button
@@ -785,7 +1223,7 @@ function TravelTab({
                     variant="destructive"
                     onClick={() => onClose(r)}
                   >
-                    Close
+                    Tutup
                   </Button>
                 )}
               </td>
@@ -797,87 +1235,34 @@ function TravelTab({
   );
 }
 
-function AccountsTab({
-  accounts,
-  isLoading,
-  onRefresh,
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
 }: {
-  accounts: BalanceAccount[];
-  isLoading: boolean;
-  onRefresh: () => void;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
 }) {
-  if (isLoading) return <Skeleton />;
-  if (accounts.length === 0)
-    return (
-      <EmptyState
-        title="No balance accounts"
-        description="No balance accounts have been configured yet."
-      />
-    );
-
-  const totalBalance = accounts.reduce((sum, a) => sum + (a.balance ?? 0), 0);
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          Total across all accounts:{" "}
-          <span className="font-semibold text-gray-900">
-            {formatCurrency(totalBalance)}
-          </span>
-        </p>
-        <Button size="sm" variant="secondary" onClick={onRefresh}>
-          Refresh
-        </Button>
-      </div>
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Code
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Name
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Description
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Balance
-              </th>
-              <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Status
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 bg-white">
-            {accounts.map((a) => (
-              <tr key={a.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-mono">{a.code}</td>
-                <td className="px-4 py-3 font-medium">{a.name}</td>
-                <td className="px-4 py-3 text-gray-500">
-                  {a.description ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                  {formatCurrency(a.balance ?? 0)}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span
-                    className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      a.isActive
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-gray-500"
-                    }`}
-                  >
-                    {a.isActive ? "Active" : "Inactive"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div>
+      <label className="mb-1 block text-sm font-medium text-gray-700">
+        {label} <span className="text-red-500">*</span>
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        <option value="">Pilih {label}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
