@@ -59,6 +59,90 @@ function assertSameTenant(ctx: unknown, tenantId: string | null | undefined) {
   }
 }
 
+function assertTenantMatch(
+  expectedTenantId: string | null,
+  actualTenantId: string | null | undefined,
+  entityLabel: string,
+) {
+  if (expectedTenantId !== actualTenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${entityLabel} tidak berada dalam tenant yang sama`,
+    });
+  }
+}
+
+async function assertJournalBuildReferences(
+  tx: DbTx,
+  input: {
+    tenantId: string | null;
+    chartOfAccountId: string;
+    offsetChartOfAccountId: string;
+    balanceAccountId?: string;
+    claimId?: string;
+    bailoutId?: string;
+  },
+) {
+  const [coa, offsetCoa, balanceAccount, claim, bailout] = await Promise.all([
+    tx.chartOfAccount.findUnique({
+      where: { id: input.chartOfAccountId },
+      select: { tenantId: true, isActive: true },
+    }),
+    tx.chartOfAccount.findUnique({
+      where: { id: input.offsetChartOfAccountId },
+      select: { tenantId: true, isActive: true },
+    }),
+    input.balanceAccountId
+      ? tx.balanceAccount.findUnique({
+          where: { id: input.balanceAccountId },
+          select: { tenantId: true, isActive: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    input.claimId
+      ? tx.claim.findUnique({
+          where: { id: input.claimId },
+          select: { tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    input.bailoutId
+      ? tx.bailout.findUnique({
+          where: { id: input.bailoutId },
+          select: { tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!coa || !coa.isActive) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "COA jurnal debit tidak valid" });
+  }
+  if (!offsetCoa || !offsetCoa.isActive) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "COA jurnal kredit tidak valid" });
+  }
+  assertTenantMatch(input.tenantId, coa.tenantId, "COA jurnal debit");
+  assertTenantMatch(input.tenantId, offsetCoa.tenantId, "COA jurnal kredit");
+
+  if (balanceAccount) {
+    if (!balanceAccount.isActive || balanceAccount.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Balance account jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, balanceAccount.tenantId, "Balance account jurnal");
+  }
+
+  if (claim) {
+    if (claim.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Claim jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, claim.tenantId, "Claim jurnal");
+  }
+
+  if (bailout) {
+    if (bailout.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Bailout jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, bailout.tenantId, "Bailout jurnal");
+  }
+}
+
 /** Generate a sequential journal transaction number, e.g. JRN-2026-00001 */
 async function generateJournalNumber(
   db: DbClient,
@@ -123,6 +207,8 @@ async function createPostedDoubleEntryJournal(
     createdById: string;
   },
 ) {
+  await assertJournalBuildReferences(tx, input);
+
   const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient, input.tenantId);
 
   const lines: Prisma.JournalEntryLineCreateWithoutJournalEntryInput[] = [

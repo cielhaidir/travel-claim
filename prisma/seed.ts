@@ -21,6 +21,7 @@ import {
   generateJournalTransactionNumber,
   generateRequestNumber,
 } from "../src/lib/utils/numberGenerators";
+import { bootstrapTenantAccounting } from "../src/lib/accounting/bootstrap";
 
 const prisma = new PrismaClient();
 
@@ -1146,276 +1147,21 @@ async function createSampleBusinessData(input: {
 }
 
 async function createChartOfAccounts(createdById: string, tenantId: string) {
-  const upsertCoa = (
-    code: string,
-    name: string,
-    accountType: "ASSET" | "EQUITY" | "EXPENSE",
-    category: string,
-    subcategory: string | null,
-    parentId: string | null,
-    description: string,
-  ) =>
-    prisma.chartOfAccount.upsert({
-      where: { tenantId_code: { tenantId, code } },
-      update: {},
-      create: {
-        tenantId,
-        code,
-        name,
-        accountType,
-        category,
-        subcategory: subcategory ?? undefined,
-        parentId: parentId ?? undefined,
-        isActive: true,
-        description,
-        createdById,
-        updatedById: createdById,
-      },
+  await prisma.$transaction(async (tx) => {
+    await bootstrapTenantAccounting(tx, {
+      tenantId,
+      userId: createdById,
     });
+  });
 
-  const assetsRoot = await upsertCoa(
-    "1000",
-    "Kas dan Setara Kas",
-    "ASSET",
-    "Assets",
-    null,
-    null,
-    "Akun aset kas dan bank",
-  );
   console.log(`    1000 Kas dan Setara Kas`);
-  await upsertCoa(
-    "1110",
-    "Kas Kecil",
-    "ASSET",
-    "Assets",
-    "Cash",
-    assetsRoot.id,
-    "Akun kas kecil kantor",
-  );
-  await upsertCoa(
-    "1120",
-    "Bank Operasional",
-    "ASSET",
-    "Assets",
-    "Bank",
-    assetsRoot.id,
-    "Akun bank operasional utama",
-  );
-  await upsertCoa(
-    "1130",
-    "Uang Muka Perjalanan",
-    "ASSET",
-    "Assets",
-    "Advance",
-    assetsRoot.id,
-    "Akun uang muka untuk bailout perjalanan dinas",
-  );
-
-  const equityRoot = await upsertCoa(
-    "3000",
-    "Ekuitas",
-    "EQUITY",
-    "Equity",
-    null,
-    null,
-    "Kelompok akun ekuitas",
-  );
   console.log(`    3000 Ekuitas`);
-  await upsertCoa(
-    "3100",
-    "Saldo Awal",
-    "EQUITY",
-    "Equity",
-    "Opening Balance",
-    equityRoot.id,
-    "Akun saldo awal modal/ekuitas",
-  );
-
-  // Root
-  const root = await upsertCoa(
-    "6000",
-    "Operating Expenses",
-    "EXPENSE",
-    "Operating",
-    null,
-    null,
-    "All operating expenses",
-  );
   console.log(`    6000 Operating Expenses`);
-
-  // Travel
-  const travel = await upsertCoa(
-    "6100",
-    "Travel & Transportation",
-    "EXPENSE",
-    "Travel",
-    null,
-    root.id,
-    "All travel and transportation related expenses",
-  );
   console.log(`    6100 Travel & Transportation`);
-  await upsertCoa(
-    "6110",
-    "Airfare",
-    "EXPENSE",
-    "Travel",
-    "Transportation",
-    travel.id,
-    "Air travel expenses",
-  );
-  await upsertCoa(
-    "6120",
-    "Ground Transportation",
-    "EXPENSE",
-    "Travel",
-    "Transportation",
-    travel.id,
-    "Taxi, car rental, fuel, parking expenses",
-  );
-  await upsertCoa(
-    "6130",
-    "Accommodation",
-    "EXPENSE",
-    "Travel",
-    "Lodging",
-    travel.id,
-    "Hotel and lodging expenses",
-  );
-
-  // Meals & Entertainment
-  const meals = await upsertCoa(
-    "6200",
-    "Meals & Entertainment",
-    "EXPENSE",
-    "Entertainment",
-    null,
-    root.id,
-    "Business meals and entertainment expenses",
-  );
   console.log(`    6200 Meals & Entertainment`);
-  await upsertCoa(
-    "6210",
-    "Business Meals",
-    "EXPENSE",
-    "Entertainment",
-    "Meals",
-    meals.id,
-    "Business-related meal expenses",
-  );
-  await upsertCoa(
-    "6220",
-    "Client Entertainment",
-    "EXPENSE",
-    "Entertainment",
-    "Hospitality",
-    meals.id,
-    "Entertainment expenses for clients and prospects",
-  );
-
-  // Communication
-  const comm = await upsertCoa(
-    "6300",
-    "Communication Expenses",
-    "EXPENSE",
-    "Communication",
-    null,
-    root.id,
-    "Phone, internet, and communication expenses",
-  );
   console.log(`    6300 Communication Expenses`);
-  await upsertCoa(
-    "6310",
-    "Phone & Mobile",
-    "EXPENSE",
-    "Communication",
-    "Telecommunications",
-    comm.id,
-    "Phone and mobile billing expenses",
-  );
-
-  // Office & Supplies
-  const office = await upsertCoa(
-    "6400",
-    "Office & Supplies",
-    "EXPENSE",
-    "Office",
-    null,
-    root.id,
-    "Office supplies and equipment expenses",
-  );
-  console.log(`    6400 Office & Supplies`);
-  await upsertCoa(
-    "6410",
-    "Stationery & Supplies",
-    "EXPENSE",
-    "Office",
-    "Supplies",
-    office.id,
-    "Office stationery and supplies",
-  );
-
-  // Employee Benefits
-  const benefits = await upsertCoa(
-    "6500",
-    "Employee Benefits",
-    "EXPENSE",
-    "Benefits",
-    null,
-    root.id,
-    "Employee benefits and welfare expenses",
-  );
-  console.log(`    6500 Employee Benefits`);
-  await upsertCoa(
-    "6510",
-    "BPJS & Health Insurance",
-    "EXPENSE",
-    "Benefits",
-    "Insurance",
-    benefits.id,
-    "BPJS health insurance and medical benefits",
-  );
-  await upsertCoa(
-    "6520",
-    "Overtime Meals",
-    "EXPENSE",
-    "Benefits",
-    "Meals",
-    benefits.id,
-    "Employee overtime meal allowances",
-  );
-
-  // Vehicle
-  const vehicle = await upsertCoa(
-    "6600",
-    "Vehicle Expenses",
-    "EXPENSE",
-    "Vehicle",
-    null,
-    root.id,
-    "Vehicle-related expenses",
-  );
-  console.log(`    6600 Vehicle Expenses`);
-  await upsertCoa(
-    "6610",
-    "Vehicle Maintenance",
-    "EXPENSE",
-    "Vehicle",
-    "Maintenance",
-    vehicle.id,
-    "Motorcycle and vehicle maintenance and service",
-  );
-
-  // Misc
-  await upsertCoa(
-    "6900",
-    "Other Expenses",
-    "EXPENSE",
-    "Miscellaneous",
-    null,
-    root.id,
-    "Other miscellaneous business expenses",
-  );
-  console.log(`    6900 Other Expenses`);
+  console.log(`    6400 Employee Support Expenses`);
+  console.log(`    6500 Office & Equipment`);
 }
 
 main()

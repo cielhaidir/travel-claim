@@ -77,7 +77,30 @@ BEGIN
   END IF;
 END $$;
 
--- 5) Add tenantId columns (nullable during expansion phase)
+-- 5) Ensure UserRole exists for databases created from older migrations
+CREATE TABLE IF NOT EXISTS "UserRole" (
+  "userId" TEXT NOT NULL,
+  "role" "Role" NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "createdBy" TEXT,
+  "tenantId" TEXT,
+  CONSTRAINT "UserRole_pkey" PRIMARY KEY ("userId", "role")
+);
+
+CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole"("role");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'UserRole_userId_fkey'
+  ) THEN
+    ALTER TABLE "UserRole"
+      ADD CONSTRAINT "UserRole_userId_fkey"
+      FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+-- 6) Add tenantId columns (nullable during expansion phase)
 ALTER TABLE "UserRole" ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 ALTER TABLE "Department" ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS "tenantId" TEXT;

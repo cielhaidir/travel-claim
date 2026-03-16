@@ -53,27 +53,9 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    label: "Keuangan",
-    href: "/finance",
-    icon: "💵",
-    roles: ["FINANCE", "ADMIN"],
-  },
-  {
-    label: "Jurnal",
-    href: "/journal",
-    icon: "🧾",
-    roles: ["FINANCE", "ADMIN"],
-  },
-  {
-    label: "Akuntansi Perusahaan",
+    label: "Akuntansi & Keuangan",
     href: "/accounting",
     icon: "🏦",
-    roles: ["FINANCE", "ADMIN"],
-  },
-  {
-    label: "Bagan Akun",
-    href: "/chart-of-accounts",
-    icon: "📋",
     roles: ["FINANCE", "ADMIN"],
   },
   {

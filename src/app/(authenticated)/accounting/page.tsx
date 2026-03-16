@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/trpc/react";
@@ -158,8 +159,8 @@ export default function AccountingPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Akuntansi Perusahaan"
-        description="Kelola akun saldo perusahaan dan lakukan penyesuaian saldo bila diperlukan"
+        title="Akuntansi & Keuangan"
+        description="Pusat menu finance, jurnal, laporan, COA, dan pengelolaan akun saldo dalam satu halaman"
         primaryAction={{
           label: "Tambah Akun",
           onClick: () => setIsCreateOpen(true),
@@ -169,6 +170,49 @@ export default function AccountingPage() {
           onClick: () => void refetch(),
         }}
       />
+
+      <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        <ModuleLinkCard
+          href="/finance"
+          title="Keuangan"
+          description="Proses claim, bailout, settlement, dan transaksi operasional finance"
+        />
+        <ModuleLinkCard
+          href="/journal"
+          title="Jurnal"
+          description="Lihat daftar jurnal tenant aktif dan detail double-entry"
+        />
+        <ModuleLinkCard
+          href="/chart-of-accounts"
+          title="Bagan Akun"
+          description="Kelola COA tenant aktif, struktur akun, dan status akun"
+        />
+        <ModuleLinkCard
+          href="/reports/journal"
+          title="Laporan Jurnal"
+          description="Rekap jurnal per tenant berdasarkan periode, status, dan sumber"
+        />
+        <ModuleLinkCard
+          href="/reports/trial-balance"
+          title="Trial Balance"
+          description="Lihat neraca saldo tenant aktif dari jurnal pada periode tertentu"
+        />
+        <ModuleLinkCard
+          href="/reports/general-ledger"
+          title="General Ledger"
+          description="Buku besar per akun COA dengan running balance tenant aktif"
+        />
+        <ModuleLinkCard
+          href="/reports/expense-summary"
+          title="Expense Summary"
+          description="Ringkasan beban tenant aktif per akun expense dan sumber jurnal"
+        />
+        <ModuleLinkCard
+          href="/dashboard"
+          title="Dashboard Tenant"
+          description="Kembali ke ringkasan operasional dan keuangan tenant aktif"
+        />
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Total Akun" value={accounts.length.toString()} />
@@ -252,6 +296,12 @@ export default function AccountingPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
+                      <Link
+                        href={`/accounting/${account.id}`}
+                        className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                      >
+                        Detail
+                      </Link>
                       <Button size="sm" variant="secondary" onClick={() => openEdit(account)}>
                         Ubah
                       </Button>
@@ -576,6 +626,27 @@ export default function AccountingPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+function ModuleLinkCard({
+  href,
+  title,
+  description,
+}: {
+  href: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+    >
+      <p className="text-sm font-semibold text-gray-900">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-gray-500">{description}</p>
+      <p className="mt-3 text-xs font-semibold text-blue-600">Buka menu →</p>
+    </Link>
   );
 }
 

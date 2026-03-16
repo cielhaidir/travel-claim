@@ -71,6 +71,153 @@ function assertBalanced(lines: Array<{ debitAmount: number; creditAmount: number
   return { totalDebit, totalCredit };
 }
 
+async function validateJournalSourceLinks(
+  ctx: {
+    db: Prisma.TransactionClient | Prisma.DefaultPrismaClient;
+    tenantId?: string | null;
+    isRoot?: boolean;
+  },
+  input: {
+    sourceType?: JournalSourceType;
+    sourceId?: string;
+    claimId?: string;
+    bailoutId?: string;
+  },
+) {
+  if (input.claimId && input.bailoutId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Jurnal hanya boleh terhubung ke salah satu claim atau bailout",
+    });
+  }
+
+  if (input.sourceType === JournalSourceType.CLAIM && !input.claimId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "sourceType CLAIM harus menyertakan claimId",
+    });
+  }
+
+  const requiresBailoutLink =
+    input.sourceType === JournalSourceType.BAILOUT ||
+    input.sourceType === JournalSourceType.SETTLEMENT;
+
+  if (requiresBailoutLink && !input.bailoutId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "sourceType BAILOUT/SETTLEMENT harus menyertakan bailoutId",
+    });
+  }
+
+  if (input.sourceType === JournalSourceType.MANUAL && (input.claimId || input.bailoutId)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Jurnal MANUAL tidak boleh menghubungkan claim atau bailout",
+    });
+  }
+
+  const scopedCtx = { tenantId: ctx.tenantId ?? null, isRoot: ctx.isRoot ?? false };
+
+  if (input.claimId) {
+    const claim = await ctx.db.claim.findFirst({
+      where: withTenantWhere(scopedCtx, {
+        id: input.claimId,
+        deletedAt: null,
+      } satisfies Prisma.ClaimWhereInput),
+      select: { id: true },
+    });
+
+    if (!claim) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Claim tidak ditemukan dalam tenant aktif",
+      });
+    }
+
+    if (input.sourceId && input.sourceId !== input.claimId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "sourceId harus sama dengan claimId untuk jurnal claim",
+      });
+    }
+  }
+
+  if (input.bailoutId) {
+    const bailout = await ctx.db.bailout.findFirst({
+      where: withTenantWhere(scopedCtx, {
+        id: input.bailoutId,
+        deletedAt: null,
+      } satisfies Prisma.BailoutWhereInput),
+      select: { id: true },
+    });
+
+    if (!bailout) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Bailout tidak ditemukan dalam tenant aktif",
+      });
+    }
+
+    if (input.sourceId && input.sourceId !== input.bailoutId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "sourceId harus sama dengan bailoutId untuk jurnal bailout",
+      });
+    }
+  }
+}
+
+async function assertPostingReferencesBelongToJournalTenant(
+  tx: Prisma.TransactionClient,
+  journal: {
+    id: string;
+    tenantId: string | null;
+    lines: Array<{
+      chartOfAccountId: string;
+      balanceAccountId: string | null;
+    }>;
+  },
+) {
+  const coaIds = [...new Set(journal.lines.map((line) => line.chartOfAccountId))];
+  const balanceIds = [...new Set(journal.lines.map((line) => line.balanceAccountId).filter(Boolean))] as string[];
+
+  const [coas, balances] = await Promise.all([
+    tx.chartOfAccount.findMany({
+      where: {
+        id: { in: coaIds },
+        tenantId: journal.tenantId,
+        isActive: true,
+      },
+      select: { id: true },
+    }),
+    balanceIds.length > 0
+      ? tx.balanceAccount.findMany({
+          where: {
+            id: { in: balanceIds },
+            tenantId: journal.tenantId,
+            isActive: true,
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  if (coas.length !== coaIds.length) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Ada bagan akun jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+    });
+  }
+
+  if (balances.length !== balanceIds.length) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Ada akun saldo jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+    });
+  }
+}
+
 const lineInput = z.object({
   chartOfAccountId: z.string().min(1),
   balanceAccountId: z.string().min(1).optional(),
@@ -199,6 +346,15 @@ export const journalEntryRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       assertBalanced(input.lines);
 
+      await validateJournalSourceLinks(
+        {
+          db: ctx.db,
+          tenantId: getTenantScope(ctx).tenantId,
+          isRoot: getTenantScope(ctx).isRoot,
+        },
+        input,
+      );
+
       const tenantId = getTenantScope(ctx).tenantId;
       const journalNumber = await generateJournalEntryNumber(ctx.db, tenantId);
 
@@ -322,8 +478,24 @@ export const journalEntryRouter = createTRPCRouter({
       }));
       assertBalanced(normalizedLines);
 
+      await validateJournalSourceLinks(
+        {
+          db: ctx.db,
+          tenantId: journal.tenantId,
+          isRoot: false,
+        },
+        {
+          sourceType: journal.sourceType ?? undefined,
+          sourceId: journal.sourceId ?? undefined,
+          claimId: journal.claimId ?? undefined,
+          bailoutId: journal.bailoutId ?? undefined,
+        },
+      );
+
       const balanceLines = journal.lines.filter((line) => line.balanceAccountId);
       const result = await ctx.db.$transaction(async (tx) => {
+        await assertPostingReferencesBelongToJournalTenant(tx, journal);
+
         for (const line of balanceLines) {
           if (!line.balanceAccountId) continue;
 

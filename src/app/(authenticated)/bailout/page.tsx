@@ -557,7 +557,7 @@ export default function BailoutApprovalPage() {
   // Single query with no status filter so we always have the full list.
   // „select" uses a stable function reference to avoid infinite re-fetches.
   const { data: allBailouts = [], isLoading } = api.bailout.getAll.useQuery(
-    { limit: 500 },
+    { limit: 100 },
     { select: selectBailouts },
   );
 
