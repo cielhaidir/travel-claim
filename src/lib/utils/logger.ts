@@ -11,6 +11,7 @@
  */
 
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -23,14 +24,37 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-/** Absolute path to the project-root `logs/` directory. */
-const LOG_DIR = path.resolve(process.cwd(), "logs");
+const LOG_DIR_CANDIDATES = [
+  path.resolve(process.cwd(), "logs"),
+  path.join(os.tmpdir(), "travel-claim", "logs"),
+];
 
-/** Ensure the `logs/` directory exists (sync, called once per process). */
-function ensureLogDir(): void {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+let cachedLogDir: string | null | undefined;
+
+/**
+ * Resolve a writable log directory.
+ *
+ * Some deployments run from a read-only app directory (for example `/app` in
+ * containers), so creating `process.cwd()/logs` can fail with EACCES.
+ */
+function getWritableLogDir(): string | null {
+  if (cachedLogDir !== undefined) {
+    return cachedLogDir;
   }
+
+  for (const dir of LOG_DIR_CANDIDATES) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      cachedLogDir = dir;
+      return cachedLogDir;
+    } catch {
+      continue;
+    }
+  }
+
+  cachedLogDir = null;
+  return cachedLogDir;
 }
 
 /**
@@ -84,9 +108,6 @@ export interface Logger {
  *              field in every entry (e.g. `"whatsapp"`).
  */
 export function createLogger(name: string): Logger {
-  ensureLogDir();
-  const filePath = path.join(LOG_DIR, `${name}.log`);
-
   function log(
     level: LogLevel,
     message: string,
@@ -99,7 +120,10 @@ export function createLogger(name: string): Logger {
       message,
       ...context,
     };
-    writeEntry(filePath, entry);
+    const logDir = getWritableLogDir();
+    if (logDir) {
+      writeEntry(path.join(logDir, `${name}.log`), entry);
+    }
     consoleEcho(level, entry);
   }
 
