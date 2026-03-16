@@ -10,7 +10,10 @@ import {
   AuditAction,
   type Prisma,
 } from "../../../../generated/prisma";
-import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
+import {
+  generateApprovalNumber,
+  generateClaimNumber,
+} from "@/lib/utils/numberGenerators";
 
 import {
   createTRPCRouter,
@@ -19,6 +22,28 @@ import {
 } from "@/server/api/trpc";
 import { sendWhatsappPoll, buildClaimApprovalPoll } from "@/lib/utils/whatsapp";
 import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
 
 export const claimRouter = createTRPCRouter({
   // Get all claims with filters
@@ -48,9 +73,9 @@ export const claimRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ClaimWhereInput = {
+      const where: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
-      };
+      });
 
       // Non-finance users can only see their own claims
       if (
@@ -177,8 +202,8 @@ export const claimRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.id },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           submitter: {
             include: {
@@ -262,8 +287,8 @@ export const claimRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // Verify access to travel request
-      const travelRequest = await ctx.db.travelRequest.findUnique({
-        where: { id: input.travelRequestId },
+      const travelRequest = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.travelRequestId }),
         include: {
           participants: true,
         },
@@ -295,10 +320,10 @@ export const claimRouter = createTRPCRouter({
       }
 
       return ctx.db.claim.findMany({
-        where: {
+        where: withTenantWhere(ctx, {
           travelRequestId: input.travelRequestId,
           deletedAt: null,
-        },
+        }),
         include: {
           submitter: {
             select: {
@@ -374,8 +399,8 @@ export const claimRouter = createTRPCRouter({
       const { travelRequestId, ...claimData } = input;
 
       // Verify travel request exists and is approved
-      const travelRequest = await ctx.db.travelRequest.findUnique({
-        where: { id: travelRequestId },
+      const travelRequest = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: travelRequestId }),
         include: {
           participants: true,
         },
@@ -415,19 +440,15 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Generate claim number
-      const year = new Date().getFullYear();
-      const count = await ctx.db.claim.count({
-        where: {
-          claimNumber: {
-            startsWith: `CLM-${year}`,
-          },
-        },
-      });
-      const claimNumber = `CLM-${year}-${String(count + 1).padStart(5, "0")}`;
+      const claimNumber = await generateClaimNumber(
+        ctx.db,
+        getTenantScope(ctx).tenantId,
+      );
 
       // Create claim
       const claim = await ctx.db.claim.create({
         data: {
+          tenantId: travelRequest.tenantId,
           claimNumber,
           travelRequestId,
           submitterId: ctx.session.user.id,
@@ -454,6 +475,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Claim",
@@ -502,8 +524,8 @@ export const claimRouter = createTRPCRouter({
       const { travelRequestId, ...claimData } = input;
 
       // Verify travel request
-      const travelRequest = await ctx.db.travelRequest.findUnique({
-        where: { id: travelRequestId },
+      const travelRequest = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: travelRequestId }),
         include: {
           participants: true,
         },
@@ -543,19 +565,15 @@ export const claimRouter = createTRPCRouter({
       }
 
       // Generate claim number
-      const year = new Date().getFullYear();
-      const count = await ctx.db.claim.count({
-        where: {
-          claimNumber: {
-            startsWith: `CLM-${year}`,
-          },
-        },
-      });
-      const claimNumber = `CLM-${year}-${String(count + 1).padStart(5, "0")}`;
+      const claimNumber = await generateClaimNumber(
+        ctx.db,
+        getTenantScope(ctx).tenantId,
+      );
 
       // Create claim
       const claim = await ctx.db.claim.create({
         data: {
+          tenantId: travelRequest.tenantId,
           claimNumber,
           travelRequestId,
           submitterId: ctx.session.user.id,
@@ -582,6 +600,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Claim",
@@ -637,8 +656,8 @@ export const claimRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, ...updateData } = input;
 
-      const existing = await ctx.db.claim.findUnique({
-        where: { id },
+      const existing = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id }),
       });
 
       if (!existing) {
@@ -696,6 +715,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Claim",
@@ -729,8 +749,8 @@ export const claimRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.id },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           submitter: {
             include: {
@@ -943,7 +963,10 @@ export const claimRouter = createTRPCRouter({
       const approvalsWithNumbers = await Promise.all(
         deduped.map(async (entry) => ({
           ...entry,
-          approvalNumber: await generateApprovalNumber(ctx.db),
+          approvalNumber: await generateApprovalNumber(
+            ctx.db,
+            getTenantScope(ctx).tenantId,
+          ),
         })),
       );
 
@@ -986,6 +1009,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.SUBMIT,
           entityType: "Claim",
@@ -1046,8 +1070,8 @@ export const claimRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.id },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!claim) {
@@ -1078,10 +1102,10 @@ export const claimRouter = createTRPCRouter({
 
       // Update travel request total reimbursed
       const totalPaid = await ctx.db.claim.aggregate({
-        where: {
+        where: withTenantWhere(ctx, {
           travelRequestId: claim.travelRequestId,
           status: ClaimStatus.PAID,
-        },
+        }),
         _sum: {
           amount: true,
         },
@@ -1097,6 +1121,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Claim",
@@ -1116,8 +1141,8 @@ export const claimRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.id },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!claim) {
@@ -1157,6 +1182,7 @@ export const claimRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "Claim",
@@ -1178,9 +1204,9 @@ export const claimRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ClaimWhereInput = {
+      const where: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
-      };
+      });
 
       if (input?.departmentId) {
         where.submitter = {

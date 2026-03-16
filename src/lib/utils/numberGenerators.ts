@@ -13,6 +13,21 @@
 
 import type { PrismaClient } from "../../../generated/prisma";
 
+function parseSuffix(value: string): number {
+  const parts = value.split("-");
+  const last = parts[parts.length - 1] ?? "0";
+  const parsed = Number.parseInt(last, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function buildPrefix(prefix: string, year: number): string {
+  return `${prefix}-${year}`;
+}
+
+function toBusinessNumber(prefix: string, year: number, seq: number): string {
+  return `${prefix}-${year}-${String(seq).padStart(5, "0")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Travel Request number  –  TR-YYYY-NNNNN
 // ---------------------------------------------------------------------------
@@ -26,12 +41,23 @@ import type { PrismaClient } from "../../../generated/prisma";
  */
 export async function generateRequestNumber(
   db: PrismaClient,
-  year = new Date().getFullYear()
+  tenantId: string | null,
+  year = new Date().getFullYear(),
 ): Promise<string> {
-  const count = await db.travelRequest.count({
-    where: { requestNumber: { startsWith: `TR-${year}` } },
+  const prefix = `${buildPrefix("TR", year)}-`;
+  const last = await db.travelRequest.findFirst({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      requestNumber: { startsWith: prefix },
+    },
+    orderBy: { requestNumber: "desc" },
+    select: { requestNumber: true },
   });
-  return `TR-${year}-${String(count + 1).padStart(5, "0")}`;
+  return toBusinessNumber(
+    "TR",
+    year,
+    parseSuffix(last?.requestNumber ?? "") + 1,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -47,12 +73,23 @@ export async function generateRequestNumber(
  */
 export async function generateClaimNumber(
   db: PrismaClient,
-  year = new Date().getFullYear()
+  tenantId: string | null,
+  year = new Date().getFullYear(),
 ): Promise<string> {
-  const count = await db.claim.count({
-    where: { claimNumber: { startsWith: `CLM-${year}` } },
+  const prefix = `${buildPrefix("CLM", year)}-`;
+  const last = await db.claim.findFirst({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      claimNumber: { startsWith: prefix },
+    },
+    orderBy: { claimNumber: "desc" },
+    select: { claimNumber: true },
   });
-  return `CLM-${year}-${String(count + 1).padStart(5, "0")}`;
+  return toBusinessNumber(
+    "CLM",
+    year,
+    parseSuffix(last?.claimNumber ?? "") + 1,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -78,24 +115,66 @@ export async function generateClaimNumber(
  */
 export async function generateApprovalNumber(
   db: PrismaClient,
-  year = new Date().getFullYear()
+  tenantId: string | null,
+  year = new Date().getFullYear(),
 ): Promise<string> {
-  // Use MAX on the numeric suffix instead of COUNT so that deleted rows
-  // (e.g. approvals removed during REVISION re-submit) do not cause
-  // the counter to reset and collide with still-existing numbers.
+  const prefix = `${buildPrefix("APR", year)}-`;
   const last = await db.approval.findFirst({
-    where: { approvalNumber: { startsWith: `APR-${year}-` } },
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      approvalNumber: { startsWith: prefix },
+    },
     orderBy: { approvalNumber: "desc" },
     select: { approvalNumber: true },
   });
 
-  let next = 1;
-  if (last) {
-    // approvalNumber format: APR-YYYY-NNNNN  →  extract last segment
-    const parts = last.approvalNumber.split("-");
-    const lastNum = parseInt(parts[parts.length - 1] ?? "0", 10);
-    if (!isNaN(lastNum)) next = lastNum + 1;
-  }
+  return toBusinessNumber(
+    "APR",
+    year,
+    parseSuffix(last?.approvalNumber ?? "") + 1,
+  );
+}
 
-  return `APR-${year}-${String(next).padStart(5, "0")}`;
+export async function generateBailoutNumber(
+  db: PrismaClient,
+  tenantId: string | null,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("BLT", year)}-`;
+  const last = await db.bailout.findFirst({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      bailoutNumber: { startsWith: prefix },
+    },
+    orderBy: { bailoutNumber: "desc" },
+    select: { bailoutNumber: true },
+  });
+
+  return toBusinessNumber(
+    "BLT",
+    year,
+    parseSuffix(last?.bailoutNumber ?? "") + 1,
+  );
+}
+
+export async function generateJournalTransactionNumber(
+  db: PrismaClient,
+  tenantId: string | null,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("JRN", year)}-`;
+  const last = await db.journalTransaction.findFirst({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      transactionNumber: { startsWith: prefix },
+    },
+    orderBy: { transactionNumber: "desc" },
+    select: { transactionNumber: true },
+  });
+
+  return toBusinessNumber(
+    "JRN",
+    year,
+    parseSuffix(last?.transactionNumber ?? "") + 1,
+  );
 }

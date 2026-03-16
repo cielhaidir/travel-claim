@@ -11,6 +11,7 @@ import {
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
 import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+import { generateBailoutNumber } from "@/lib/utils/numberGenerators";
 
 const SALES_CHIEF_ROLES: string[] = [
   Role.SALES_CHIEF,
@@ -19,6 +20,39 @@ const SALES_CHIEF_ROLES: string[] = [
   Role.ADMIN,
 ];
 const DIRECTOR_ROLES: string[] = [Role.DIRECTOR, Role.ADMIN];
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
+function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
+  const scope = getTenantScope(ctx);
+  if (scope.isRoot) return;
+  if (!scope.tenantId || scope.tenantId !== tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cross-tenant access denied",
+    });
+  }
+}
 
 export const bailoutRouter = createTRPCRouter({
   // ─── GET ALL (by travelRequestId or global) ───────────────────────────────
@@ -42,7 +76,9 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = { deletedAt: null };
+      const where: Record<string, unknown> = withTenantWhere(ctx, {
+        deletedAt: null,
+      });
 
       // Non-privileged users only see their own bailouts
       const privilegedRoles: string[] = [...SALES_CHIEF_ROLES, Role.FINANCE];
@@ -154,8 +190,8 @@ export const bailoutRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           requester: {
             select: { id: true, name: true, email: true, employeeId: true },
@@ -233,13 +269,13 @@ export const bailoutRouter = createTRPCRouter({
         mealLocation: z.string().optional(),
         // Finance assignment
         financeId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if travel request exists
-      const travelRequest = await ctx.db.travelRequest.findUnique({
-        where: { id: input.travelRequestId },
+      const travelRequest = await ctx.db.travelRequest.findFirst({
+        where: withTenantWhere(ctx, { id: input.travelRequestId }),
       });
 
       if (!travelRequest) {
@@ -264,11 +300,10 @@ export const bailoutRouter = createTRPCRouter({
       }
 
       // Generate bailout number
-      const year = new Date().getFullYear();
-      const count = await ctx.db.bailout.count({
-        where: { bailoutNumber: { startsWith: `BLT-${year}` } },
-      });
-      const bailoutNumber = `BLT-${year}-${String(count + 1).padStart(5, "0")}`;
+      const bailoutNumber = await generateBailoutNumber(
+        ctx.db,
+        getTenantScope(ctx).tenantId,
+      );
 
       const {
         travelRequestId,
@@ -281,6 +316,7 @@ export const bailoutRouter = createTRPCRouter({
 
       const bailout = await ctx.db.bailout.create({
         data: {
+          tenantId: travelRequest.tenantId,
           bailoutNumber,
           travelRequestId,
           requesterId: ctx.session.user.id,
@@ -301,6 +337,7 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Bailout",
@@ -317,8 +354,8 @@ export const bailoutRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!bailout) {
@@ -366,6 +403,12 @@ export const bailoutRouter = createTRPCRouter({
             role: { in: [Role.SALES_CHIEF, Role.MANAGER] },
             deletedAt: null,
             phoneNumber: { not: null },
+            memberships: {
+              some: {
+                tenantId: bailout.tenantId ?? undefined,
+                status: "ACTIVE",
+              },
+            },
           },
           select: { phoneNumber: true, name: true },
           take: 5,
@@ -412,8 +455,8 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!bailout) {
@@ -439,6 +482,7 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.APPROVE,
           entityType: "Bailout",
@@ -454,6 +498,12 @@ export const bailoutRouter = createTRPCRouter({
             role: Role.DIRECTOR,
             deletedAt: null,
             phoneNumber: { not: null },
+            memberships: {
+              some: {
+                tenantId: bailout.tenantId ?? undefined,
+                status: "ACTIVE",
+              },
+            },
           },
           select: { phoneNumber: true, name: true },
           take: 5,
@@ -500,6 +550,7 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
+<<<<<<< HEAD
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
         include: {
@@ -514,6 +565,10 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
+=======
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
+>>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {
@@ -539,6 +594,7 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.APPROVE,
           entityType: "Bailout",
@@ -549,8 +605,8 @@ export const bailoutRouter = createTRPCRouter({
 
       // Send notification to requester & finance that bailout is fully approved
       void (async () => {
-        const fullBailout = await ctx.db.bailout.findUnique({
-          where: { id: input.id },
+        const fullBailout = await ctx.db.bailout.findFirst({
+          where: withTenantWhere(ctx, { id: input.id }),
           include: {
             requester: { select: { phoneNumber: true, name: true } },
           },
@@ -627,8 +683,8 @@ export const bailoutRouter = createTRPCRouter({
         }
 
         // Fetch requester name for the message
-        const bailoutWithRequester = await ctx.db.bailout.findUnique({
-          where: { id: input.id },
+        const bailoutWithRequester = await ctx.db.bailout.findFirst({
+          where: withTenantWhere(ctx, { id: input.id }),
           include: {
             requester: { select: { name: true, email: true } },
             travelRequest: {
@@ -657,6 +713,12 @@ export const bailoutRouter = createTRPCRouter({
             role: Role.FINANCE,
             deletedAt: null,
             phoneNumber: { not: null },
+            memberships: {
+              some: {
+                tenantId: bailout.tenantId ?? undefined,
+                status: "ACTIVE",
+              },
+            },
           },
           select: { phoneNumber: true },
           take: 5,
@@ -690,6 +752,7 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
+<<<<<<< HEAD
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
         include: {
@@ -704,6 +767,10 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
+=======
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
+>>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {
@@ -736,6 +803,7 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.REJECT,
           entityType: "Bailout",
@@ -746,8 +814,8 @@ export const bailoutRouter = createTRPCRouter({
 
       // Send notification to requester that bailout was rejected
       void (async () => {
-        const fullBailout = await ctx.db.bailout.findUnique({
-          where: { id: input.id },
+        const fullBailout = await ctx.db.bailout.findFirst({
+          where: withTenantWhere(ctx, { id: input.id }),
           include: {
             requester: { select: { phoneNumber: true, name: true } },
           },
@@ -778,7 +846,7 @@ export const bailoutRouter = createTRPCRouter({
         id: z.string(),
         disbursementRef: z.string().optional(),
         storageUrl: z.string().url().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -789,6 +857,7 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
+<<<<<<< HEAD
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.id },
         include: {
@@ -803,6 +872,10 @@ export const bailoutRouter = createTRPCRouter({
             select: { id: true },
           },
         },
+=======
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
+>>>>>>> feat/add-multitenant
       });
 
       if (!bailout) {
@@ -844,6 +917,7 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CLOSE,
           entityType: "Bailout",
@@ -871,7 +945,7 @@ export const bailoutRouter = createTRPCRouter({
       }
 
       const bailouts = await ctx.db.bailout.findMany({
-        where: { status: statusFilter, deletedAt: null },
+        where: withTenantWhere(ctx, { status: statusFilter, deletedAt: null }),
         include: {
           requester: {
             select: { id: true, name: true, email: true, employeeId: true },
@@ -902,13 +976,16 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.bailoutId },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.bailoutId }),
         select: { requesterId: true },
       });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       const isOwner = bailout.requesterId === ctx.session.user.id;
@@ -919,14 +996,21 @@ export const bailoutRouter = createTRPCRouter({
       ]);
 
       if (!isOwner && !isPrivileged) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak upload file ini" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Tidak berhak upload file ini",
+        });
       }
 
       const { getPresignedUploadUrl, buildStorageKey, getPublicUrl } =
         await import("@/lib/storage/r2");
 
       const key = buildStorageKey("bailouts", input.bailoutId, input.filename);
-      const uploadUrl = await getPresignedUploadUrl(key, input.contentType, 900);
+      const uploadUrl = await getPresignedUploadUrl(
+        key,
+        input.contentType,
+        900,
+      );
 
       return { uploadUrl, key, publicUrl: getPublicUrl(key) };
     }),
@@ -942,13 +1026,16 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         select: { requesterId: true },
       });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       const isOwner = bailout.requesterId === ctx.session.user.id;
@@ -959,7 +1046,10 @@ export const bailoutRouter = createTRPCRouter({
       ]);
 
       if (!isOwner && !isPrivileged) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak mengubah file ini" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Tidak berhak mengubah file ini",
+        });
       }
 
       return ctx.db.bailout.update({
@@ -973,13 +1063,16 @@ export const bailoutRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { id: input.id },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         select: { requesterId: true, storageUrl: true },
       });
 
       if (!bailout) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Bailout tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
       }
 
       const isOwner = bailout.requesterId === ctx.session.user.id;
@@ -990,7 +1083,10 @@ export const bailoutRouter = createTRPCRouter({
       ]);
 
       if (!isOwner && !isPrivileged) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Tidak berhak mengakses file ini" });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Tidak berhak mengakses file ini",
+        });
       }
 
       if (!bailout.storageUrl) {

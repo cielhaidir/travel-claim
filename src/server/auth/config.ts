@@ -20,9 +20,22 @@ type AuthToken = {
   roles?: Role[];
   employeeId?: string | null;
   departmentId?: string | null;
+  activeTenantId?: string | null;
+  isRoot?: boolean;
+  memberships?: AuthTenantMembership[];
   email?: string;
   name?: string | null;
   picture?: string | null;
+};
+
+type AuthTenantMembership = {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  role: Role;
+  status: "ACTIVE" | "INVITED" | "SUSPENDED";
+  isDefault: boolean;
+  isRootTenant: boolean;
 };
 
 /**
@@ -40,6 +53,9 @@ declare module "next-auth" {
       email: string;
       employeeId: string | null;
       departmentId: string | null;
+      activeTenantId: string | null;
+      isRoot: boolean;
+      memberships: AuthTenantMembership[];
     } & DefaultSession["user"];
   }
 
@@ -48,6 +64,9 @@ declare module "next-auth" {
     roles: Role[];
     employeeId: string | null;
     departmentId: string | null;
+    activeTenantId: string | null;
+    isRoot: boolean;
+    memberships: AuthTenantMembership[];
   }
 }
 
@@ -65,6 +84,178 @@ async function getUserRoles(
     roles: rows.map((row) => row.role),
     role: fallbackRole,
   });
+}
+
+async function getUserMemberships(
+  userId: string,
+): Promise<AuthTenantMembership[]> {
+  try {
+    const memberships = await db.$queryRaw<
+      Array<{
+        tenantId: string;
+        tenantName: string;
+        tenantSlug: string;
+        role: string;
+        status: string;
+        isDefault: boolean;
+        isRootTenant: boolean;
+      }>
+    >`
+      SELECT
+        tm."tenantId" as "tenantId",
+        t."name" as "tenantName",
+        t."slug" as "tenantSlug",
+        tm."role"::text as "role",
+        tm."status"::text as "status",
+        tm."isDefault" as "isDefault",
+        t."isRoot" as "isRootTenant"
+      FROM "TenantMembership" tm
+      INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
+      WHERE tm."userId" = ${userId}
+      ORDER BY tm."isDefault" DESC, tm."createdAt" ASC
+    `;
+
+    return memberships.map((membership) => ({
+      tenantId: membership.tenantId,
+      tenantName: membership.tenantName,
+      tenantSlug: membership.tenantSlug,
+      role: membership.role as Role,
+      status: membership.status as AuthTenantMembership["status"],
+      isDefault: membership.isDefault,
+      isRootTenant: membership.isRootTenant,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function resolveActiveTenantId(input: {
+  memberships: AuthTenantMembership[];
+  currentTenantId?: string | null;
+  isRoot: boolean;
+}): string | null {
+  const { memberships, currentTenantId, isRoot } = input;
+  const activeMemberships = memberships.filter((m) => m.status === "ACTIVE");
+
+  if (
+    currentTenantId &&
+    activeMemberships.some(
+      (membership) => membership.tenantId === currentTenantId,
+    )
+  ) {
+    return currentTenantId;
+  }
+
+  const defaultMembership = activeMemberships.find(
+    (membership) => membership.isDefault,
+  );
+  if (defaultMembership) {
+    return defaultMembership.tenantId;
+  }
+
+  if (activeMemberships[0]) {
+    return activeMemberships[0].tenantId;
+  }
+
+  if (isRoot) {
+    const rootMembership = memberships.find(
+      (membership) => membership.isRootTenant,
+    );
+    return rootMembership?.tenantId ?? null;
+  }
+
+  return null;
+}
+
+function hasRootAccess(roles: readonly Role[]): boolean {
+  return roles.includes("ROOT" as Role);
+}
+
+async function ensureTenantBootstrapRows(): Promise<{
+  defaultTenantId: string | null;
+  rootTenantId: string | null;
+}> {
+  try {
+    await db.$executeRaw`
+      INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+      VALUES (md5(random()::text || clock_timestamp()::text), 'root', 'Root Tenant', true, NOW(), NOW())
+      ON CONFLICT ("slug") DO UPDATE
+      SET "name" = EXCLUDED."name", "isRoot" = true, "updatedAt" = NOW()
+    `;
+
+    await db.$executeRaw`
+      INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+      VALUES (md5(random()::text || clock_timestamp()::text), 'default', 'Default Tenant', false, NOW(), NOW())
+      ON CONFLICT ("slug") DO UPDATE
+      SET "name" = EXCLUDED."name", "updatedAt" = NOW()
+    `;
+
+    const rows = await db.$queryRaw<
+      Array<{ slug: string; id: string }>
+    >`SELECT "slug", "id" FROM "Tenant" WHERE "slug" IN ('default', 'root')`;
+
+    return {
+      defaultTenantId: rows.find((row) => row.slug === "default")?.id ?? null,
+      rootTenantId: rows.find((row) => row.slug === "root")?.id ?? null,
+    };
+  } catch {
+    return { defaultTenantId: null, rootTenantId: null };
+  }
+}
+
+async function ensureMembershipsForUser(input: {
+  userId: string;
+  role: Role;
+}): Promise<void> {
+  const { defaultTenantId, rootTenantId } = await ensureTenantBootstrapRows();
+
+  if (!defaultTenantId) {
+    return;
+  }
+
+  try {
+    await db.$executeRaw`
+      INSERT INTO "TenantMembership" (
+        "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
+      )
+      VALUES (
+        md5(random()::text || clock_timestamp()::text),
+        ${input.userId},
+        ${defaultTenantId},
+        ${input.role}::"Role",
+        'ACTIVE'::"MembershipStatus",
+        true,
+        NOW(),
+        NOW(),
+        NOW()
+      )
+      ON CONFLICT ("userId", "tenantId") DO UPDATE
+      SET "status" = 'ACTIVE', "updatedAt" = NOW()
+    `;
+
+    if (input.role === "ROOT" && rootTenantId) {
+      await db.$executeRaw`
+        INSERT INTO "TenantMembership" (
+          "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
+        )
+        VALUES (
+          md5(random()::text || clock_timestamp()::text),
+          ${input.userId},
+          ${rootTenantId},
+          'ROOT'::"Role",
+          'ACTIVE'::"MembershipStatus",
+          false,
+          NOW(),
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT ("userId", "tenantId") DO UPDATE
+        SET "role" = 'ROOT', "status" = 'ACTIVE', "updatedAt" = NOW()
+      `;
+    }
+  } catch {
+    // ignore if migration not applied yet
+  }
 }
 
 /**
@@ -123,15 +314,24 @@ export const authConfig = {
             process.env.NODE_ENV !== "production" &&
             credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
           ) {
+            const roles = await getUserRoles(user.id, user.role as Role);
+            const memberships = await getUserMemberships(user.id);
+            const isRoot = hasRootAccess(roles);
             console.log(
               `[auth] authorize: bypass key accepted for ${user.email}.`,
             );
             return {
+              activeTenantId: resolveActiveTenantId({
+                memberships,
+                isRoot,
+              }),
+              isRoot,
+              memberships,
               id: user.id,
               name: user.name,
               email: user.email,
               role: user.role,
-              roles: normalizeRoles({ roles: [], role: user.role }),
+              roles,
               employeeId: user.employeeId,
               departmentId: user.departmentId,
             };
@@ -162,12 +362,19 @@ export const authConfig = {
             return null;
           }
 
+          const roles = await getUserRoles(user.id, user.role as Role);
+          const memberships = await getUserMemberships(user.id);
+          const isRoot = hasRootAccess(roles);
+
           return {
+            activeTenantId: resolveActiveTenantId({ memberships, isRoot }),
+            isRoot,
+            memberships,
             id: user.id,
             name: user.name,
             email: user.email,
             role: user.role,
-            roles: normalizeRoles({ roles: [], role: user.role }),
+            roles,
             employeeId: user.employeeId,
             departmentId: user.departmentId,
           };
@@ -257,6 +464,10 @@ export const authConfig = {
             VALUES (${newUser.id}, ${DEFAULT_USER_ROLES[0]}::"Role", NOW())
             ON CONFLICT ("userId", "role") DO NOTHING
           `;
+          await ensureMembershipsForUser({
+            userId: newUser.id,
+            role: newUser.role as Role,
+          });
         } else {
           // Update existing user profile
           await db.user.update({
@@ -267,6 +478,10 @@ export const authConfig = {
               emailVerified: existingUser.emailVerified ?? new Date(),
               updatedAt: new Date(),
             },
+          });
+          await ensureMembershipsForUser({
+            userId: existingUser.id,
+            role: existingUser.role as Role,
           });
         }
 
@@ -293,6 +508,13 @@ export const authConfig = {
           });
           authToken.employeeId = user.employeeId;
           authToken.departmentId = user.departmentId;
+          authToken.memberships = user.memberships;
+          authToken.isRoot = user.isRoot;
+          authToken.activeTenantId = resolveActiveTenantId({
+            memberships: user.memberships,
+            currentTenantId: user.activeTenantId,
+            isRoot: user.isRoot,
+          });
           authToken.email = user.email ?? undefined;
           authToken.name = user.name;
           authToken.picture = user.image;
@@ -312,6 +534,7 @@ export const authConfig = {
           });
 
           if (dbUser) {
+            const memberships = await getUserMemberships(dbUser.id);
             authToken.id = dbUser.id;
             authToken.roles = await getUserRoles(
               dbUser.id,
@@ -320,6 +543,13 @@ export const authConfig = {
             authToken.role = derivePrimaryRole(authToken.roles);
             authToken.employeeId = dbUser.employeeId;
             authToken.departmentId = dbUser.departmentId;
+            authToken.memberships = memberships;
+            authToken.isRoot = hasRootAccess(authToken.roles);
+            authToken.activeTenantId = resolveActiveTenantId({
+              memberships,
+              currentTenantId: authToken.activeTenantId,
+              isRoot: authToken.isRoot,
+            });
             authToken.email = dbUser.email ?? undefined;
             authToken.name = dbUser.name;
             authToken.picture = dbUser.image;
@@ -343,10 +573,18 @@ export const authConfig = {
         });
 
         if (dbUser) {
+          const memberships = await getUserMemberships(dbUser.id);
           authToken.roles = await getUserRoles(dbUser.id, dbUser.role as Role);
           authToken.role = derivePrimaryRole(authToken.roles);
           authToken.employeeId = dbUser.employeeId;
           authToken.departmentId = dbUser.departmentId;
+          authToken.memberships = memberships;
+          authToken.isRoot = hasRootAccess(authToken.roles);
+          authToken.activeTenantId = resolveActiveTenantId({
+            memberships,
+            currentTenantId: authToken.activeTenantId,
+            isRoot: authToken.isRoot,
+          });
           authToken.email = dbUser.email ?? undefined;
           authToken.name = dbUser.name;
           authToken.picture = dbUser.image;
@@ -369,6 +607,9 @@ export const authConfig = {
         session.user.role = derivePrimaryRole(roles);
         session.user.employeeId = authToken.employeeId as string | null;
         session.user.departmentId = authToken.departmentId as string | null;
+        session.user.activeTenantId = authToken.activeTenantId ?? null;
+        session.user.isRoot = authToken.isRoot ?? false;
+        session.user.memberships = authToken.memberships ?? [];
         session.user.email = authToken.email as string;
         session.user.name = authToken.name as string;
         session.user.image = authToken.picture as string;

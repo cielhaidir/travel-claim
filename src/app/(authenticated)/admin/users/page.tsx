@@ -49,6 +49,7 @@ interface UserFormData {
 // ─────────────────────────── Constants ───────────────────────────
 
 const ROLE_LABELS: Record<Role, string> = {
+  ROOT: "Root",
   EMPLOYEE: "Employee",
   SUPERVISOR: "Supervisor",
   MANAGER: "Manager",
@@ -60,6 +61,7 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ROLE_COLORS: Record<Role, string> = {
+  ROOT: "bg-black text-white",
   EMPLOYEE: "bg-gray-100 text-gray-700",
   SUPERVISOR: "bg-blue-100 text-blue-700",
   MANAGER: "bg-purple-100 text-purple-700",
@@ -88,7 +90,7 @@ export default function UserManagementPage() {
   const router = useRouter();
   const userRole = session?.user?.role ?? "EMPLOYEE";
 
-  if (userRole !== "ADMIN") {
+  if (userRole !== "ADMIN" && userRole !== "ROOT") {
     router.replace("/");
     return null;
   }
@@ -130,7 +132,9 @@ function UserManagementContent() {
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
   const [importPassword, setImportPassword] = useState("Password@123");
   const [importError, setImportError] = useState("");
-  const [importResults, setImportResults] = useState<ImportResult[] | null>(null);
+  const [importResults, setImportResults] = useState<ImportResult[] | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form & password state
@@ -140,14 +144,18 @@ function UserManagementContent() {
 
   // Queries
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const { data: rawUsers, isLoading, refetch } = api.user.getAll.useQuery(
+  const {
+    data: rawUsers,
+    isLoading,
+    refetch,
+  } = api.user.getAll.useQuery(
     {
       role: roleFilter === "ALL" ? undefined : roleFilter,
       departmentId: deptFilter || undefined,
       search: search || undefined,
       limit: 100,
     },
-    { refetchOnWindowFocus: false }
+    { refetchOnWindowFocus: false },
   );
   const users = (rawUsers as { users: UserRef[] } | undefined)?.users ?? [];
 
@@ -157,25 +165,46 @@ function UserManagementContent() {
 
   // Mutations
   const createMutation = api.user.create.useMutation({
-    onSuccess: () => { void refetch(); setIsCreateOpen(false); setForm(DEFAULT_FORM); setFormError(""); },
+    onSuccess: () => {
+      void refetch();
+      setIsCreateOpen(false);
+      setForm(DEFAULT_FORM);
+      setFormError("");
+    },
     onError: (e) => setFormError(e.message),
   });
   const updateMutation = api.user.update.useMutation({
-    onSuccess: () => { void refetch(); setEditingUser(null); setFormError(""); },
+    onSuccess: () => {
+      void refetch();
+      setEditingUser(null);
+      setFormError("");
+    },
     onError: (e) => setFormError(e.message),
   });
   const deleteMutation = api.user.delete.useMutation({
-    onSuccess: () => { void refetch(); setDeletingUser(null); },
+    onSuccess: () => {
+      void refetch();
+      setDeletingUser(null);
+    },
     onError: (e) => alert(`Error: ${e.message}`),
   });
   const resetPwMutation = api.user.resetPassword.useMutation({
-    onSuccess: () => { setResetPwUser(null); setNewPassword(""); alert("Password reset successfully."); },
+    onSuccess: () => {
+      setResetPwUser(null);
+      setNewPassword("");
+      alert("Password reset successfully.");
+    },
     onError: (e) => alert(`Error: ${e.message}`),
   });
 
   const bulkImportMutation = api.user.bulkImport.useMutation({
     onSuccess: (data) => {
-      const d = data as { results: ImportResult[]; created: number; skipped: number; total: number };
+      const d = data as {
+        results: ImportResult[];
+        created: number;
+        skipped: number;
+        total: number;
+      };
       setImportResults(d.results);
       void refetch();
     },
@@ -204,11 +233,19 @@ function UserManagementContent() {
         const workbook = XLSX.read(data, { type: "array" });
         const sheetName = workbook.SheetNames[0];
 
-        if (!sheetName) { setImportError("No sheets found in file."); return; }
+        if (!sheetName) {
+          setImportError("No sheets found in file.");
+          return;
+        }
         const sheet = workbook.Sheets[sheetName];
 
-        if (!sheet) { setImportError("Sheet not found in file."); return; }
-        const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        if (!sheet) {
+          setImportError("Sheet not found in file.");
+          return;
+        }
+        const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, {
+          defval: "",
+        });
 
         // Normalize keys (case-insensitive)
         const normalised: ImportRow[] = rows
@@ -220,7 +257,11 @@ function UserManagementContent() {
             return {
               id: lower.id ?? "",
               displayName: lower.displayname ?? lower.display_name ?? "",
-              userPrincipalName: lower.userprincipalname ?? lower.user_principal_name ?? lower.email ?? "",
+              userPrincipalName:
+                lower.userprincipalname ??
+                lower.user_principal_name ??
+                lower.email ??
+                "",
               userType: lower.usertype ?? lower.user_type ?? "",
             };
           })
@@ -230,13 +271,17 @@ function UserManagementContent() {
           .filter((row) => row.displayName && row.userPrincipalName);
 
         if (normalised.length === 0) {
-          setImportError("No valid member rows found. Make sure your file has a 'userType' column with value 'member'.");
+          setImportError(
+            "No valid member rows found. Make sure your file has a 'userType' column with value 'member'.",
+          );
           setImportRows([]);
         } else {
           setImportRows(normalised);
         }
       } catch {
-        setImportError("Failed to parse file. Please upload a valid Excel (.xlsx) or CSV file.");
+        setImportError(
+          "Failed to parse file. Please upload a valid Excel (.xlsx) or CSV file.",
+        );
       }
     };
     reader.readAsArrayBuffer(file);
@@ -260,14 +305,21 @@ function UserManagementContent() {
   };
 
   // Helpers
-  const openCreate = () => { setForm(DEFAULT_FORM); setFormError(""); setIsCreateOpen(true); };
+  const openCreate = () => {
+    setForm(DEFAULT_FORM);
+    setFormError("");
+    setIsCreateOpen(true);
+  };
   const openEdit = (user: UserRef) => {
     setForm({
       name: user.name ?? "",
       email: user.email ?? "",
       password: "",
       employeeId: user.employeeId ?? "",
-      roles: (user.userRoles?.length ?? 0) > 0 ? user.userRoles.map((r) => r.role) : [user.role],
+      roles:
+        (user.userRoles?.length ?? 0) > 0
+          ? user.userRoles.map((r) => r.role)
+          : [user.role],
       departmentId: user.department?.id ?? "",
       supervisorId: user.supervisor?.id ?? "",
       phoneNumber: user.phoneNumber ?? "",
@@ -330,7 +382,7 @@ function UserManagementContent() {
         {departments.map((dept) => {
           const deptUsers = users.filter((u) => u.department?.id === dept.id);
           const chief = deptUsers.find((u) =>
-            ["SUPERVISOR", "MANAGER", "ADMIN"].includes(u.role)
+            ["SUPERVISOR", "MANAGER", "ADMIN"].includes(u.role),
           );
           const isActive = deptFilter === dept.id;
           return (
@@ -342,8 +394,12 @@ function UserManagementContent() {
                 isActive ? "border-blue-500 bg-blue-50" : "bg-white"
               }`}
             >
-              <p className="text-xs font-semibold uppercase text-gray-500">{dept.name}</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">{deptUsers.length}</p>
+              <p className="text-xs font-semibold text-gray-500 uppercase">
+                {dept.name}
+              </p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">
+                {deptUsers.length}
+              </p>
               <p className="mt-0.5 truncate text-xs text-gray-500">
                 {chief ? `Chief: ${chief.name ?? "—"}` : "No chief assigned"}
               </p>
@@ -355,8 +411,12 @@ function UserManagementContent() {
           const directors = users.filter((u) => u.role === "DIRECTOR");
           return (
             <div className="rounded-lg border bg-white p-4">
-              <p className="text-xs font-semibold uppercase text-gray-500">Director</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">{directors.length}</p>
+              <p className="text-xs font-semibold text-gray-500 uppercase">
+                Director
+              </p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">
+                {directors.length}
+              </p>
               <p className="mt-0.5 truncate text-xs text-gray-500">
                 {directors[0]?.name ?? "Not assigned"}
               </p>
@@ -372,12 +432,12 @@ function UserManagementContent() {
           placeholder="Search name, email, employee ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-64 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-64 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
         />
         <select
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value as Role | "ALL")}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
         >
           <option value="ALL">All Roles</option>
           <option value="EMPLOYEE">Employee</option>
@@ -392,16 +452,22 @@ function UserManagementContent() {
         <select
           value={deptFilter}
           onChange={(e) => setDeptFilter(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
         >
           <option value="">All Departments</option>
           {departments.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
           ))}
         </select>
         {(deptFilter || roleFilter !== "ALL" || search) && (
           <button
-            onClick={() => { setDeptFilter(""); setRoleFilter("ALL"); setSearch(""); }}
+            onClick={() => {
+              setDeptFilter("");
+              setRoleFilter("ALL");
+              setSearch("");
+            }}
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
           >
             Clear Filters
@@ -411,7 +477,9 @@ function UserManagementContent() {
 
       {/* User Table */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">Loading…</div>
+        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+          Loading…
+        </div>
       ) : users.length === 0 ? (
         <EmptyState
           icon="👥"
@@ -422,7 +490,7 @@ function UserManagementContent() {
       ) : (
         <div className="overflow-hidden rounded-lg border bg-white">
           <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50 text-left text-xs font-semibold uppercase text-gray-500">
+            <thead className="border-b bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
               <tr>
                 <th className="px-4 py-3">Employee</th>
                 <th className="px-4 py-3">Email</th>
@@ -437,13 +505,22 @@ function UserManagementContent() {
               {users.map((user) => (
                 <tr key={user.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">{user.name ?? "—"}</p>
-                    <p className="text-xs text-gray-500">{user.employeeId ?? "—"}</p>
+                    <p className="font-medium text-gray-900">
+                      {user.name ?? "—"}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user.employeeId ?? "—"}
+                    </p>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{user.email ?? "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {user.email ?? "—"}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {((user.userRoles?.length ?? 0) > 0 ? user.userRoles.map((r) => r.role) : [user.role]).map((r) => (
+                      {((user.userRoles?.length ?? 0) > 0
+                        ? user.userRoles.map((r) => r.role)
+                        : [user.role]
+                      ).map((r) => (
                         <span
                           key={r}
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
@@ -453,9 +530,15 @@ function UserManagementContent() {
                       ))}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{user.department?.name ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{user.supervisor?.name ?? "—"}</td>
-                  <td className="px-4 py-3 text-center text-gray-600">{user._count.directReports}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {user.department?.name ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {user.supervisor?.name ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-center text-gray-600">
+                    {user._count.directReports}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
                       <button
@@ -471,7 +554,10 @@ function UserManagementContent() {
                         Edit
                       </button>
                       <button
-                        onClick={() => { setResetPwUser(user); setNewPassword(""); }}
+                        onClick={() => {
+                          setResetPwUser(user);
+                          setNewPassword("");
+                        }}
                         className="rounded px-2 py-1 text-xs text-amber-600 hover:bg-amber-50"
                       >
                         Reset PW
@@ -497,7 +583,12 @@ function UserManagementContent() {
       {/* ── Modals ──────────────────────────────────────────── */}
 
       {/* Create */}
-      <Modal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} title="Add New User" size="lg">
+      <Modal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Add New User"
+        size="lg"
+      >
         <UserForm
           form={form}
           setForm={setForm}
@@ -545,9 +636,14 @@ function UserManagementContent() {
                 {(viewingUser.name ?? "?")[0]?.toUpperCase()}
               </div>
               <div>
-                <p className="text-lg font-semibold text-gray-900">{viewingUser.name ?? "—"}</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {viewingUser.name ?? "—"}
+                </p>
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {((viewingUser.userRoles?.length ?? 0) > 0 ? viewingUser.userRoles.map((r) => r.role) : [viewingUser.role]).map((r) => (
+                  {((viewingUser.userRoles?.length ?? 0) > 0
+                    ? viewingUser.userRoles.map((r) => r.role)
+                    : [viewingUser.role]
+                  ).map((r) => (
                     <span
                       key={r}
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
@@ -559,25 +655,66 @@ function UserManagementContent() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Employee ID" value={viewingUser.employeeId ?? "—"} />
+              <Field
+                label="Employee ID"
+                value={viewingUser.employeeId ?? "—"}
+              />
               <Field label="Email" value={viewingUser.email ?? "—"} />
               <Field label="Phone" value={viewingUser.phoneNumber ?? "—"} />
-              <Field label="Department" value={viewingUser.department?.name ?? "—"} />
-              <Field label="Supervisor" value={viewingUser.supervisor?.name ?? "—"} />
-              <Field label="Direct Reports" value={String(viewingUser._count.directReports)} />
-              <Field label="Travel Requests" value={String(viewingUser._count.travelRequests)} />
+              <Field
+                label="Department"
+                value={viewingUser.department?.name ?? "—"}
+              />
+              <Field
+                label="Supervisor"
+                value={viewingUser.supervisor?.name ?? "—"}
+              />
+              <Field
+                label="Direct Reports"
+                value={String(viewingUser._count.directReports)}
+              />
+              <Field
+                label="Travel Requests"
+                value={String(viewingUser._count.travelRequests)}
+              />
               <Field label="Claims" value={String(viewingUser._count.claims)} />
-              <Field label="Created At" value={formatDate(viewingUser.createdAt)} />
-              <Field label="Status" value={viewingUser.deletedAt ? "🔴 Deleted" : "🟢 Active"} />
+              <Field
+                label="Created At"
+                value={formatDate(viewingUser.createdAt)}
+              />
+              <Field
+                label="Status"
+                value={viewingUser.deletedAt ? "🔴 Deleted" : "🟢 Active"}
+              />
             </div>
             <div className="flex justify-end gap-3 border-t pt-4">
-              <Button variant="destructive" size="sm" onClick={() => { setDeletingUser(viewingUser); setViewingUser(null); }}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setDeletingUser(viewingUser);
+                  setViewingUser(null);
+                }}
+              >
                 Delete
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => { setResetPwUser(viewingUser); setViewingUser(null); }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setResetPwUser(viewingUser);
+                  setViewingUser(null);
+                }}
+              >
                 Reset Password
               </Button>
-              <Button size="sm" onClick={() => { openEdit(viewingUser); setViewingUser(null); }}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  openEdit(viewingUser);
+                  setViewingUser(null);
+                }}
+              >
                 Edit
               </Button>
             </div>
@@ -589,7 +726,9 @@ function UserManagementContent() {
       <ConfirmModal
         isOpen={!!deletingUser}
         onClose={() => setDeletingUser(null)}
-        onConfirm={() => deletingUser && deleteMutation.mutate({ id: deletingUser.id })}
+        onConfirm={() =>
+          deletingUser && deleteMutation.mutate({ id: deletingUser.id })
+        }
         title="Delete User"
         message={`Delete "${deletingUser?.name ?? "this user"}"? This will soft-delete the account. Users with active direct reports cannot be deleted.`}
         confirmLabel="Delete"
@@ -609,17 +748,23 @@ function UserManagementContent() {
             Set a new password for <strong>{resetPwUser?.name}</strong>.
           </p>
           <div>
-            <label className="block text-xs font-medium text-gray-700">New Password</label>
+            <label className="block text-xs font-medium text-gray-700">
+              New Password
+            </label>
             <input
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="Minimum 8 characters"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="secondary" size="sm" onClick={() => setResetPwUser(null)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setResetPwUser(null)}
+            >
               Cancel
             </Button>
             <Button
@@ -645,17 +790,31 @@ function UserManagementContent() {
           <div className="rounded-lg bg-blue-50 px-4 py-3 text-blue-800">
             <p className="font-medium">Expected columns in your file:</p>
             <ul className="mt-1 list-disc pl-4 text-xs">
-              <li><code>id</code> — optional, Azure/external ID</li>
-              <li><code>displayName</code> — full name (required)</li>
-              <li><code>userPrincipalName</code> — email address (required)</li>
-              <li><code>userType</code> — only rows with value <strong>member</strong> will be imported</li>
+              <li>
+                <code>id</code> — optional, Azure/external ID
+              </li>
+              <li>
+                <code>displayName</code> — full name (required)
+              </li>
+              <li>
+                <code>userPrincipalName</code> — email address (required)
+              </li>
+              <li>
+                <code>userType</code> — only rows with value{" "}
+                <strong>member</strong> will be imported
+              </li>
             </ul>
-            <p className="mt-1 text-xs">Supports <strong>.xlsx</strong>, <strong>.xls</strong>, and <strong>.csv</strong> files.</p>
+            <p className="mt-1 text-xs">
+              Supports <strong>.xlsx</strong>, <strong>.xls</strong>, and{" "}
+              <strong>.csv</strong> files.
+            </p>
           </div>
 
           {/* File picker */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Upload File *</label>
+            <label className="mb-1 block text-xs font-medium text-gray-700">
+              Upload File *
+            </label>
             <input
               ref={fileInputRef}
               type="file"
@@ -667,43 +826,63 @@ function UserManagementContent() {
 
           {/* Default password */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Default Password (min 8 chars) *</label>
+            <label className="mb-1 block text-xs font-medium text-gray-700">
+              Default Password (min 8 chars) *
+            </label>
             <input
               type="text"
               value={importPassword}
               onChange={(e) => setImportPassword(e.target.value)}
               placeholder="Password@123"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
-            <p className="mt-1 text-xs text-gray-500">All imported users will receive this temporary password.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              All imported users will receive this temporary password.
+            </p>
           </div>
 
           {/* Error */}
           {importError && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{importError}</div>
+            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              {importError}
+            </div>
           )}
 
           {/* Preview table */}
           {importRows.length > 0 && !importResults && (
             <div>
               <p className="mb-1 text-xs font-medium text-gray-700">
-                Preview — <span className="text-blue-600">{importRows.length} member row(s)</span> ready to import
+                Preview —{" "}
+                <span className="text-blue-600">
+                  {importRows.length} member row(s)
+                </span>{" "}
+                ready to import
               </p>
               <div className="max-h-52 overflow-y-auto rounded-lg border">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-gray-50 text-left">
                     <tr>
-                      <th className="px-3 py-2 font-semibold text-gray-500">Display Name</th>
-                      <th className="px-3 py-2 font-semibold text-gray-500">Email (UPN)</th>
-                      <th className="px-3 py-2 font-semibold text-gray-500">ID</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        Display Name
+                      </th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        Email (UPN)
+                      </th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        ID
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {importRows.map((row, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2">{row.displayName}</td>
-                        <td className="px-3 py-2 text-gray-600">{row.userPrincipalName}</td>
-                        <td className="px-3 py-2 text-gray-400">{row.id ?? "—"}</td>
+                        <td className="px-3 py-2 text-gray-600">
+                          {row.userPrincipalName}
+                        </td>
+                        <td className="px-3 py-2 text-gray-400">
+                          {row.id ?? "—"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -715,38 +894,56 @@ function UserManagementContent() {
           {/* Results */}
           {importResults && (
             <div>
-              <p className="mb-1 text-xs font-medium text-gray-700">Import Results</p>
+              <p className="mb-1 text-xs font-medium text-gray-700">
+                Import Results
+              </p>
               <div className="max-h-52 overflow-y-auto rounded-lg border">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-gray-50 text-left">
                     <tr>
-                      <th className="px-3 py-2 font-semibold text-gray-500">Email</th>
-                      <th className="px-3 py-2 font-semibold text-gray-500">Status</th>
-                      <th className="px-3 py-2 font-semibold text-gray-500">Reason</th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        Email
+                      </th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        Status
+                      </th>
+                      <th className="px-3 py-2 font-semibold text-gray-500">
+                        Reason
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {importResults.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2">{r.email}</td>
-                        <td className={`px-3 py-2 font-semibold ${r.status === "created" ? "text-green-600" : "text-amber-600"}`}>
+                        <td
+                          className={`px-3 py-2 font-semibold ${r.status === "created" ? "text-green-600" : "text-amber-600"}`}
+                        >
                           {r.status === "created" ? "✓ Created" : "⚠ Skipped"}
                         </td>
-                        <td className="px-3 py-2 text-gray-400">{r.reason ?? "—"}</td>
+                        <td className="px-3 py-2 text-gray-400">
+                          {r.reason ?? "—"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                {importResults.filter((r) => r.status === "created").length} created ·{" "}
-                {importResults.filter((r) => r.status === "skipped").length} skipped
+                {importResults.filter((r) => r.status === "created").length}{" "}
+                created ·{" "}
+                {importResults.filter((r) => r.status === "skipped").length}{" "}
+                skipped
               </p>
             </div>
           )}
 
           <div className="flex justify-end gap-3 border-t pt-4">
-            <Button variant="secondary" size="sm" onClick={() => setIsImportOpen(false)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsImportOpen(false)}
+            >
               {importResults ? "Close" : "Cancel"}
             </Button>
             {!importResults && (
@@ -756,7 +953,8 @@ function UserManagementContent() {
                 isLoading={bulkImportMutation.isPending}
                 disabled={importRows.length === 0 || importPassword.length < 8}
               >
-                Import {importRows.length > 0 ? `${importRows.length} Users` : "Users"}
+                Import{" "}
+                {importRows.length > 0 ? `${importRows.length} Users` : "Users"}
               </Button>
             )}
           </div>
@@ -795,80 +993,97 @@ function UserForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {error && (
-        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       )}
       <div className="grid grid-cols-2 gap-4">
         {/* Name */}
         <div>
-          <label className="block text-xs font-medium text-gray-700">Full Name *</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Full Name *
+          </label>
           <input
             required
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
         {/* Email */}
         <div>
-          <label className="block text-xs font-medium text-gray-700">Email *</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Email *
+          </label>
           <input
             required
             type="email"
             value={form.email}
             onChange={(e) => set("email", e.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
         {/* Password (create only) */}
         {isCreate && (
           <div>
-            <label className="block text-xs font-medium text-gray-700">Password *</label>
+            <label className="block text-xs font-medium text-gray-700">
+              Password *
+            </label>
             <input
               required
               type="password"
               value={form.password}
               onChange={(e) => set("password", e.target.value)}
               placeholder="Min. 8 characters"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
         )}
         {/* Employee ID */}
         <div>
-          <label className="block text-xs font-medium text-gray-700">Employee ID</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Employee ID
+          </label>
           <input
             value={form.employeeId}
             onChange={(e) => set("employeeId", e.target.value)}
             placeholder="e.g. EMP011"
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
         {/* Phone */}
         <div>
-          <label className="block text-xs font-medium text-gray-700">Phone Number</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Phone Number
+          </label>
           <input
             value={form.phoneNumber}
             onChange={(e) => set("phoneNumber", e.target.value)}
             placeholder="+628..."
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
         </div>
         {/* Roles — multi-select checkboxes */}
         <div className="col-span-2">
           <label className="block text-xs font-medium text-gray-700">
-            Roles * <span className="font-normal text-gray-400">(select one or more)</span>
+            Roles *{" "}
+            <span className="font-normal text-gray-400">
+              (select one or more)
+            </span>
           </label>
           <div className="mt-1 grid grid-cols-4 gap-2">
-            {([
-              { value: "EMPLOYEE", label: "Employee" },
-              { value: "SUPERVISOR", label: "Supervisor" },
-              { value: "MANAGER", label: "Manager" },
-              { value: "DIRECTOR", label: "Director" },
-              { value: "FINANCE", label: "Finance" },
-              { value: "ADMIN", label: "Admin" },
-              { value: "SALES_EMPLOYEE", label: "Sales Employee" },
-              { value: "SALES_CHIEF", label: "Sales Chief" },
-            ] as { value: Role; label: string }[]).map(({ value, label }) => {
+            {(
+              [
+                { value: "EMPLOYEE", label: "Employee" },
+                { value: "SUPERVISOR", label: "Supervisor" },
+                { value: "MANAGER", label: "Manager" },
+                { value: "DIRECTOR", label: "Director" },
+                { value: "FINANCE", label: "Finance" },
+                { value: "ADMIN", label: "Admin" },
+                { value: "SALES_EMPLOYEE", label: "Sales Employee" },
+                { value: "SALES_CHIEF", label: "Sales Chief" },
+              ] as { value: Role; label: string }[]
+            ).map(({ value, label }) => {
               const checked = form.roles.includes(value);
               return (
                 <label
@@ -905,37 +1120,52 @@ function UserForm({
             <p className="mt-1 text-xs text-gray-400">
               Primary role (auto-derived):{" "}
               <span className="font-medium text-gray-600">
-                {ROLE_LABELS[
-                  [
-                    "ADMIN", "FINANCE", "DIRECTOR", "MANAGER",
-                    "SALES_CHIEF", "SUPERVISOR", "SALES_EMPLOYEE", "EMPLOYEE",
-                  ].find((r) => form.roles.includes(r as Role)) as Role ?? "EMPLOYEE"
-                ]}
+                {
+                  ROLE_LABELS[
+                    ([
+                      "ADMIN",
+                      "FINANCE",
+                      "DIRECTOR",
+                      "MANAGER",
+                      "SALES_CHIEF",
+                      "SUPERVISOR",
+                      "SALES_EMPLOYEE",
+                      "EMPLOYEE",
+                    ].find((r) => form.roles.includes(r as Role)) as Role) ??
+                      "EMPLOYEE"
+                  ]
+                }
               </span>
             </p>
           )}
         </div>
         {/* Department */}
         <div>
-          <label className="block text-xs font-medium text-gray-700">Department</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Department
+          </label>
           <select
             value={form.departmentId}
             onChange={(e) => set("departmentId", e.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
             <option value="">— No Department —</option>
             {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
             ))}
           </select>
         </div>
         {/* Supervisor */}
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-700">Supervisor</label>
+          <label className="block text-xs font-medium text-gray-700">
+            Supervisor
+          </label>
           <select
             value={form.supervisorId}
             onChange={(e) => set("supervisorId", e.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
             <option value="">— No Supervisor —</option>
             {supervisorOptions.map((u) => (

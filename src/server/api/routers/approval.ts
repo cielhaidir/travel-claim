@@ -62,14 +62,18 @@ const approvalIdentifierSchema = z
  */
 async function resolveApprovalBase<TInclude extends Prisma.ApprovalInclude>(
   db: PrismaClient,
+  ctx: unknown,
   identifier: { approvalId?: string; approvalNumber?: string },
   include: TInclude,
-) {
-  const where: Prisma.ApprovalWhereUniqueInput = identifier.approvalId
+): Promise<Prisma.ApprovalGetPayload<{ include: TInclude }>> {
+  const where: Prisma.ApprovalWhereInput = identifier.approvalId
     ? { id: identifier.approvalId }
     : { approvalNumber: identifier.approvalNumber! };
 
-  const approval = await db.approval.findUnique({ where, include });
+  const approval = await db.approval.findFirst({
+    where: applyTenantFilter(ctx, where),
+    include,
+  });
 
   if (!approval) {
     throw new TRPCError({
@@ -115,6 +119,42 @@ function verifyCallerPhone(
       code: "FORBIDDEN",
       message:
         "Phone ownership verification failed: the supplied phone number does not match the approver on record",
+    });
+  }
+}
+
+function getTenantContext(ctx: unknown): {
+  isRoot: boolean;
+  tenantId: string | null;
+} {
+  const typed = ctx as { isRoot?: boolean; tenantId?: string | null };
+  return {
+    isRoot: typed.isRoot ?? false,
+    tenantId: typed.tenantId ?? null,
+  };
+}
+
+function applyTenantFilter<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { isRoot, tenantId } = getTenantContext(ctx);
+  if (!isRoot && tenantId) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
+function assertTenantAccess(
+  ctx: unknown,
+  recordTenantId: string | null | undefined,
+) {
+  const { isRoot, tenantId } = getTenantContext(ctx);
+  if (isRoot) return;
+  if (!tenantId || !recordTenantId || tenantId !== recordTenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cross-tenant access denied",
     });
   }
 }
@@ -271,9 +311,9 @@ export const approvalRouter = createTRPCRouter({
       // ACTION: list
       // ══════════════════════════════════════════════════════════════════════
       if (input.action === "list") {
-        const where: Prisma.ApprovalWhereInput = {
+        const where: Prisma.ApprovalWhereInput = applyTenantFilter(ctx, {
           approverId: ctx.session.user.id,
-        };
+        } satisfies Prisma.ApprovalWhereInput);
 
         if (input.status) where.status = input.status;
         if (input.entityType === "TravelRequest") {
@@ -337,10 +377,10 @@ export const approvalRouter = createTRPCRouter({
       // ══════════════════════════════════════════════════════════════════════
       if (input.action === "pending_count") {
         return ctx.db.approval.count({
-          where: {
+          where: applyTenantFilter(ctx, {
             approverId: ctx.session.user.id,
             status: ApprovalStatus.PENDING,
-          },
+          } satisfies Prisma.ApprovalWhereInput),
         });
       }
 
@@ -350,8 +390,10 @@ export const approvalRouter = createTRPCRouter({
       if (input.action === "get") {
         if (input.approvalNumber && !input.approvalId) {
           // Lookup by approvalNumber with optional phone verification (WhatsApp flow)
-          const found = await ctx.db.approval.findUnique({
-            where: { approvalNumber: input.approvalNumber },
+          const found = await ctx.db.approval.findFirst({
+            where: applyTenantFilter(ctx, {
+              approvalNumber: input.approvalNumber,
+            } satisfies Prisma.ApprovalWhereInput),
             include: fullApprovalInclude,
           });
 
@@ -364,9 +406,11 @@ export const approvalRouter = createTRPCRouter({
 
           // Phone-based identity check when phone is supplied
           if (input.phone) {
-            const approverPhone =
-              (found.approver as { phoneNumber?: string | null } | null)
-                ?.phoneNumber ?? "";
+            const approver = await ctx.db.user.findUnique({
+              where: { id: found.approverId },
+              select: { phoneNumber: true },
+            });
+            const approverPhone = approver?.phoneNumber ?? "";
             if (!approverPhone) {
               throw new TRPCError({
                 code: "FORBIDDEN",
@@ -396,11 +440,11 @@ export const approvalRouter = createTRPCRouter({
             });
           }
 
-          const where: Prisma.ApprovalWhereUniqueInput = id
+          const where: Prisma.ApprovalWhereInput = id
             ? { id }
             : { approvalNumber: input.approvalNumber! };
 
-          const found = await ctx.db.approval.findUnique({
+          const found = await ctx.db.approval.findFirst({
             where,
             include: fullApprovalInclude,
           });
@@ -452,6 +496,7 @@ export const approvalRouter = createTRPCRouter({
       // ── Resolve base record with all linked entities ───────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: { select: { id: true, phoneNumber: true } },
@@ -490,10 +535,7 @@ export const approvalRouter = createTRPCRouter({
                 })();
 
       // ── Phone ownership verification (WhatsApp flow) ───────────────────────
-      verifyCallerPhone(
-        input.callerPhone,
-        approval.approver.phoneNumber,
-      );
+      verifyCallerPhone(input.callerPhone, approval.approver.phoneNumber);
 
       // ── Session-based authorisation ────────────────────────────────────────
       if (approval.approverId !== ctx.session.user.id) {
@@ -1532,6 +1574,8 @@ export const approvalRouter = createTRPCRouter({
         where.claimId = { not: null };
       }
 
+      applyTenantFilter(ctx, where);
+
       const approvals = await ctx.db.approval.findMany({
         take: input?.limit ? input.limit + 1 : 51,
         cursor: input?.cursor ? { id: input.cursor } : undefined,
@@ -1629,36 +1673,39 @@ export const approvalRouter = createTRPCRouter({
     .input(z.object({}))
     .output(z.number())
     .query(async ({ ctx }) => {
-    const isAdmin = ctx.session.user.role === "ADMIN";
-    return ctx.db.approval.count({
-      where: {
-        ...(isAdmin ? {} : { approverId: ctx.session.user.id }),
-        status: ApprovalStatus.PENDING,
-      },
-    });
-  }),
+      const isAdmin = ctx.session.user.role === "ADMIN";
+      return ctx.db.approval.count({
+        where: applyTenantFilter(ctx, {
+          ...(isAdmin ? {} : { approverId: ctx.session.user.id }),
+          status: ApprovalStatus.PENDING,
+        } satisfies Prisma.ApprovalWhereInput),
+      });
+    }),
 
   // Get approval by ID
   getById: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/approvals/{id}',
+        method: "GET",
+        path: "/approvals/{id}",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Get approval by ID',
+        tags: ["Approvals"],
+        summary: "Get approval by ID",
       },
       mcp: {
         enabled: true,
         name: "get_approval_by_id",
-        description: "Get detailed information about a specific approval by its ID",
+        description:
+          "Get detailed information about a specific approval by its ID",
       },
     })
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const approval = await ctx.db.approval.findUnique({
-        where: { id: input.id },
+      const approval = await ctx.db.approval.findFirst({
+        where: applyTenantFilter(ctx, {
+          id: input.id,
+        } satisfies Prisma.ApprovalWhereInput),
         include: {
           travelRequest: {
             include: {
@@ -1760,7 +1807,7 @@ export const approvalRouter = createTRPCRouter({
         approval.travelRequest?.requesterId === ctx.session.user.id ||
         approval.claim?.submitterId === ctx.session.user.id;
       const canView = ["MANAGER", "DIRECTOR", "ADMIN", "FINANCE"].includes(
-        ctx.session.user.role
+        ctx.session.user.role,
       );
 
       if (!isApprover && !isRequester && !canView) {
@@ -1777,16 +1824,17 @@ export const approvalRouter = createTRPCRouter({
   getByApprovalNumber: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/approvals/by-number/{approvalNumber}',
+        method: "GET",
+        path: "/approvals/by-number/{approvalNumber}",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Get approval by approval number',
+        tags: ["Approvals"],
+        summary: "Get approval by approval number",
       },
       mcp: {
         enabled: true,
         name: "get_approval_by_approval_number",
-        description: "Fetch detailed information about a specific approval using its human-readable business key (e.g. APR-2026-00001). Returns the same full detail as get_approval_by_id including linked travel request or claim, approver, and approval chain.",
+        description:
+          "Fetch detailed information about a specific approval using its human-readable business key (e.g. APR-2026-00001). Returns the same full detail as get_approval_by_id including linked travel request or claim, approver, and approval chain.",
       },
     })
     .input(
@@ -1794,12 +1842,14 @@ export const approvalRouter = createTRPCRouter({
         approvalNumber: z.string(),
         // Phone is used to verify the caller is the approver — no session identity assumed
         phone: z.string(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const approval = await ctx.db.approval.findUnique({
-        where: { approvalNumber: input.approvalNumber },
+      const approval = await ctx.db.approval.findFirst({
+        where: applyTenantFilter(ctx, {
+          approvalNumber: input.approvalNumber,
+        } satisfies Prisma.ApprovalWhereInput),
         include: {
           travelRequest: {
             include: {
@@ -1906,14 +1956,16 @@ export const approvalRouter = createTRPCRouter({
       if (!approverPhone) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "The approver for this approval has no phone number registered",
+          message:
+            "The approver for this approval has no phone number registered",
         });
       }
 
       if (normalize(input.phone) !== normalize(approverPhone)) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "The supplied phone number does not match the approver on record",
+          message:
+            "The supplied phone number does not match the approver on record",
         });
       }
 
@@ -1938,28 +1990,30 @@ export const approvalRouter = createTRPCRouter({
   approveTravelRequest: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/approve-travel-request',
+        method: "POST",
+        path: "/approvals/approve-travel-request",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Approve travel request',
+        tags: ["Approvals"],
+        summary: "Approve travel request",
       },
       mcp: {
         enabled: true,
         name: "approve_travel_request",
-        description: "Approve a travel request approval at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Approve a travel request approval at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         comments: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2014,8 +2068,16 @@ export const approvalRouter = createTRPCRouter({
       });
 
       // Check if all previous level approvals are complete
-      const currentLevelIndex = Object.values(ApprovalLevel).indexOf(approval.level);
-      const allPreviousApproved = (approval.travelRequest.approvals as Array<{ level: ApprovalLevel; status: ApprovalStatus; id: string }>)
+      const currentLevelIndex = Object.values(ApprovalLevel).indexOf(
+        approval.level,
+      );
+      const allPreviousApproved = (
+        approval.travelRequest.approvals as Array<{
+          level: ApprovalLevel;
+          status: ApprovalStatus;
+          id: string;
+        }>
+      )
         .filter((a) => {
           const levelIndex = Object.values(ApprovalLevel).indexOf(a.level);
           return levelIndex < currentLevelIndex;
@@ -2030,8 +2092,13 @@ export const approvalRouter = createTRPCRouter({
       }
 
       // Check if there are more approvals pending (excluding the one just approved)
-      const pendingApprovals = (approval.travelRequest.approvals as Array<{ status: ApprovalStatus; id: string }>).filter(
-        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
+      const pendingApprovals = (
+        approval.travelRequest.approvals as Array<{
+          status: ApprovalStatus;
+          id: string;
+        }>
+      ).filter(
+        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId,
       );
 
       // Determine new status
@@ -2040,7 +2107,8 @@ export const approvalRouter = createTRPCRouter({
         newStatus = TravelStatus.APPROVED;
       } else {
         // Map the sequence number (1-based) of the just-approved step to an APPROVED_LN status
-        const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+        const currentSequence =
+          (approval as unknown as { sequence: number }).sequence ?? 1;
         const seqStatusMap: Record<number, TravelStatus> = {
           1: TravelStatus.APPROVED_L1,
           2: TravelStatus.APPROVED_L2,
@@ -2096,7 +2164,8 @@ export const approvalRouter = createTRPCRouter({
           }
         } else {
           // More approvals pending — find the next one by sequence and notify its approver
-          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const currentSequence =
+            (approval as unknown as { sequence: number }).sequence ?? 1;
           const nextApproval = (
             approval.travelRequest!.approvals as Array<{
               id: string;
@@ -2105,7 +2174,9 @@ export const approvalRouter = createTRPCRouter({
               approverId: string;
               approvalNumber: string;
             }>
-          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+          ).find(
+            (a) => a.sequence === currentSequence + 1 && a.status === "PENDING",
+          );
 
           if (!nextApproval) return;
 
@@ -2124,14 +2195,16 @@ export const approvalRouter = createTRPCRouter({
           });
           if (!tr) return;
 
-          const { buildTravelRequestApprovalPoll } = await import("@/lib/utils/whatsapp");
+          const { buildTravelRequestApprovalPoll } =
+            await import("@/lib/utils/whatsapp");
           await sendWhatsappPoll(
             buildTravelRequestApprovalPoll(
               nextApproval.approvalNumber,
               phone.replace(/^\+/, ""),
               {
                 requestNumber: tr.requestNumber,
-                requesterName: tr.requester.name ?? tr.requester.email ?? "Unknown",
+                requesterName:
+                  tr.requester.name ?? tr.requester.email ?? "Unknown",
                 destination: tr.destination,
                 purpose: tr.purpose,
                 startDate: tr.startDate,
@@ -2152,28 +2225,30 @@ export const approvalRouter = createTRPCRouter({
   rejectTravelRequest: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/reject-travel-request',
+        method: "POST",
+        path: "/approvals/reject-travel-request",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Reject travel request',
+        tags: ["Approvals"],
+        summary: "Reject travel request",
       },
       mcp: {
         enabled: true,
         name: "reject_travel_request",
-        description: "Reject a travel request with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Reject a travel request with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         rejectionReason: z.string().min(10),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2274,28 +2349,30 @@ export const approvalRouter = createTRPCRouter({
   requestRevision: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/request-revision',
+        method: "POST",
+        path: "/approvals/request-revision",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Request revision for travel request',
+        tags: ["Approvals"],
+        summary: "Request revision for travel request",
       },
       mcp: {
         enabled: true,
         name: "request_travel_request_revision",
-        description: "Request a revision for a travel request, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Request a revision for a travel request, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         comments: z.string().min(10),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2404,28 +2481,30 @@ export const approvalRouter = createTRPCRouter({
   approveClaim: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/approve-claim',
+        method: "POST",
+        path: "/approvals/approve-claim",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Approve claim',
+        tags: ["Approvals"],
+        summary: "Approve claim",
       },
       mcp: {
         enabled: true,
         name: "approve_claim",
-        description: "Approve a claim at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Approve a claim at the current supervisor/manager level. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         comments: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2479,12 +2558,20 @@ export const approvalRouter = createTRPCRouter({
         },
       });
 
-      const pendingApprovals = (approval.claim.approvals as Array<{ status: ApprovalStatus; id: string; sequence: number }>).filter(
-        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId
+      const pendingApprovals = (
+        approval.claim.approvals as Array<{
+          status: ApprovalStatus;
+          id: string;
+          sequence: number;
+        }>
+      ).filter(
+        (a) => a.status === ApprovalStatus.PENDING && a.id !== resolvedId,
       );
 
       const newStatus =
-        pendingApprovals.length === 0 ? ClaimStatus.APPROVED : (approval.claim.status);
+        pendingApprovals.length === 0
+          ? ClaimStatus.APPROVED
+          : approval.claim.status;
 
       await ctx.db.claim.update({
         where: { id: approval.claimId as string },
@@ -2531,7 +2618,8 @@ export const approvalRouter = createTRPCRouter({
           }
         } else {
           // More approvals pending — find the next one by sequence and notify its approver
-          const currentSequence = (approval as unknown as { sequence: number }).sequence ?? 1;
+          const currentSequence =
+            (approval as unknown as { sequence: number }).sequence ?? 1;
           const nextApproval = (
             approval.claim!.approvals as Array<{
               id: string;
@@ -2540,7 +2628,9 @@ export const approvalRouter = createTRPCRouter({
               approverId: string;
               approvalNumber: string;
             }>
-          ).find((a) => a.sequence === currentSequence + 1 && a.status === "PENDING");
+          ).find(
+            (a) => a.sequence === currentSequence + 1 && a.status === "PENDING",
+          );
 
           if (!nextApproval) return;
 
@@ -2560,14 +2650,16 @@ export const approvalRouter = createTRPCRouter({
           });
           if (!cl) return;
 
-          const { buildClaimApprovalPoll } = await import("@/lib/utils/whatsapp");
+          const { buildClaimApprovalPoll } =
+            await import("@/lib/utils/whatsapp");
           await sendWhatsappPoll(
             buildClaimApprovalPoll(
               nextApproval.approvalNumber,
               phone.replace(/^\+/, ""),
               {
                 claimNumber: cl.claimNumber,
-                submitterName: cl.submitter.name ?? cl.submitter.email ?? "Unknown",
+                submitterName:
+                  cl.submitter.name ?? cl.submitter.email ?? "Unknown",
                 claimType: cl.claimType as string,
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
                 amount: cl.amount as any,
@@ -2589,28 +2681,30 @@ export const approvalRouter = createTRPCRouter({
   rejectClaim: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/reject-claim',
+        method: "POST",
+        path: "/approvals/reject-claim",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Reject claim',
+        tags: ["Approvals"],
+        summary: "Reject claim",
       },
       mcp: {
         enabled: true,
         name: "reject_claim",
-        description: "Reject a claim with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Reject a claim with a mandatory rejection reason. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         rejectionReason: z.string().min(10),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2712,28 +2806,30 @@ export const approvalRouter = createTRPCRouter({
   requestClaimRevision: supervisorProcedure
     .meta({
       openapi: {
-        method: 'POST',
-        path: '/approvals/request-claim-revision',
+        method: "POST",
+        path: "/approvals/request-claim-revision",
         protect: true,
-        tags: ['Approvals'],
-        summary: 'Request revision for claim',
+        tags: ["Approvals"],
+        summary: "Request revision for claim",
       },
       mcp: {
         enabled: true,
         name: "request_claim_revision",
-        description: "Request a revision for a claim, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
+        description:
+          "Request a revision for a claim, resetting all approvals back to pending. Accepts approvalId or approvalNumber. Optionally verify caller phone for incoming WhatsApp flows.",
       },
     })
     .input(
       approvalIdentifierSchema.extend({
         comments: z.string().min(10),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // ── 1. Resolve approval record ──────────────────────────────────────────
       const approval = await resolveApprovalBase(
         ctx.db,
+        ctx,
         { approvalId: input.approvalId, approvalNumber: input.approvalNumber },
         {
           approver: {
@@ -2873,6 +2969,8 @@ export const approvalRouter = createTRPCRouter({
         where.status = input.status;
       }
 
+      applyTenantFilter(ctx, where);
+
       const approvals = await ctx.db.approval.findMany({
         take: input?.limit ? input.limit + 1 : 51,
         where,
@@ -2931,8 +3029,10 @@ export const approvalRouter = createTRPCRouter({
         });
       }
 
-      const approval = await ctx.db.approval.findUnique({
-        where: { id: input.approvalId },
+      const approval = await ctx.db.approval.findFirst({
+        where: applyTenantFilter(ctx, {
+          id: input.approvalId,
+        } satisfies Prisma.ApprovalWhereInput),
         include: {
           travelRequest: {
             include: {
@@ -3124,6 +3224,9 @@ export const approvalRouter = createTRPCRouter({
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
             deletedAt: null,
+            ...(getTenantContext(ctx).isRoot
+              ? {}
+              : { tenantId: getTenantContext(ctx).tenantId }),
             status: {
               in: [
                 TravelStatus.SUBMITTED,
@@ -3165,6 +3268,9 @@ export const approvalRouter = createTRPCRouter({
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
             deletedAt: null,
+            ...(getTenantContext(ctx).isRoot
+              ? {}
+              : { tenantId: getTenantContext(ctx).tenantId }),
             approvals: { some: { level: ApprovalLevel.DIRECTOR } },
           },
           include: {
@@ -3218,8 +3324,13 @@ export const approvalRouter = createTRPCRouter({
         });
       }
 
-      const travelRequest = await ctx.db.travelRequest.findUnique({
-        where: { id: input.travelRequestId },
+      const travelRequest = await ctx.db.travelRequest.findFirst({
+        where: {
+          id: input.travelRequestId,
+          ...(getTenantContext(ctx).isRoot
+            ? {}
+            : { tenantId: getTenantContext(ctx).tenantId }),
+        },
       });
 
       if (!travelRequest) {
@@ -3237,9 +3348,13 @@ export const approvalRouter = createTRPCRouter({
             : ApprovalStatus.REVISION_REQUESTED;
 
       // Create a DIRECTOR-level approval record with a resolved status (create + approve in one shot)
-      const approvalNumber = await generateApprovalNumber(ctx.db);
+      const approvalNumber = await generateApprovalNumber(
+        ctx.db,
+        getTenantContext(ctx).tenantId,
+      );
       await ctx.db.approval.create({
         data: {
+          tenantId: getTenantContext(ctx).tenantId,
           approvalNumber,
           travelRequestId: input.travelRequestId,
           approverId: ctx.session.user.id,

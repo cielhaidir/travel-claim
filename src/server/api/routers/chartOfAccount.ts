@@ -1,12 +1,39 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { COAType, AuditAction, type Prisma, type PrismaClient } from "../../../../generated/prisma";
+import {
+  COAType,
+  AuditAction,
+  type Prisma,
+  type PrismaClient,
+} from "../../../../generated/prisma";
 
 import {
   createTRPCRouter,
   protectedProcedure,
   adminProcedure,
 } from "@/server/api/trpc";
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
 
 export const chartOfAccountRouter = createTRPCRouter({
   // Get all Chart of Accounts with optional filters
@@ -30,11 +57,11 @@ export const chartOfAccountRouter = createTRPCRouter({
           limit: z.number().min(1).max(100).optional(),
           cursor: z.string().optional(),
         })
-        .optional()
+        .optional(),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = {};
+      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {});
 
       if (input?.accountType) {
         where.accountType = input.accountType;
@@ -125,8 +152,8 @@ export const chartOfAccountRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const account = await ctx.db.chartOfAccount.findUnique({
-        where: { id: input.id },
+      const account = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           parent: {
             select: {
@@ -201,13 +228,13 @@ export const chartOfAccountRouter = createTRPCRouter({
       z.object({
         accountType: z.nativeEnum(COAType).optional(),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = {
+      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
         parentId: null,
-      };
+      });
 
       if (input.accountType) {
         where.accountType = input.accountType;
@@ -268,13 +295,13 @@ export const chartOfAccountRouter = createTRPCRouter({
     .input(
       z.object({
         accountType: z.nativeEnum(COAType).optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = {
+      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
         isActive: true,
-      };
+      });
 
       if (input.accountType) {
         where.accountType = input.accountType;
@@ -310,13 +337,13 @@ export const chartOfAccountRouter = createTRPCRouter({
       z.object({
         accountType: z.nativeEnum(COAType),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = {
+      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
         accountType: input.accountType,
-      };
+      });
 
       if (input.isActive !== undefined) {
         where.isActive = input.isActive;
@@ -362,7 +389,10 @@ export const chartOfAccountRouter = createTRPCRouter({
           .string()
           .min(1)
           .max(20)
-          .regex(/^[A-Z0-9-]+$/, "Code must contain only uppercase letters, numbers, and hyphens"),
+          .regex(
+            /^[A-Z0-9-]+$/,
+            "Code must contain only uppercase letters, numbers, and hyphens",
+          ),
         name: z.string().min(1).max(100),
         accountType: z.nativeEnum(COAType),
         category: z.string().min(1).max(50),
@@ -370,13 +400,13 @@ export const chartOfAccountRouter = createTRPCRouter({
         parentId: z.string().optional(),
         description: z.string().optional(),
         isActive: z.boolean().optional().default(true),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if code already exists
-      const existing = await ctx.db.chartOfAccount.findUnique({
-        where: { code: input.code },
+      const existing = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
       });
 
       if (existing) {
@@ -388,8 +418,8 @@ export const chartOfAccountRouter = createTRPCRouter({
 
       // Validate parent exists if provided
       if (input.parentId) {
-        const parent = await ctx.db.chartOfAccount.findUnique({
-          where: { id: input.parentId },
+        const parent = await ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, { id: input.parentId }),
         });
 
         if (!parent) {
@@ -411,6 +441,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create the account
       const account = await ctx.db.chartOfAccount.create({
         data: {
+          tenantId: getTenantScope(ctx).tenantId,
           code: input.code,
           name: input.name,
           accountType: input.accountType,
@@ -444,6 +475,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "ChartOfAccount",
@@ -476,7 +508,10 @@ export const chartOfAccountRouter = createTRPCRouter({
           .string()
           .min(1)
           .max(20)
-          .regex(/^[A-Z0-9-]+$/, "Code must contain only uppercase letters, numbers, and hyphens")
+          .regex(
+            /^[A-Z0-9-]+$/,
+            "Code must contain only uppercase letters, numbers, and hyphens",
+          )
           .optional(),
         name: z.string().min(1).max(100).optional(),
         accountType: z.nativeEnum(COAType).optional(),
@@ -485,15 +520,15 @@ export const chartOfAccountRouter = createTRPCRouter({
         parentId: z.string().optional().nullable(),
         description: z.string().optional().nullable(),
         isActive: z.boolean().optional(),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const { id, ...updateData } = input;
 
       // Check if account exists
-      const existing = await ctx.db.chartOfAccount.findUnique({
-        where: { id },
+      const existing = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, { id }),
         include: {
           children: true,
           _count: {
@@ -513,8 +548,8 @@ export const chartOfAccountRouter = createTRPCRouter({
 
       // If updating code, check for conflicts
       if (input.code && input.code !== existing.code) {
-        const codeExists = await ctx.db.chartOfAccount.findUnique({
-          where: { code: input.code },
+        const codeExists = await ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, { code: input.code }),
         });
 
         if (codeExists) {
@@ -536,8 +571,8 @@ export const chartOfAccountRouter = createTRPCRouter({
 
         if (input.parentId) {
           // Check if the new parent exists
-          const parent = await ctx.db.chartOfAccount.findUnique({
-            where: { id: input.parentId },
+          const parent = await ctx.db.chartOfAccount.findFirst({
+            where: withTenantWhere(ctx, { id: input.parentId }),
           });
 
           if (!parent) {
@@ -560,7 +595,7 @@ export const chartOfAccountRouter = createTRPCRouter({
           const isDescendant = await checkIsDescendant(
             ctx.db,
             id,
-            input.parentId
+            input.parentId,
           );
           if (isDescendant) {
             throw new TRPCError({
@@ -576,8 +611,7 @@ export const chartOfAccountRouter = createTRPCRouter({
         if (existing.children.length > 0) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message:
-              "Cannot change account type when child accounts exist",
+            message: "Cannot change account type when child accounts exist",
           });
         }
       }
@@ -618,6 +652,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "ChartOfAccount",
@@ -649,13 +684,13 @@ export const chartOfAccountRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         force: z.boolean().optional().default(false),
-      })
+      }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Check if account exists
-      const account = await ctx.db.chartOfAccount.findUnique({
-        where: { id: input.id },
+      const account = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           children: true,
           _count: {
@@ -697,6 +732,7 @@ export const chartOfAccountRouter = createTRPCRouter({
           // Create audit log
           await ctx.db.auditLog.create({
             data: {
+              tenantId: account.tenantId,
               userId: ctx.session.user.id,
               action: AuditAction.DELETE,
               entityType: "ChartOfAccount",
@@ -732,6 +768,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "ChartOfAccount",
@@ -764,8 +801,8 @@ export const chartOfAccountRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const account = await ctx.db.chartOfAccount.findUnique({
-        where: { id: input.id },
+      const account = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
       });
 
       if (!account) {
@@ -779,8 +816,8 @@ export const chartOfAccountRouter = createTRPCRouter({
 
       // If activating, check parent is also active
       if (newActiveStatus && account.parentId) {
-        const parent = await ctx.db.chartOfAccount.findUnique({
-          where: { id: account.parentId },
+        const parent = await ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, { id: account.parentId }),
         });
 
         if (parent && !parent.isActive) {
@@ -794,13 +831,13 @@ export const chartOfAccountRouter = createTRPCRouter({
       // If deactivating, deactivate all children too
       if (!newActiveStatus) {
         const childrenCount = await ctx.db.chartOfAccount.count({
-          where: { parentId: input.id, isActive: true },
+          where: withTenantWhere(ctx, { parentId: input.id, isActive: true }),
         });
 
         if (childrenCount > 0) {
           // Deactivate all active children
           await ctx.db.chartOfAccount.updateMany({
-            where: { parentId: input.id, isActive: true },
+            where: withTenantWhere(ctx, { parentId: input.id, isActive: true }),
             data: {
               isActive: false,
               updatedById: ctx.session.user.id,
@@ -831,6 +868,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "ChartOfAccount",
@@ -852,7 +890,7 @@ export const chartOfAccountRouter = createTRPCRouter({
 async function checkIsDescendant(
   db: PrismaClient,
   ancestorId: string,
-  descendantId: string
+  descendantId: string,
 ): Promise<boolean> {
   const descendant = await db.chartOfAccount.findUnique({
     where: { id: descendantId },

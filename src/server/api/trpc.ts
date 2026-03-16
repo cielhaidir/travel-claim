@@ -151,6 +151,39 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   });
 });
 
+const enforceTenantContext = t.middleware(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Authentication required",
+    });
+  }
+
+  const userRoles = normalizeRoles({
+    roles: ctx.session.user.roles,
+    role: ctx.session.user.role,
+    includeDefault: false,
+  });
+  const isRoot = userRoles.includes("ROOT" as Role);
+  const tenantId = ctx.session.user.activeTenantId;
+
+  if (!isRoot && !tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Active tenant is required",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      session: { ...ctx.session, user: ctx.session.user },
+      tenantId: tenantId ?? null,
+      isRoot,
+    },
+  });
+});
+
 /**
  * Middleware: Enforce role requirements
  *
@@ -170,6 +203,15 @@ const enforceRole = (allowedRoles: Role[]) => {
       role: ctx.session.user.role,
       includeDefault: false,
     });
+
+    if (userRoles.includes("ROOT" as Role)) {
+      return next({
+        ctx: {
+          ...ctx,
+          session: { ...ctx.session, user: ctx.session.user },
+        },
+      });
+    }
 
     if (userRoles.length === 0) {
       throw new TRPCError({
@@ -208,6 +250,7 @@ const enforceRole = (allowedRoles: Role[]) => {
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
   .use(enforceUserIsAuthed)
+  .use(enforceTenantContext)
   .use(({ ctx, next }) => {
     if (!ctx.session?.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });

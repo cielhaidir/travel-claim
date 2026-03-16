@@ -11,20 +11,53 @@ import {
 import { db as dbClient } from "@/server/db";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
+import { generateJournalTransactionNumber } from "@/lib/utils/numberGenerators";
 
-const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
+const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 type DbClient = typeof dbClient;
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
+function assertSameTenant(ctx: unknown, tenantId: string | null | undefined) {
+  const scope = getTenantScope(ctx);
+  if (scope.isRoot) return;
+  if (!scope.tenantId || scope.tenantId !== tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cross-tenant access denied",
+    });
+  }
+}
+
 /** Generate a sequential journal transaction number, e.g. JRN-2026-00001 */
-async function generateJournalNumber(db: DbClient): Promise<string> {
-  const year = new Date().getFullYear();
-  const count = await db.journalTransaction.count({
-    where: { transactionNumber: { startsWith: `JRN-${year}` } },
-  });
-  return `JRN-${year}-${String(count + 1).padStart(5, "0")}`;
+async function generateJournalNumber(
+  db: DbClient,
+  ctx: unknown,
+): Promise<string> {
+  return generateJournalTransactionNumber(db, getTenantScope(ctx).tenantId);
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -58,7 +91,9 @@ export const financeRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const isFinance = userHasAnyRole(ctx.session.user, FINANCE_ROLES);
 
-      const where: Record<string, unknown> = { deletedAt: null };
+      const where: Prisma.BailoutWhereInput = withTenantWhere(ctx, {
+        deletedAt: null,
+      } satisfies Prisma.BailoutWhereInput);
 
       if (!isFinance) {
         where.requesterId = ctx.session.user.id;
@@ -188,6 +223,8 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
+      assertSameTenant(ctx, bailout.tenantId);
+
       return bailout;
     }),
 
@@ -223,8 +260,11 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      const bailout = await ctx.db.bailout.findUnique({
-        where: { bailoutNumber: input.bailoutNumber, deletedAt: null },
+      const bailout = await ctx.db.bailout.findFirst({
+        where: withTenantWhere(ctx, {
+          bailoutNumber: input.bailoutNumber,
+          deletedAt: null,
+        } satisfies Prisma.BailoutWhereInput),
       });
 
       if (!bailout) {
@@ -233,6 +273,8 @@ export const financeRouter = createTRPCRouter({
           message: "Bailout tidak ditemukan",
         });
       }
+
+      assertSameTenant(ctx, bailout.tenantId);
 
       // File may be attached at any point from APPROVED_DIRECTOR onward (ready for disbursement)
       const attachableStatuses: BailoutStatus[] = [
@@ -249,7 +291,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       const updatedBailout = await ctx.db.bailout.update({
-        where: { bailoutNumber: input.bailoutNumber },
+        where: { id: bailout.id },
         data: {
           storageUrl: input.storageUrl,
           financeId: ctx.session.user.id,
@@ -265,6 +307,7 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Bailout",
@@ -339,6 +382,8 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
+      assertSameTenant(ctx, bailout.tenantId);
+
       // Only fully-approved bailouts can be processed (APPROVED_DIRECTOR or DISBURSED)
       const processableStatuses: BailoutStatus[] = [
         BailoutStatus.APPROVED_DIRECTOR,
@@ -352,11 +397,18 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const coa = await ctx.db.chartOfAccount.findUnique({
-        where: { id: input.chartOfAccountId, isActive: true },
+      const coa = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          id: input.chartOfAccountId,
+          isActive: true,
+        } satisfies Prisma.ChartOfAccountWhereInput),
       });
-      const balanceAccount = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+      const balanceAccount = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          id: input.balanceAccountId,
+          isActive: true,
+          deletedAt: null,
+        } satisfies Prisma.BalanceAccountWhereInput),
       });
 
       if (!coa) {
@@ -373,7 +425,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Generate transaction number ───────────────────────────────────────
-      const transactionNumber = await generateJournalNumber(ctx.db);
+      const transactionNumber = await generateJournalNumber(ctx.db, ctx);
       const txDate = input.transactionDate ?? new Date();
 
       // ── Run in a DB transaction ───────────────────────────────────────────
@@ -386,6 +438,7 @@ export const financeRouter = createTRPCRouter({
             description: `Bailout expense: ${bailout.bailoutNumber} — ${bailout.description}`,
             amount: bailout.amount,
             entryType: JournalEntryType.DEBIT,
+            tenantId: bailout.tenantId,
             bailoutId: bailout.id,
             chartOfAccountId: input.chartOfAccountId,
             balanceAccountId: input.balanceAccountId,
@@ -425,6 +478,7 @@ export const financeRouter = createTRPCRouter({
       // ── Audit log ─────────────────────────────────────────────────────────
       await ctx.db.auditLog.create({
         data: {
+          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Bailout",
@@ -500,6 +554,8 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
+      assertSameTenant(ctx, claim.tenantId);
+
       // Claim must be final (APPROVED or PAID)
       const processableStatuses: ClaimStatus[] = [
         ClaimStatus.APPROVED,
@@ -513,11 +569,18 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const coa = await ctx.db.chartOfAccount.findUnique({
-        where: { id: input.chartOfAccountId, isActive: true },
+      const coa = await ctx.db.chartOfAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          id: input.chartOfAccountId,
+          isActive: true,
+        } satisfies Prisma.ChartOfAccountWhereInput),
       });
-      const balanceAccount = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.balanceAccountId, isActive: true, deletedAt: null },
+      const balanceAccount = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          id: input.balanceAccountId,
+          isActive: true,
+          deletedAt: null,
+        } satisfies Prisma.BalanceAccountWhereInput),
       });
 
       if (!coa) {
@@ -534,7 +597,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Generate transaction number ───────────────────────────────────────
-      const transactionNumber = await generateJournalNumber(ctx.db);
+      const transactionNumber = await generateJournalNumber(ctx.db, ctx);
       const txDate = input.transactionDate ?? new Date();
 
       // ── Run in a DB transaction ───────────────────────────────────────────
@@ -547,6 +610,7 @@ export const financeRouter = createTRPCRouter({
             description: `Claim expense: ${claim.claimNumber} — ${claim.description}`,
             amount: claim.amount,
             entryType: JournalEntryType.DEBIT,
+            tenantId: claim.tenantId,
             claimId: claim.id,
             chartOfAccountId: input.chartOfAccountId,
             balanceAccountId: input.balanceAccountId,
@@ -585,6 +649,7 @@ export const financeRouter = createTRPCRouter({
       // ── Audit log ─────────────────────────────────────────────────────────
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Claim",
@@ -638,7 +703,9 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      const where: Record<string, unknown> = { deletedAt: null };
+      const where: Prisma.BalanceAccountWhereInput = withTenantWhere(ctx, {
+        deletedAt: null,
+      } satisfies Prisma.BalanceAccountWhereInput);
       if (input.isActive !== undefined) where.isActive = input.isActive;
 
       const rows = await ctx.db.balanceAccount.findMany({
@@ -693,8 +760,11 @@ export const financeRouter = createTRPCRouter({
       }
 
       // Ensure code is unique
-      const existing = await ctx.db.balanceAccount.findUnique({
-        where: { code: input.code },
+      const existing = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          code: input.code,
+          deletedAt: null,
+        } satisfies Prisma.BalanceAccountWhereInput),
       });
       if (existing) {
         throw new TRPCError({
@@ -705,6 +775,7 @@ export const financeRouter = createTRPCRouter({
 
       const balanceAccount = await ctx.db.balanceAccount.create({
         data: {
+          tenantId: getTenantScope(ctx).tenantId,
           code: input.code,
           name: input.name,
           balance: input.balance,
@@ -715,6 +786,7 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: getTenantScope(ctx).tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "BalanceAccount",
@@ -754,8 +826,11 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      const existing = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const existing = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, {
+          id: input.id,
+          deletedAt: null,
+        } satisfies Prisma.BalanceAccountWhereInput),
       });
 
       if (!existing) {
@@ -773,6 +848,7 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "BalanceAccount",

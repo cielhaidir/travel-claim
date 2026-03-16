@@ -4,7 +4,29 @@ import { JournalEntryType, Role } from "../../../../generated/prisma";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
 
-const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
+const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
 
 export const journalTransactionRouter = createTRPCRouter({
   // ─── LIST ─────────────────────────────────────────────────────────────────
@@ -43,7 +65,9 @@ export const journalTransactionRouter = createTRPCRouter({
 
       // Build where clause
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const where: Record<string, any> = { deletedAt: null };
+      const where: Record<string, any> = withTenantWhere(ctx, {
+        deletedAt: null,
+      });
 
       if (!isFinance) {
         // Regular users can only see transactions tied to their own entities
@@ -129,8 +153,8 @@ export const journalTransactionRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const tx = await ctx.db.journalTransaction.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const tx = await ctx.db.journalTransaction.findFirst({
+        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
         include: {
           chartOfAccount: true,
           balanceAccount: true,
@@ -201,7 +225,9 @@ export const journalTransactionRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const where: Record<string, any> = { deletedAt: null };
+      const where: Record<string, any> = withTenantWhere(ctx, {
+        deletedAt: null,
+      });
       if (input.isActive !== undefined) where.isActive = input.isActive;
 
       const rows = await ctx.db.balanceAccount.findMany({
@@ -234,10 +260,11 @@ export const journalTransactionRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const ba = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const ba = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
         include: {
           journalTransactions: {
+            where: withTenantWhere(ctx, { deletedAt: null }),
             take: 10,
             orderBy: { transactionDate: "desc" },
             select: {

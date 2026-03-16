@@ -5,6 +5,28 @@ import { AuditAction, type Prisma } from "../../../../generated/prisma";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
 export const attachmentRouter = createTRPCRouter({
   // Get attachments by claim ID
   getByClaim: protectedProcedure
@@ -26,8 +48,8 @@ export const attachmentRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // Verify access to claim
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.claimId },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.claimId }),
         include: {
           travelRequest: {
             include: {
@@ -66,10 +88,10 @@ export const attachmentRouter = createTRPCRouter({
       }
 
       return ctx.db.attachment.findMany({
-        where: {
+        where: withTenantWhere(ctx, {
           claimId: input.claimId,
           deletedAt: null,
-        },
+        }),
         orderBy: {
           createdAt: "desc",
         },
@@ -90,8 +112,8 @@ export const attachmentRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const attachment = await ctx.db.attachment.findUnique({
-        where: { id: input.id },
+      const attachment = await ctx.db.attachment.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           claim: {
             include: {
@@ -256,8 +278,8 @@ export const attachmentRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       // Verify claim exists and user has access
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.claimId },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.claimId }),
         include: {
           travelRequest: {
             include: {
@@ -326,6 +348,7 @@ export const attachmentRouter = createTRPCRouter({
 
       const attachment = await ctx.db.attachment.create({
         data: {
+          tenantId: claim.tenantId,
           claimId: input.claimId,
           filename: input.filename,
           originalName: input.originalName,
@@ -343,6 +366,7 @@ export const attachmentRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Attachment",
@@ -386,8 +410,8 @@ export const attachmentRouter = createTRPCRouter({
         }),
       };
 
-      const attachment = await ctx.db.attachment.findUnique({
-        where: { id },
+      const attachment = await ctx.db.attachment.findFirst({
+        where: withTenantWhere(ctx, { id }),
         include: {
           claim: {
             include: {
@@ -435,6 +459,7 @@ export const attachmentRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: attachment.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Attachment",
@@ -467,8 +492,8 @@ export const attachmentRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const attachment = await ctx.db.attachment.findUnique({
-        where: { id: input.id },
+      const attachment = await ctx.db.attachment.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           claim: {
             include: {
@@ -527,6 +552,7 @@ export const attachmentRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: attachment.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "Attachment",
@@ -555,8 +581,8 @@ export const attachmentRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const attachment = await ctx.db.attachment.findUnique({
-        where: { id: input.id },
+      const attachment = await ctx.db.attachment.findFirst({
+        where: withTenantWhere(ctx, { id: input.id }),
         include: {
           claim: {
             include: {
@@ -635,8 +661,8 @@ export const attachmentRouter = createTRPCRouter({
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx, input }) => {
       // Verify claim
-      const claim = await ctx.db.claim.findUnique({
-        where: { id: input.claimId },
+      const claim = await ctx.db.claim.findFirst({
+        where: withTenantWhere(ctx, { id: input.claimId }),
         include: {
           travelRequest: {
             include: {
@@ -707,6 +733,7 @@ export const attachmentRouter = createTRPCRouter({
       // Create attachments
       const created = await ctx.db.attachment.createMany({
         data: input.attachments.map((file) => ({
+          tenantId: claim.tenantId,
           claimId: input.claimId,
           ...file,
         })),
@@ -715,6 +742,7 @@ export const attachmentRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
+          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Attachment",

@@ -3,8 +3,31 @@ import { TRPCError } from "@trpc/server";
 import { AuditAction, Role } from "../../../../generated/prisma";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+import { generateJournalTransactionNumber } from "@/lib/utils/numberGenerators";
 
-const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN];
+const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
+
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
 
 export const balanceAccountRouter = createTRPCRouter({
   // ─── LIST ─────────────────────────────────────────────────────────────────
@@ -35,7 +58,9 @@ export const balanceAccountRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const where: Record<string, any> = { deletedAt: null };
+      const where: Record<string, any> = withTenantWhere(ctx, {
+        deletedAt: null,
+      });
 
       if (input.isActive !== undefined) {
         where.isActive = input.isActive;
@@ -84,11 +109,11 @@ export const balanceAccountRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const ba = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const ba = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
         include: {
           journalTransactions: {
-            where: { deletedAt: null },
+            where: withTenantWhere(ctx, { deletedAt: null }),
             orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }],
             take: 20,
             select: {
@@ -142,8 +167,8 @@ export const balanceAccountRouter = createTRPCRouter({
     .input(z.object({ code: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const ba = await ctx.db.balanceAccount.findUnique({
-        where: { code: input.code, deletedAt: null },
+      const ba = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { code: input.code, deletedAt: null }),
       });
 
       if (!ba) {
@@ -192,8 +217,8 @@ export const balanceAccountRouter = createTRPCRouter({
       }
 
       // Ensure code is unique (including soft-deleted, to avoid confusion)
-      const existing = await ctx.db.balanceAccount.findUnique({
-        where: { code: input.code },
+      const existing = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
       });
       if (existing) {
         throw new TRPCError({
@@ -204,6 +229,7 @@ export const balanceAccountRouter = createTRPCRouter({
 
       const ba = await ctx.db.balanceAccount.create({
         data: {
+          tenantId: getTenantScope(ctx).tenantId,
           code: input.code,
           name: input.name,
           balance: input.balance,
@@ -214,6 +240,7 @@ export const balanceAccountRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: ba.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "BalanceAccount",
@@ -265,8 +292,8 @@ export const balanceAccountRouter = createTRPCRouter({
         });
       }
 
-      const existing = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const existing = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
       });
 
       if (!existing) {
@@ -285,6 +312,7 @@ export const balanceAccountRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "BalanceAccount",
@@ -353,8 +381,11 @@ export const balanceAccountRouter = createTRPCRouter({
         ctx.db.balanceAccount.findUnique({
           where: { id: input.id, isActive: true, deletedAt: null },
         }),
-        ctx.db.chartOfAccount.findUnique({
-          where: { id: input.chartOfAccountId, isActive: true },
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.chartOfAccountId,
+            isActive: true,
+          }),
         }),
       ]);
 
@@ -371,12 +402,20 @@ export const balanceAccountRouter = createTRPCRouter({
         });
       }
 
+      const scoped = withTenantWhere(ctx, { id: ba.id });
+      const scopedTenantId = (scoped as { tenantId?: string | null }).tenantId;
+      if (scopedTenantId !== undefined && ba.tenantId !== scopedTenantId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Cross-tenant access denied",
+        });
+      }
+
       // Generate sequential journal number
-      const year = new Date().getFullYear();
-      const count = await ctx.db.journalTransaction.count({
-        where: { transactionNumber: { startsWith: `JRN-${year}` } },
-      });
-      const transactionNumber = `JRN-${year}-${String(count + 1).padStart(5, "0")}`;
+      const transactionNumber = await generateJournalTransactionNumber(
+        ctx.db,
+        ba.tenantId,
+      );
 
       const result = await ctx.db.$transaction(async (tx) => {
         const journal = await tx.journalTransaction.create({
@@ -386,6 +425,7 @@ export const balanceAccountRouter = createTRPCRouter({
             description: input.description,
             amount: input.amount,
             entryType: input.entryType,
+            tenantId: ba.tenantId,
             chartOfAccountId: input.chartOfAccountId,
             balanceAccountId: input.id,
             referenceNumber: input.referenceNumber,
@@ -408,6 +448,7 @@ export const balanceAccountRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: ba.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "BalanceAccount",
@@ -450,8 +491,8 @@ export const balanceAccountRouter = createTRPCRouter({
         });
       }
 
-      const existing = await ctx.db.balanceAccount.findUnique({
-        where: { id: input.id, deletedAt: null },
+      const existing = await ctx.db.balanceAccount.findFirst({
+        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
       });
 
       if (!existing) {
@@ -463,7 +504,10 @@ export const balanceAccountRouter = createTRPCRouter({
 
       // Prevent deletion if there are journal transactions linked to this account
       const txCount = await ctx.db.journalTransaction.count({
-        where: { balanceAccountId: input.id, deletedAt: null },
+        where: withTenantWhere(ctx, {
+          balanceAccountId: input.id,
+          deletedAt: null,
+        }),
       });
       if (txCount > 0) {
         throw new TRPCError({
@@ -479,6 +523,7 @@ export const balanceAccountRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
+          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "BalanceAccount",

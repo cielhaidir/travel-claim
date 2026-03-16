@@ -13,172 +13,194 @@ import {
   financeProcedure,
 } from "@/server/api/trpc";
 
+function getTenantScope(ctx: unknown): {
+  tenantId: string | null;
+  isRoot: boolean;
+} {
+  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
+  return {
+    tenantId: typed.tenantId ?? null,
+    isRoot: typed.isRoot ?? false,
+  };
+}
+
+function withTenantWhere<T extends Record<string, unknown>>(
+  ctx: unknown,
+  where: T,
+): T {
+  const { tenantId, isRoot } = getTenantScope(ctx);
+  if (!isRoot) {
+    (where as Record<string, unknown>).tenantId = tenantId;
+  }
+  return where;
+}
+
 export const dashboardRouter = createTRPCRouter({
   // Get user dashboard statistics
   getMyDashboard: protectedProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/dashboard/my',
+        method: "GET",
+        path: "/dashboard/my",
         protect: true,
-        tags: ['Dashboard'],
-        summary: 'Get my dashboard statistics',
-      }
+        tags: ["Dashboard"],
+        summary: "Get my dashboard statistics",
+      },
     })
     .input(z.object({}))
     .output(z.any())
     .query(async ({ ctx }) => {
-    const userId = ctx.session.user.id;
+      const userId = ctx.session.user.id;
 
-    // Get counts in parallel
-    const [
-      myTravelRequests,
-      myClaims,
-      pendingApprovals,
-      unreadNotifications,
-      myTeamTravelRequests,
-    ] = await Promise.all([
-      // My travel requests count by status
-      ctx.db.travelRequest.groupBy({
-        by: ["status"],
-        where: {
+      // Get counts in parallel
+      const [
+        myTravelRequests,
+        myClaims,
+        pendingApprovals,
+        unreadNotifications,
+        myTeamTravelRequests,
+      ] = await Promise.all([
+        // My travel requests count by status
+        ctx.db.travelRequest.groupBy({
+          by: ["status"],
+          where: withTenantWhere(ctx, {
+            requesterId: userId,
+            deletedAt: null,
+          }),
+          _count: true,
+        }),
+        // My claims count by status
+        ctx.db.claim.groupBy({
+          by: ["status"],
+          where: withTenantWhere(ctx, {
+            submitterId: userId,
+            deletedAt: null,
+          }),
+          _count: true,
+        }),
+        // Pending approvals for me
+        ctx.db.approval.count({
+          where: withTenantWhere(ctx, {
+            approverId: userId,
+            status: ApprovalStatus.PENDING,
+          }),
+        }),
+        // Unread notifications
+        ctx.db.notification.count({
+          where: withTenantWhere(ctx, {
+            userId,
+            readAt: null,
+          }),
+        }),
+        // Team travel requests (if supervisor)
+        ctx.db.travelRequest.count({
+          where: withTenantWhere(ctx, {
+            requester: {
+              supervisorId: userId,
+            },
+            status: {
+              in: [TravelStatus.DRAFT, TravelStatus.SUBMITTED],
+            },
+            deletedAt: null,
+          }),
+        }),
+      ]);
+
+      // Get recent travel requests
+      const recentTravelRequests = await ctx.db.travelRequest.findMany({
+        take: 5,
+        where: withTenantWhere(ctx, {
           requesterId: userId,
           deletedAt: null,
-        },
-        _count: true,
-      }),
-      // My claims count by status
-      ctx.db.claim.groupBy({
-        by: ["status"],
-        where: {
-          submitterId: userId,
-          deletedAt: null,
-        },
-        _count: true,
-      }),
-      // Pending approvals for me
-      ctx.db.approval.count({
-        where: {
-          approverId: userId,
-          status: ApprovalStatus.PENDING,
-        },
-      }),
-      // Unread notifications
-      ctx.db.notification.count({
-        where: {
-          userId,
-          readAt: null,
-        },
-      }),
-      // Team travel requests (if supervisor)
-      ctx.db.travelRequest.count({
-        where: {
-          requester: {
-            supervisorId: userId,
-          },
-          status: {
-            in: [TravelStatus.DRAFT, TravelStatus.SUBMITTED],
-          },
-          deletedAt: null,
-        },
-      }),
-    ]);
-
-    // Get recent travel requests
-    const recentTravelRequests = await ctx.db.travelRequest.findMany({
-      take: 5,
-      where: {
-        requesterId: userId,
-        deletedAt: null,
-      },
-      include: {
-        approvals: {
-          include: {
-            approver: {
-              select: {
-                id: true,
-                name: true,
-                role: true,
+        }),
+        include: {
+          approvals: {
+            include: {
+              approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
 
-    // Get recent claims
-    const recentClaims = await ctx.db.claim.findMany({
-      take: 5,
-      where: {
-        submitterId: userId,
-        deletedAt: null,
-      },
-      include: {
-        travelRequest: {
-          select: {
-            requestNumber: true,
-            destination: true,
+      // Get recent claims
+      const recentClaims = await ctx.db.claim.findMany({
+        take: 5,
+        where: withTenantWhere(ctx, {
+          submitterId: userId,
+          deletedAt: null,
+        }),
+        include: {
+          travelRequest: {
+            select: {
+              requestNumber: true,
+              destination: true,
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
 
-    return {
-      travelRequests: {
-        total: myTravelRequests.reduce((sum, item) => sum + item._count, 0),
-        byStatus: myTravelRequests.map((item) => ({
-          status: item.status,
-          count: item._count,
-        })),
-        recent: recentTravelRequests,
-      },
-      claims: {
-        total: myClaims.reduce((sum, item) => sum + item._count, 0),
-        byStatus: myClaims.map((item) => ({
-          status: item.status,
-          count: item._count,
-        })),
-        recent: recentClaims,
-      },
-      approvals: {
-        pending: pendingApprovals,
-      },
-      notifications: {
-        unread: unreadNotifications,
-      },
-      team: {
-        pendingRequests: myTeamTravelRequests,
-      },
-    };
-  }),
+      return {
+        travelRequests: {
+          total: myTravelRequests.reduce((sum, item) => sum + item._count, 0),
+          byStatus: myTravelRequests.map((item) => ({
+            status: item.status,
+            count: item._count,
+          })),
+          recent: recentTravelRequests,
+        },
+        claims: {
+          total: myClaims.reduce((sum, item) => sum + item._count, 0),
+          byStatus: myClaims.map((item) => ({
+            status: item.status,
+            count: item._count,
+          })),
+          recent: recentClaims,
+        },
+        approvals: {
+          pending: pendingApprovals,
+        },
+        notifications: {
+          unread: unreadNotifications,
+        },
+        team: {
+          pendingRequests: myTeamTravelRequests,
+        },
+      };
+    }),
 
   // Get manager dashboard
   getManagerDashboard: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/dashboard/manager',
+        method: "GET",
+        path: "/dashboard/manager",
         protect: true,
-        tags: ['Dashboard'],
-        summary: 'Get manager dashboard statistics',
-      }
+        tags: ["Dashboard"],
+        summary: "Get manager dashboard statistics",
+      },
     })
     .input(
       z.object({
         departmentId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = {
+      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
-      };
+      });
 
       // Filter by department if provided
       if (input?.departmentId) {
@@ -205,21 +227,24 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by status
         ctx.db.claim.groupBy({
           by: ["status"],
-          where: input?.departmentId
-            ? {
-                submitter: {
-                  departmentId: input.departmentId,
-                },
-                deletedAt: null,
-              }
-            : { deletedAt: null },
+          where: withTenantWhere(
+            ctx,
+            input?.departmentId
+              ? {
+                  submitter: {
+                    departmentId: input.departmentId,
+                  },
+                  deletedAt: null,
+                }
+              : { deletedAt: null },
+          ),
           _count: true,
         }),
         // Pending approvals count
         ctx.db.approval.count({
-          where: {
+          where: withTenantWhere(ctx, {
             status: ApprovalStatus.PENDING,
-          },
+          }),
         }),
         // Recent travel requests
         ctx.db.travelRequest.findMany({
@@ -246,14 +271,14 @@ export const dashboardRouter = createTRPCRouter({
         // Top spenders (users with highest total claims)
         ctx.db.claim.groupBy({
           by: ["submitterId"],
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.PAID,
             ...(input?.departmentId && {
               submitter: {
                 departmentId: input.departmentId,
               },
             }),
-          },
+          }),
           _sum: {
             amount: true,
           },
@@ -284,6 +309,14 @@ export const dashboardRouter = createTRPCRouter({
       const spenderUsers = await ctx.db.user.findMany({
         where: {
           id: { in: spenderIds },
+          memberships: getTenantScope(ctx).isRoot
+            ? undefined
+            : {
+                some: {
+                  tenantId: getTenantScope(ctx).tenantId ?? undefined,
+                  status: "ACTIVE",
+                },
+              },
         },
         select: {
           id: true,
@@ -311,7 +344,10 @@ export const dashboardRouter = createTRPCRouter({
       });
 
       // Calculate monthly trend
-      const monthlyData = new Map<string, { submitted: number; approved: number }>();
+      const monthlyData = new Map<
+        string,
+        { submitted: number; approved: number }
+      >();
       monthlyTrend.forEach((request) => {
         const month = request.createdAt.toISOString().slice(0, 7); // YYYY-MM
         if (!monthlyData.has(month)) {
@@ -333,7 +369,10 @@ export const dashboardRouter = createTRPCRouter({
 
       return {
         travelRequests: {
-          total: travelRequestsByStatus.reduce((sum, item) => sum + item._count, 0),
+          total: travelRequestsByStatus.reduce(
+            (sum, item) => sum + item._count,
+            0,
+          ),
           byStatus: travelRequestsByStatus.map((item) => ({
             status: item.status,
             count: item._count,
@@ -359,18 +398,18 @@ export const dashboardRouter = createTRPCRouter({
   getFinanceDashboard: financeProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/dashboard/finance',
+        method: "GET",
+        path: "/dashboard/finance",
         protect: true,
-        tags: ['Dashboard'],
-        summary: 'Get finance dashboard statistics',
-      }
+        tags: ["Dashboard"],
+        summary: "Get finance dashboard statistics",
+      },
     })
     .input(
       z.object({
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -386,6 +425,11 @@ export const dashboardRouter = createTRPCRouter({
         dateFilter.createdAt = createdAt;
       }
 
+      const claimBaseWhere: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
+        deletedAt: null,
+        ...dateFilter,
+      });
+
       // Get financial statistics
       const [
         claimsByStatus,
@@ -399,10 +443,7 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by status
         ctx.db.claim.groupBy({
           by: ["status"],
-          where: {
-            deletedAt: null,
-            ...dateFilter,
-          },
+          where: claimBaseWhere,
           _count: true,
           _sum: {
             amount: true,
@@ -410,22 +451,22 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Total approved amount
         ctx.db.claim.aggregate({
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.APPROVED,
             deletedAt: null,
             ...dateFilter,
-          },
+          }),
           _sum: {
             amount: true,
           },
         }),
         // Total paid amount
         ctx.db.claim.aggregate({
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
             ...dateFilter,
-          },
+          }),
           _sum: {
             amount: true,
           },
@@ -433,10 +474,7 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by type
         ctx.db.claim.groupBy({
           by: ["claimType"],
-          where: {
-            deletedAt: null,
-            ...dateFilter,
-          },
+          where: claimBaseWhere,
           _count: true,
           _sum: {
             amount: true,
@@ -445,21 +483,21 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by department
         ctx.db.claim.groupBy({
           by: ["submitterId"],
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
             ...dateFilter,
-          },
+          }),
           _sum: {
             amount: true,
           },
         }),
         // Pending payments
         ctx.db.claim.findMany({
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.APPROVED,
             deletedAt: null,
-          },
+          }),
           include: {
             submitter: {
               select: {
@@ -488,10 +526,10 @@ export const dashboardRouter = createTRPCRouter({
         // Recent paid claims
         ctx.db.claim.findMany({
           take: 10,
-          where: {
+          where: withTenantWhere(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
-          },
+          }),
           include: {
             submitter: {
               select: {
@@ -519,6 +557,14 @@ export const dashboardRouter = createTRPCRouter({
       const submitters = await ctx.db.user.findMany({
         where: {
           id: { in: submitterIds },
+          memberships: getTenantScope(ctx).isRoot
+            ? undefined
+            : {
+                some: {
+                  tenantId: getTenantScope(ctx).tenantId ?? undefined,
+                  status: "ACTIVE",
+                },
+              },
         },
         select: {
           id: true,
@@ -531,7 +577,10 @@ export const dashboardRouter = createTRPCRouter({
         },
       });
 
-      const departmentSpending = new Map<string, { name: string; amount: number }>();
+      const departmentSpending = new Map<
+        string,
+        { name: string; amount: number }
+      >();
       claimsByDepartment.forEach((claim) => {
         const user = submitters.find((u) => u.id === claim.submitterId);
         if (user?.department) {
@@ -560,7 +609,9 @@ export const dashboardRouter = createTRPCRouter({
         overview: {
           totalApproved: totalApprovedAmount._sum.amount ?? 0,
           totalPaid: totalPaidAmount._sum.amount ?? 0,
-          pendingPayment: Number(totalApprovedAmount._sum.amount ?? 0) - Number(totalPaidAmount._sum.amount ?? 0),
+          pendingPayment:
+            Number(totalApprovedAmount._sum.amount ?? 0) -
+            Number(totalPaidAmount._sum.amount ?? 0),
         },
         claims: {
           byStatus: claimsByStatus.map((item) => ({
@@ -577,7 +628,10 @@ export const dashboardRouter = createTRPCRouter({
         departmentSpending: departmentSpendingArray,
         pendingPayments: {
           count: pendingPayments.length,
-          total: pendingPayments.reduce((sum, claim) => sum + Number(claim.amount), 0),
+          total: pendingPayments.reduce(
+            (sum, claim) => sum + Number(claim.amount),
+            0,
+          ),
           claims: pendingPayments,
         },
         recentPayments: recentPaidClaims,
@@ -588,29 +642,29 @@ export const dashboardRouter = createTRPCRouter({
   getTravelTrends: managerProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/dashboard/travel-trends',
+        method: "GET",
+        path: "/dashboard/travel-trends",
         protect: true,
-        tags: ['Dashboard'],
-        summary: 'Get travel trends analytics',
-      }
+        tags: ["Dashboard"],
+        summary: "Get travel trends analytics",
+      },
     })
     .input(
       z.object({
         startDate: z.coerce.date(),
         endDate: z.coerce.date(),
         departmentId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = {
+      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,
           lte: input.endDate,
         },
-      };
+      });
 
       if (input.departmentId) {
         where.requester = {
@@ -649,7 +703,10 @@ export const dashboardRouter = createTRPCRouter({
           monthlyData.set(month, new Map());
         }
         const typeMap = monthlyData.get(month)!;
-        typeMap.set(request.travelType, (typeMap.get(request.travelType) ?? 0) + 1);
+        typeMap.set(
+          request.travelType,
+          (typeMap.get(request.travelType) ?? 0) + 1,
+        );
       });
 
       const monthlyTrend = Array.from(monthlyData.entries())
@@ -676,29 +733,29 @@ export const dashboardRouter = createTRPCRouter({
   getExpenseAnalysis: financeProcedure
     .meta({
       openapi: {
-        method: 'GET',
-        path: '/dashboard/expense-analysis',
+        method: "GET",
+        path: "/dashboard/expense-analysis",
         protect: true,
-        tags: ['Dashboard'],
-        summary: 'Get expense analysis',
-      }
+        tags: ["Dashboard"],
+        summary: "Get expense analysis",
+      },
     })
     .input(
       z.object({
         startDate: z.coerce.date(),
         endDate: z.coerce.date(),
         departmentId: z.string().optional(),
-      })
+      }),
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ClaimWhereInput = {
+      const where: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,
           lte: input.endDate,
         },
-      };
+      });
 
       if (input.departmentId) {
         where.submitter = {
@@ -746,7 +803,10 @@ export const dashboardRouter = createTRPCRouter({
       ]);
 
       // Calculate monthly totals
-      const monthlyTotals = new Map<string, { entertainment: number; nonEntertainment: number }>();
+      const monthlyTotals = new Map<
+        string,
+        { entertainment: number; nonEntertainment: number }
+      >();
       totalByMonth.forEach((claim) => {
         const month = claim.createdAt.toISOString().slice(0, 7);
         if (!monthlyTotals.has(month)) {

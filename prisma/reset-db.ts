@@ -5,7 +5,7 @@
  * Run:  npx tsx prisma/reset-db.ts
  */
 
-import { PrismaClient } from "../generated/prisma/index.js";
+import { PrismaClient, type Role } from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -18,6 +18,29 @@ async function hash(plain: string) {
 
 async function main() {
   console.log("🗑️  Resetting all data (master data preserved)…\n");
+
+  await prisma.$executeRaw`
+    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+    VALUES (md5(random()::text || clock_timestamp()::text), 'root', 'Root Tenant', true, NOW(), NOW())
+    ON CONFLICT ("slug") DO UPDATE
+    SET "name" = EXCLUDED."name", "isRoot" = true, "updatedAt" = NOW()
+  `;
+
+  await prisma.$executeRaw`
+    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
+    VALUES (md5(random()::text || clock_timestamp()::text), 'default', 'Default Tenant', false, NOW(), NOW())
+    ON CONFLICT ("slug") DO UPDATE
+    SET "name" = EXCLUDED."name", "updatedAt" = NOW()
+  `;
+
+  const tenantRows = await prisma.$queryRaw<
+    Array<{ slug: string; id: string }>
+  >`
+    SELECT "slug", "id" FROM "Tenant" WHERE "slug" IN ('root', 'default')
+  `;
+  const rootTenantId = tenantRows.find((row) => row.slug === "root")?.id ?? "";
+  const defaultTenantId =
+    tenantRows.find((row) => row.slug === "default")?.id ?? "";
 
   // ── 1. Delete transactional tables in dependency order ────────────────────
 
@@ -61,6 +84,9 @@ async function main() {
   console.log("🔴 Deleting user roles…");
   await prisma.userRole.deleteMany({});
 
+  console.log("🔴 Deleting tenant memberships…");
+  await prisma.$executeRaw`DELETE FROM "TenantMembership"`;
+
   // Clear department chief references before deleting users
   console.log("🔴 Clearing department chief references…");
   await prisma.department.updateMany({ data: { chiefId: null } });
@@ -89,35 +115,79 @@ async function main() {
       email: "admin@company.com",
       name: "admin",
       employeeId: "EMP001",
-      role: "ADMIN",
+      role: "ROOT" as unknown as Role,
       password: pw,
       emailVerified: new Date(),
       phoneNumber: "+628111000001",
     },
   });
-  console.log("  🔑 Admin : admin@company.com  (EMP001)");
+  console.log("  🔑 Admin : admin@company.com  (EMP001, ROOT)");
 
   // Sync UserRole
   await prisma.$executeRaw`
     INSERT INTO "UserRole" ("userId", "role", "createdAt")
-    VALUES (${admin.id}, ${"ADMIN"}::"Role", NOW())
+    VALUES (${admin.id}, ${"ROOT"}::"Role", NOW())
     ON CONFLICT ("userId", "role") DO NOTHING
   `;
   console.log("  ✅ UserRole synced\n");
 
+  await prisma.$executeRaw`
+    INSERT INTO "TenantMembership" (
+      "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
+    )
+    VALUES (
+      md5(random()::text || clock_timestamp()::text),
+      ${admin.id},
+      ${rootTenantId},
+      'ROOT'::"Role",
+      'ACTIVE'::"MembershipStatus",
+      true,
+      NOW(),
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT ("userId", "tenantId") DO UPDATE
+    SET "role" = 'ROOT', "status" = 'ACTIVE', "isDefault" = true, "updatedAt" = NOW()
+  `;
+
+  await prisma.$executeRaw`
+    INSERT INTO "TenantMembership" (
+      "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
+    )
+    VALUES (
+      md5(random()::text || clock_timestamp()::text),
+      ${admin.id},
+      ${defaultTenantId},
+      'ROOT'::"Role",
+      'ACTIVE'::"MembershipStatus",
+      false,
+      NOW(),
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT ("userId", "tenantId") DO UPDATE
+    SET "role" = 'ROOT', "status" = 'ACTIVE', "updatedAt" = NOW()
+  `;
+  console.log("  ✅ TenantMembership synced\n");
+
   // Re-point ChartOfAccount FKs to the new admin user
   console.log("🔗 Re-pointing ChartOfAccount user FKs to admin user…");
   await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "createdById" = ${admin.id}, "updatedById" = ${admin.id}`;
+  await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
   console.log("  ✅ ChartOfAccount user FKs updated\n");
 
   // ── 3. Summary ────────────────────────────────────────────────────────────
   console.log("🎉 Reset complete!\n");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  );
   console.log("  Admin user:");
   console.log("    Email    : admin@company.com");
   console.log("    Password : password123");
   console.log("    Role     : ADMIN");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+  );
 }
 
 main()
