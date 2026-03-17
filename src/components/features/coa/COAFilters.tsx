@@ -12,12 +12,12 @@ interface COAFiltersProps {
 }
 
 const ACCOUNT_TYPES: Array<{ value: COAType | "ALL"; label: string }> = [
-  { value: "ALL", label: "All Types" },
-  { value: "ASSET", label: "Asset" },
-  { value: "LIABILITY", label: "Liability" },
-  { value: "EQUITY", label: "Equity" },
-  { value: "REVENUE", label: "Revenue" },
-  { value: "EXPENSE", label: "Expense" },
+  { value: "ALL", label: "Semua Jenis" },
+  { value: "ASSET", label: "Aset" },
+  { value: "LIABILITY", label: "Liabilitas" },
+  { value: "EQUITY", label: "Ekuitas" },
+  { value: "REVENUE", label: "Pendapatan" },
+  { value: "EXPENSE", label: "Beban" },
 ];
 
 export function COAFilters({
@@ -35,7 +35,7 @@ export function COAFilters({
         <div className="flex-1 min-w-[200px]">
           <input
             type="text"
-            placeholder="Search by code or name..."
+            placeholder="Cari berdasarkan kode atau nama..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -69,9 +69,9 @@ export function COAFilters({
           }}
           className="rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="ALL">All Status</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
+          <option value="ALL">Semua Status</option>
+          <option value="true">Aktif</option>
+          <option value="false">Nonaktif</option>
         </select>
       </div>
     </div>

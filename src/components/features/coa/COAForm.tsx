@@ -30,11 +30,11 @@ interface COAFormProps {
 }
 
 const ACCOUNT_TYPES: Array<{ value: COAType; label: string }> = [
-  { value: "ASSET", label: "Asset" },
-  { value: "LIABILITY", label: "Liability" },
-  { value: "EQUITY", label: "Equity" },
-  { value: "REVENUE", label: "Revenue" },
-  { value: "EXPENSE", label: "Expense" },
+  { value: "ASSET", label: "Aset" },
+  { value: "LIABILITY", label: "Liabilitas" },
+  { value: "EQUITY", label: "Ekuitas" },
+  { value: "REVENUE", label: "Pendapatan" },
+  { value: "EXPENSE", label: "Beban" },
 ];
 
 export function COAForm({
@@ -77,17 +77,17 @@ export function COAForm({
     const newErrors: Partial<Record<keyof COAFormData, string>> = {};
 
     if (!formData.code.trim()) {
-      newErrors.code = "Account code is required";
+      newErrors.code = "Kode akun wajib diisi";
     } else if (!/^[A-Z0-9-]+$/.test(formData.code)) {
-      newErrors.code = "Code must contain only uppercase letters, numbers, and hyphens";
+      newErrors.code = "Kode hanya boleh berisi huruf kapital, angka, dan tanda hubung";
     }
 
     if (!formData.name.trim()) {
-      newErrors.name = "Account name is required";
+      newErrors.name = "Nama akun wajib diisi";
     }
 
     if (!formData.category.trim()) {
-      newErrors.category = "Category is required";
+      newErrors.category = "Kategori wajib diisi";
     }
 
     setErrors(newErrors);
@@ -118,13 +118,13 @@ export function COAForm({
         {/* Account Code */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Account Code <span className="text-red-500">*</span>
+            Kode Akun <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={formData.code}
             onChange={(e) => handleChange("code", e.target.value.toUpperCase())}
-            placeholder="e.g., EXP-001"
+            placeholder="contoh: BEB-001"
             className={`w-full rounded-lg border px-4 py-2 text-sm font-mono focus:outline-none focus:ring-2 ${
               errors.code
                 ? "border-red-500 focus:ring-red-500"
@@ -140,13 +140,13 @@ export function COAForm({
         {/* Account Name */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Account Name <span className="text-red-500">*</span>
+            Nama Akun <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={formData.name}
             onChange={(e) => handleChange("name", e.target.value)}
-            placeholder="e.g., Travel Expenses"
+            placeholder="contoh: Biaya Perjalanan Dinas"
             className={`w-full rounded-lg border px-4 py-2 text-sm focus:outline-none focus:ring-2 ${
               errors.name
                 ? "border-red-500 focus:ring-red-500"
@@ -162,7 +162,7 @@ export function COAForm({
         {/* Account Type */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Account Type <span className="text-red-500">*</span>
+            Jenis Akun <span className="text-red-500">*</span>
           </label>
           <select
             value={formData.accountType}
@@ -185,13 +185,13 @@ export function COAForm({
         {/* Category */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Category <span className="text-red-500">*</span>
+            Kategori <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={formData.category}
             onChange={(e) => handleChange("category", e.target.value)}
-            placeholder="e.g., Operating Expenses"
+            placeholder="contoh: Beban Operasional"
             className={`w-full rounded-lg border px-4 py-2 text-sm focus:outline-none focus:ring-2 ${
               errors.category
                 ? "border-red-500 focus:ring-red-500"
@@ -207,13 +207,13 @@ export function COAForm({
         {/* Subcategory */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Subcategory
+            Subkategori
           </label>
           <input
             type="text"
             value={formData.subcategory}
             onChange={(e) => handleChange("subcategory", e.target.value)}
-            placeholder="e.g., International Travel"
+            placeholder="contoh: Perjalanan Luar Kota"
             className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={isLoading}
           />
@@ -222,7 +222,7 @@ export function COAForm({
         {/* Parent Account */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Parent Account
+            Akun Induk
           </label>
           <select
             value={formData.parentId}
@@ -230,7 +230,7 @@ export function COAForm({
             className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={isLoading}
           >
-            <option value="">None (Root Account)</option>
+            <option value="">Tidak ada (Akun Utama)</option>
             {filteredParents.map((parent) => (
               <option key={parent.id} value={parent.id}>
                 {buildHierarchicalName(parent)}
@@ -238,7 +238,7 @@ export function COAForm({
             ))}
           </select>
           <p className="mt-1 text-xs text-gray-500">
-            Only {formData.accountType} accounts shown
+            Hanya akun dengan jenis {formData.accountType} yang ditampilkan
           </p>
         </div>
       </div>
@@ -246,12 +246,12 @@ export function COAForm({
       {/* Description */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Description
+          Deskripsi
         </label>
         <textarea
           value={formData.description}
           onChange={(e) => handleChange("description", e.target.value)}
-          placeholder="Optional account description..."
+          placeholder="Deskripsi akun (opsional)..."
           rows={3}
           className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           disabled={isLoading}
@@ -269,7 +269,7 @@ export function COAForm({
           disabled={isLoading}
         />
         <label htmlFor="isActive" className="text-sm font-medium text-gray-700">
-          Active (available for use in claims)
+          Aktif (dapat digunakan pada klaim)
         </label>
       </div>
 
@@ -281,16 +281,16 @@ export function COAForm({
           onClick={onCancel}
           disabled={isLoading}
         >
-          Cancel
+          Batal
         </Button>
         <Button type="submit" disabled={isLoading}>
           {isLoading ? (
             <>
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent mr-2"></span>
-              {initialData?.id ? "Updating..." : "Creating..."}
+              {initialData?.id ? "Menyimpan perubahan..." : "Membuat akun..."}
             </>
           ) : (
-            <>{initialData?.id ? "Update Account" : "Create Account"}</>
+            <>{initialData?.id ? "Simpan Perubahan" : "Tambah Akun"}</>
           )}
         </Button>
       </div>

@@ -7,11 +7,13 @@
  */
 export function formatCurrency(
   amount: number,
-  currency = "USD"
+  currency = "IDR"
 ): string {
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat("id-ID", {
     style: "currency",
     currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(amount);
 }
 
@@ -20,7 +22,7 @@ export function formatCurrency(
  */
 export function formatDate(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("id-ID", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -32,7 +34,7 @@ export function formatDate(date: Date | string): string {
  */
 export function formatDateTime(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("id-ID", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -50,31 +52,31 @@ export function formatRelativeTime(date: Date | string): string {
   const diffInSeconds = Math.floor((now.getTime() - d.getTime()) / 1000);
 
   if (diffInSeconds < 60) {
-    return "just now";
+    return "baru saja";
   }
 
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) {
-    return `${diffInMinutes} ${diffInMinutes === 1 ? "minute" : "minutes"} ago`;
+    return `${diffInMinutes} menit yang lalu`;
   }
 
   const diffInHours = Math.floor(diffInMinutes / 60);
   if (diffInHours < 24) {
-    return `${diffInHours} ${diffInHours === 1 ? "hour" : "hours"} ago`;
+    return `${diffInHours} jam yang lalu`;
   }
 
   const diffInDays = Math.floor(diffInHours / 24);
   if (diffInDays < 30) {
-    return `${diffInDays} ${diffInDays === 1 ? "day" : "days"} ago`;
+    return `${diffInDays} hari yang lalu`;
   }
 
   const diffInMonths = Math.floor(diffInDays / 30);
   if (diffInMonths < 12) {
-    return `${diffInMonths} ${diffInMonths === 1 ? "month" : "months"} ago`;
+    return `${diffInMonths} bulan yang lalu`;
   }
 
   const diffInYears = Math.floor(diffInMonths / 12);
-  return `${diffInYears} ${diffInYears === 1 ? "year" : "years"} ago`;
+  return `${diffInYears} tahun yang lalu`;
 }
 
 /**

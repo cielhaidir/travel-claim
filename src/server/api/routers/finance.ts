@@ -4,20 +4,27 @@ import {
   AuditAction,
   BailoutStatus,
   ClaimStatus,
+  COAType,
   JournalEntryType,
+  JournalSourceType,
+  JournalStatus,
   Role,
   type Prisma,
 } from "../../../../generated/prisma";
 import { db as dbClient } from "@/server/db";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
-import { generateJournalTransactionNumber } from "@/lib/utils/numberGenerators";
+import {
+  generateJournalEntryNumber,
+  generateJournalTransactionNumber,
+} from "@/lib/utils/numberGenerators";
 
 const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 type DbClient = typeof dbClient;
+type DbTx = Prisma.TransactionClient;
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -52,12 +59,208 @@ function assertSameTenant(ctx: unknown, tenantId: string | null | undefined) {
   }
 }
 
+function assertTenantMatch(
+  expectedTenantId: string | null,
+  actualTenantId: string | null | undefined,
+  entityLabel: string,
+) {
+  if (expectedTenantId !== actualTenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${entityLabel} tidak berada dalam tenant yang sama`,
+    });
+  }
+}
+
+async function assertJournalBuildReferences(
+  tx: DbTx,
+  input: {
+    tenantId: string | null;
+    chartOfAccountId: string;
+    offsetChartOfAccountId: string;
+    balanceAccountId?: string;
+    claimId?: string;
+    bailoutId?: string;
+  },
+) {
+  const [coa, offsetCoa, balanceAccount, claim, bailout] = await Promise.all([
+    tx.chartOfAccount.findUnique({
+      where: { id: input.chartOfAccountId },
+      select: { tenantId: true, isActive: true },
+    }),
+    tx.chartOfAccount.findUnique({
+      where: { id: input.offsetChartOfAccountId },
+      select: { tenantId: true, isActive: true },
+    }),
+    input.balanceAccountId
+      ? tx.balanceAccount.findUnique({
+          where: { id: input.balanceAccountId },
+          select: { tenantId: true, isActive: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    input.claimId
+      ? tx.claim.findUnique({
+          where: { id: input.claimId },
+          select: { tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    input.bailoutId
+      ? tx.bailout.findUnique({
+          where: { id: input.bailoutId },
+          select: { tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!coa || !coa.isActive) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "COA jurnal debit tidak valid" });
+  }
+  if (!offsetCoa || !offsetCoa.isActive) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "COA jurnal kredit tidak valid" });
+  }
+  assertTenantMatch(input.tenantId, coa.tenantId, "COA jurnal debit");
+  assertTenantMatch(input.tenantId, offsetCoa.tenantId, "COA jurnal kredit");
+
+  if (balanceAccount) {
+    if (!balanceAccount.isActive || balanceAccount.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Balance account jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, balanceAccount.tenantId, "Balance account jurnal");
+  }
+
+  if (claim) {
+    if (claim.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Claim jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, claim.tenantId, "Claim jurnal");
+  }
+
+  if (bailout) {
+    if (bailout.deletedAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Bailout jurnal tidak valid" });
+    }
+    assertTenantMatch(input.tenantId, bailout.tenantId, "Bailout jurnal");
+  }
+}
+
 /** Generate a sequential journal transaction number, e.g. JRN-2026-00001 */
 async function generateJournalNumber(
   db: DbClient,
   ctx: unknown,
 ): Promise<string> {
   return generateJournalTransactionNumber(db, getTenantScope(ctx).tenantId);
+}
+
+function assertClaimAccountingAccounts(input: {
+  expenseType: COAType;
+  offsetType: COAType;
+}) {
+  if (input.expenseType !== COAType.EXPENSE) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun beban klaim harus bertipe EXPENSE/Beban",
+    });
+  }
+
+  if (input.offsetType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun lawan pembayaran klaim harus bertipe ASSET/Aset (misalnya kas atau bank)",
+    });
+  }
+}
+
+function assertBailoutAccountingAccounts(input: {
+  advanceType: COAType;
+  offsetType: COAType;
+}) {
+  if (input.advanceType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun pencairan bailout harus bertipe ASSET/Aset karena dicatat sebagai uang muka, bukan langsung beban",
+    });
+  }
+
+  if (input.offsetType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun lawan pencairan bailout harus bertipe ASSET/Aset (misalnya kas atau bank)",
+    });
+  }
+}
+
+async function createPostedDoubleEntryJournal(
+  tx: DbTx,
+  input: {
+    tenantId: string | null;
+    transactionDate: Date;
+    description: string;
+    sourceType: JournalSourceType;
+    claimId?: string;
+    bailoutId?: string;
+    chartOfAccountId: string;
+    offsetChartOfAccountId: string;
+    balanceAccountId?: string;
+    amount: Prisma.Decimal | number;
+    referenceNumber?: string;
+    notes?: string;
+    createdById: string;
+  },
+) {
+  await assertJournalBuildReferences(tx, input);
+
+  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient, input.tenantId);
+
+  const lines: Prisma.JournalEntryLineCreateWithoutJournalEntryInput[] = [
+    {
+      chartOfAccount: { connect: { id: input.chartOfAccountId } },
+      description: input.description,
+      debitAmount: input.amount,
+      creditAmount: 0,
+      lineNumber: 1,
+    },
+    {
+      chartOfAccount: { connect: { id: input.offsetChartOfAccountId } },
+      balanceAccount: input.balanceAccountId
+        ? { connect: { id: input.balanceAccountId } }
+        : undefined,
+      description: `Lawan jurnal - ${input.description}`,
+      debitAmount: 0,
+      creditAmount: input.amount,
+      lineNumber: 2,
+    },
+  ];
+
+  return tx.journalEntry.create({
+    data: {
+      tenantId: input.tenantId,
+      journalNumber,
+      transactionDate: input.transactionDate,
+      description: input.description,
+      sourceType: input.sourceType,
+      sourceId: input.claimId ?? input.bailoutId,
+      claimId: input.claimId,
+      bailoutId: input.bailoutId,
+      referenceNumber: input.referenceNumber,
+      notes: input.notes,
+      status: JournalStatus.POSTED,
+      createdById: input.createdById,
+      postedById: input.createdById,
+      postedAt: new Date(),
+      lines: {
+        create: lines,
+      },
+    },
+    include: {
+      lines: {
+        orderBy: { lineNumber: "asc" },
+        include: {
+          chartOfAccount: { select: { id: true, code: true, name: true } },
+          balanceAccount: { select: { id: true, code: true, name: true } },
+        },
+      },
+    },
+  });
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -354,6 +557,7 @@ export const financeRouter = createTRPCRouter({
         bailoutId: z.string().min(1),
         storageUrl: z.string().url(),
         chartOfAccountId: z.string().min(1),
+        offsetChartOfAccountId: z.string().min(1).optional(),
         balanceAccountId: z.string().min(1),
         /** Optional override for the accounting date; defaults to today. */
         transactionDate: z.coerce.date().optional(),
@@ -397,32 +601,51 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const coa = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, {
-          id: input.chartOfAccountId,
-          isActive: true,
-        } satisfies Prisma.ChartOfAccountWhereInput),
-      });
-      const balanceAccount = await ctx.db.balanceAccount.findFirst({
-        where: withTenantWhere(ctx, {
-          id: input.balanceAccountId,
-          isActive: true,
-          deletedAt: null,
-        } satisfies Prisma.BalanceAccountWhereInput),
-      });
+      const [coa, offsetCoa, balanceAccount] = await Promise.all([
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.chartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.offsetChartOfAccountId ?? input.chartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        ctx.db.balanceAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.balanceAccountId,
+            isActive: true,
+            deletedAt: null,
+          } satisfies Prisma.BalanceAccountWhereInput),
+        }),
+      ]);
 
       if (!coa) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Chart of Account tidak ditemukan atau tidak aktif",
+          message: "Bagan Akun beban tidak ditemukan atau tidak aktif",
+        });
+      }
+      if (!offsetCoa) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bagan Akun lawan tidak ditemukan atau tidak aktif",
         });
       }
       if (!balanceAccount) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Balance Account tidak ditemukan atau tidak aktif",
+          message: "Akun saldo tidak ditemukan atau tidak aktif",
         });
       }
+
+      assertBailoutAccountingAccounts({
+        advanceType: coa.accountType,
+        offsetType: offsetCoa.accountType,
+      });
 
       // ── Generate transaction number ───────────────────────────────────────
       const transactionNumber = await generateJournalNumber(ctx.db, ctx);
@@ -430,12 +653,12 @@ export const financeRouter = createTRPCRouter({
 
       // ── Run in a DB transaction ───────────────────────────────────────────
       const result = await ctx.db.$transaction(async (tx) => {
-        // 1. Create journal entry (expense = DEBIT on expense account)
+        // 1. Create legacy journal transaction (temporary compatibility)
         const journal = await tx.journalTransaction.create({
           data: {
             transactionNumber,
             transactionDate: txDate,
-            description: `Bailout expense: ${bailout.bailoutNumber} — ${bailout.description}`,
+            description: `Beban bailout: ${bailout.bailoutNumber} — ${bailout.description}`,
             amount: bailout.amount,
             entryType: JournalEntryType.DEBIT,
             tenantId: bailout.tenantId,
@@ -453,7 +676,23 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        // 2. Deduct from balance account (expense reduces the balance)
+        // 2. Create proper double-entry journal
+        const journalEntry = await createPostedDoubleEntryJournal(tx, {
+          tenantId: bailout.tenantId,
+          transactionDate: txDate,
+          description: `Pencairan bailout ${bailout.bailoutNumber}`,
+          sourceType: JournalSourceType.BAILOUT,
+          bailoutId: bailout.id,
+          chartOfAccountId: input.chartOfAccountId,
+          offsetChartOfAccountId: offsetCoa.id,
+          balanceAccountId: input.balanceAccountId,
+          amount: bailout.amount,
+          referenceNumber: input.referenceNumber,
+          notes: input.notes,
+          createdById: ctx.session.user.id,
+        });
+
+        // 3. Deduct from balance account (expense reduces the balance)
         const updatedBalance = await tx.balanceAccount.update({
           where: { id: input.balanceAccountId },
           data: {
@@ -463,7 +702,7 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        // 3. Update bailout — attach storage URL and assign finance user
+        // 4. Update bailout — attach storage URL and assign finance user
         const updatedBailout = await tx.bailout.update({
           where: { id: input.bailoutId },
           data: {
@@ -472,7 +711,7 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        return { journal, updatedBalance, updatedBailout };
+        return { journal, journalEntry, updatedBalance, updatedBailout };
       });
 
       // ── Audit log ─────────────────────────────────────────────────────────
@@ -486,8 +725,11 @@ export const financeRouter = createTRPCRouter({
           metadata: {
             action: "process_transaction",
             journalTransactionId: result.journal.id,
+            journalEntryId: result.journalEntry.id,
             transactionNumber,
+            journalNumber: result.journalEntry.journalNumber,
             chartOfAccountId: input.chartOfAccountId,
+            offsetChartOfAccountId: offsetCoa.id,
             balanceAccountId: input.balanceAccountId,
             storageUrl: input.storageUrl,
           },
@@ -526,6 +768,7 @@ export const financeRouter = createTRPCRouter({
         claimId: z.string().min(1),
         storageUrl: z.string().url(),
         chartOfAccountId: z.string().min(1),
+        offsetChartOfAccountId: z.string().min(1).optional(),
         balanceAccountId: z.string().min(1),
         /** Optional override for the accounting date; defaults to today. */
         transactionDate: z.coerce.date().optional(),
@@ -569,32 +812,51 @@ export const financeRouter = createTRPCRouter({
       }
 
       // ── Validate COA & Balance Account ────────────────────────────────────
-      const coa = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, {
-          id: input.chartOfAccountId,
-          isActive: true,
-        } satisfies Prisma.ChartOfAccountWhereInput),
-      });
-      const balanceAccount = await ctx.db.balanceAccount.findFirst({
-        where: withTenantWhere(ctx, {
-          id: input.balanceAccountId,
-          isActive: true,
-          deletedAt: null,
-        } satisfies Prisma.BalanceAccountWhereInput),
-      });
+      const [coa, offsetCoa, balanceAccount] = await Promise.all([
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.chartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.offsetChartOfAccountId ?? input.chartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        ctx.db.balanceAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.balanceAccountId,
+            isActive: true,
+            deletedAt: null,
+          } satisfies Prisma.BalanceAccountWhereInput),
+        }),
+      ]);
 
       if (!coa) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Chart of Account tidak ditemukan atau tidak aktif",
+          message: "Bagan Akun beban tidak ditemukan atau tidak aktif",
+        });
+      }
+      if (!offsetCoa) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bagan Akun lawan tidak ditemukan atau tidak aktif",
         });
       }
       if (!balanceAccount) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Balance Account tidak ditemukan atau tidak aktif",
+          message: "Akun saldo tidak ditemukan atau tidak aktif",
         });
       }
+
+      assertClaimAccountingAccounts({
+        expenseType: coa.accountType,
+        offsetType: offsetCoa.accountType,
+      });
 
       // ── Generate transaction number ───────────────────────────────────────
       const transactionNumber = await generateJournalNumber(ctx.db, ctx);
@@ -602,12 +864,12 @@ export const financeRouter = createTRPCRouter({
 
       // ── Run in a DB transaction ───────────────────────────────────────────
       const result = await ctx.db.$transaction(async (tx) => {
-        // 1. Create journal entry (expense = DEBIT)
+        // 1. Create legacy journal transaction (temporary compatibility)
         const journal = await tx.journalTransaction.create({
           data: {
             transactionNumber,
             transactionDate: txDate,
-            description: `Claim expense: ${claim.claimNumber} — ${claim.description}`,
+            description: `Beban klaim: ${claim.claimNumber} — ${claim.description}`,
             amount: claim.amount,
             entryType: JournalEntryType.DEBIT,
             tenantId: claim.tenantId,
@@ -625,7 +887,23 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        // 2. Deduct from balance account
+        // 2. Create proper double-entry journal
+        const journalEntry = await createPostedDoubleEntryJournal(tx, {
+          tenantId: claim.tenantId,
+          transactionDate: txDate,
+          description: `Pembayaran klaim ${claim.claimNumber}`,
+          sourceType: JournalSourceType.CLAIM,
+          claimId: claim.id,
+          chartOfAccountId: input.chartOfAccountId,
+          offsetChartOfAccountId: offsetCoa.id,
+          balanceAccountId: input.balanceAccountId,
+          amount: claim.amount,
+          referenceNumber: input.referenceNumber,
+          notes: input.notes,
+          createdById: ctx.session.user.id,
+        });
+
+        // 3. Deduct from balance account
         const updatedBalance = await tx.balanceAccount.update({
           where: { id: input.balanceAccountId },
           data: {
@@ -635,7 +913,7 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        // 3. Update claim — attach storage URL and assign finance user
+        // 4. Update claim — attach storage URL and assign finance user
         const updatedClaim = await tx.claim.update({
           where: { id: input.claimId },
           data: {
@@ -643,7 +921,7 @@ export const financeRouter = createTRPCRouter({
           },
         });
 
-        return { journal, updatedBalance, updatedClaim };
+        return { journal, journalEntry, updatedBalance, updatedClaim };
       });
 
       // ── Audit log ─────────────────────────────────────────────────────────
@@ -657,8 +935,11 @@ export const financeRouter = createTRPCRouter({
           metadata: {
             action: "process_transaction",
             journalTransactionId: result.journal.id,
+            journalEntryId: result.journalEntry.id,
             transactionNumber,
+            journalNumber: result.journalEntry.journalNumber,
             chartOfAccountId: input.chartOfAccountId,
+            offsetChartOfAccountId: offsetCoa.id,
             balanceAccountId: input.balanceAccountId,
             storageUrl: input.storageUrl,
           },
@@ -666,6 +947,142 @@ export const financeRouter = createTRPCRouter({
       });
 
       return result;
+    }),
+
+  settleBailoutTransaction: protectedProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/finance/bailouts/{bailoutId}/settlement",
+        protect: true,
+        tags: ["Finance"],
+        summary: "Settle bailout into expense journal",
+      },
+    })
+    .input(
+      z.object({
+        bailoutId: z.string().min(1),
+        expenseChartOfAccountId: z.string().min(1),
+        advanceChartOfAccountId: z.string().min(1),
+        transactionDate: z.coerce.date().optional(),
+        notes: z.string().optional(),
+        referenceNumber: z.string().optional(),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Finance or Admin can settle bailout transactions",
+        });
+      }
+
+      const bailout = await ctx.db.bailout.findUnique({
+        where: { id: input.bailoutId, deletedAt: null },
+      });
+
+      if (!bailout) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bailout tidak ditemukan",
+        });
+      }
+
+      assertSameTenant(ctx, bailout.tenantId);
+
+      if (bailout.status !== BailoutStatus.DISBURSED) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Settlement bailout hanya bisa dilakukan untuk bailout yang sudah dicairkan",
+        });
+      }
+
+      const existingSettlement = await ctx.db.journalEntry.findFirst({
+        where: withTenantWhere(ctx, {
+          bailoutId: bailout.id,
+          sourceType: JournalSourceType.SETTLEMENT,
+          status: JournalStatus.POSTED,
+          deletedAt: null,
+        } satisfies Prisma.JournalEntryWhereInput),
+        select: { id: true, journalNumber: true },
+      });
+
+      if (existingSettlement) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Settlement bailout sudah pernah diposting dengan nomor jurnal ${existingSettlement.journalNumber}`,
+        });
+      }
+
+      const [expenseCoa, advanceCoa] = await Promise.all([
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.expenseChartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        ctx.db.chartOfAccount.findFirst({
+          where: withTenantWhere(ctx, {
+            id: input.advanceChartOfAccountId,
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+      ]);
+
+      if (!expenseCoa) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bagan Akun beban settlement tidak ditemukan atau tidak aktif",
+        });
+      }
+      if (!advanceCoa) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bagan Akun uang muka tidak ditemukan atau tidak aktif",
+        });
+      }
+
+      assertClaimAccountingAccounts({
+        expenseType: expenseCoa.accountType,
+        offsetType: advanceCoa.accountType,
+      });
+
+      const txDate = input.transactionDate ?? new Date();
+      const journalEntry = await ctx.db.$transaction(async (tx) => {
+        return createPostedDoubleEntryJournal(tx, {
+          tenantId: bailout.tenantId,
+          transactionDate: txDate,
+          description: `Settlement bailout ${bailout.bailoutNumber}`,
+          sourceType: JournalSourceType.SETTLEMENT,
+          bailoutId: bailout.id,
+          chartOfAccountId: expenseCoa.id,
+          offsetChartOfAccountId: advanceCoa.id,
+          amount: bailout.amount,
+          referenceNumber: input.referenceNumber,
+          notes: input.notes,
+          createdById: ctx.session.user.id,
+        });
+      });
+
+      await ctx.db.auditLog.create({
+        data: {
+          tenantId: bailout.tenantId,
+          userId: ctx.session.user.id,
+          action: AuditAction.UPDATE,
+          entityType: "Bailout",
+          entityId: bailout.id,
+          metadata: {
+            action: "settlement_transaction",
+            journalEntryId: journalEntry.id,
+            journalNumber: journalEntry.journalNumber,
+            expenseChartOfAccountId: expenseCoa.id,
+            advanceChartOfAccountId: advanceCoa.id,
+          },
+        },
+      });
+
+      return { journalEntry, bailout };
     }),
 
   // ─── BALANCE ACCOUNTS ─────────────────────────────────────────────────────

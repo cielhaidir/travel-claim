@@ -5,6 +5,7 @@ import {
   Role,
   type Prisma,
 } from "../../../../generated/prisma";
+import { bootstrapTenantAccounting } from "@/lib/accounting/bootstrap";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 
 const ROLE_PRECEDENCE: Role[] = [
@@ -262,6 +263,11 @@ export const tenantRouter = createTRPCRouter({
             isDefault: false,
             activatedAt: new Date(),
           },
+        });
+
+        await bootstrapTenantAccounting(tx, {
+          tenantId: tenant.id,
+          userId: ctx.session.user.id,
         });
 
         await syncUserAccess(tx, ctx.session.user.id);

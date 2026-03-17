@@ -20,7 +20,9 @@
     "lint:fix": "next lint --fix",
     "preview": "next build && next start",
     "start": "node .next/standalone/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:multitenant": "QUIET_TEST_LOGS=1 NODE_ENV=test tsx scripts/test-multitenant.ts",
+    "test:accounting-uat": "QUIET_TEST_LOGS=1 NODE_ENV=test tsx scripts/test-accounting-uat.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

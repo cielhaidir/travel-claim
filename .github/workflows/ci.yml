@@ -21,11 +21,64 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # 1. Build Docker image (and push on main/develop)
+  # 1. Multi-tenant regression checks
+  # ──────────────────────────────────────────────────────────────────────────
+  test-multitenant:
+    name: Multi-tenant Integration Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: travel_claim_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d travel_claim_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/travel_claim_ci?schema=public
+      AUTH_SECRET: ci-test-secret
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply baseline schema and seed data
+        run: npx prisma migrate reset --force
+
+      - name: Run multi-tenant integration check
+        run: npm run test:multitenant
+
+      - name: Run accounting UAT smoke test
+        run: npm run test:accounting-uat
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Build Docker image (and push on main/develop)
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: Build Docker Image
     runs-on: self-hosted         # self-hosted runner label
+    needs: test-multitenant
     permissions:
       contents: read
       packages: write

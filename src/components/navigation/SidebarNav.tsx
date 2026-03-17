@@ -13,34 +13,34 @@ interface NavItem {
 
 const navigationItems: NavItem[] = [
   {
-    label: "Dashboard",
+    label: "Dasbor",
     href: "/dashboard",
     icon: "📊",
   },
   {
-    label: "Business Trip Requests",
+    label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
     icon: "✈️",
   },
   {
-    label: "Projects",
+    label: "Proyek",
     href: "/projects",
     icon: "📁",
     roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
   },
   {
-    label: "Bailout Approval",
+    label: "Persetujuan Bailout",
     href: "/bailout",
     icon: "💼",
     roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
   },
   {
-    label: "Claims",
+    label: "Klaim",
     href: "/claims",
     icon: "💰",
   },
   {
-    label: "Approvals",
+    label: "Persetujuan",
     href: "/approvals",
     icon: "✅",
     roles: [
@@ -53,19 +53,13 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    label: "Finance",
-    href: "/finance",
-    icon: "💵",
+    label: "Akuntansi & Keuangan",
+    href: "/accounting",
+    icon: "🏦",
     roles: ["FINANCE", "ADMIN"],
   },
   {
-    label: "Chart of Accounts",
-    href: "/chart-of-accounts",
-    icon: "📋",
-    roles: ["FINANCE", "ADMIN"],
-  },
-  {
-    label: "User Management",
+    label: "Manajemen Pengguna",
     href: "/admin/users",
     icon: "👥",
     roles: ["ADMIN"],
