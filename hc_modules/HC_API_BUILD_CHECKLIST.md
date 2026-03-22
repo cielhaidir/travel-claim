@@ -53,7 +53,7 @@ Dokumen ini menjadi sumber utama tracking implementasi HC berbasis blueprint.
 - [x] Date utility
 - [x] Approval log helper
 - [ ] Transaction helper generik terpisah (saat ini inline per service)
-- [ ] Revisi seluruh kontrak internal dari `employeeId` ke `userId`
+- [x] Revisi seluruh kontrak internal dari `employeeId` ke `userId`
 
 ## 4. Modul Absensi
 - [x] `attendance.createCheckIn`
@@ -154,7 +154,8 @@ Dokumen ini menjadi sumber utama tracking implementasi HC berbasis blueprint.
 - [ ] Integration test endpoint HC
 - [ ] Concurrency test (double approve)
 - [ ] Regression test perubahan workday vs attendance
-- [ ] Test kontrak setelah migrasi `employeeId -> userId`
+- [x] Audit kontrak internal setelah migrasi `employeeId -> userId` di area `hc_modules`
+- [ ] Test runtime/integration kontrak setelah HC di-wire ke app utama
 
 ## 13. Dokumentasi API
 - [ ] Tambah dokumentasi endpoint HC di OpenAPI/tRPC docs

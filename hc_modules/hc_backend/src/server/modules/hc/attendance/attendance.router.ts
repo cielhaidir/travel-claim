@@ -8,6 +8,6 @@ import {
 export const attendanceRouterContract = {
   createCheckIn: attendanceCreateCheckInSchema,
   createCheckOut: attendanceCreateCheckOutSchema,
-  listByEmployeePeriod: attendanceListByPeriodSchema,
+  listByPeriod: attendanceListByPeriodSchema,
   nightlyFinalizeStatus: attendanceNightlyFinalizeSchema,
 };
