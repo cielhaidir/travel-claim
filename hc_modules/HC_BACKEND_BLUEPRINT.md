@@ -1,7 +1,9 @@
 # HC Backend Blueprint (Modular System)
 
 ## 1. Tujuan
-Blueprint ini menjadi acuan awal backend untuk Human Capital (HC) dengan pendekatan modular. Fokus sementara:
+Blueprint ini menjadi acuan backend Human Capital (HC) dengan pendekatan modular dan menyesuaikan schema existing project.
+
+Fokus sementara:
 - `Absensi`
 - `Lembur`
 - `Permintaan Cuti`
@@ -10,12 +12,22 @@ Blueprint ini menjadi acuan awal backend untuk Human Capital (HC) dengan pendeka
 - `Bonus`
 
 Target utama:
-- Mudah dikembangkan per modul.
-- Konsisten untuk audit, approval, dan payroll.
-- Siap diintegrasikan ke sistem existing (auth, notification, finance bila diperlukan).
+- Mudah dikembangkan per modul
+- Konsisten untuk audit, approval, dan payroll
+- Nyambung ke schema existing tanpa duplikasi master employee
 
-## 2. Struktur Stack (Backend)
-Rekomendasi mengikuti stack project saat ini:
+## 2. Prinsip Arsitektur Penting
+- **Master employee existing adalah `User`**, bukan tabel `hc_employees`
+- Data organisasi mengikuti tabel existing seperti `User`, `Department`, dan `UserRole`
+- Modul HC hanya menambah **tabel transaksi/domain HC**
+- Semua FK person di HC memakai `User.id`
+
+Naming yang dipakai di HC:
+- `user_id` untuk pemilik transaksi HC
+- `approved_by_user_id` untuk approver
+- `actor_user_id` untuk audit log actor
+
+## 3. Struktur Stack (Backend)
 - Runtime: `Node.js` (TypeScript)
 - Framework: `Next.js` API route + `tRPC` routers
 - ORM: `Prisma`
@@ -23,15 +35,14 @@ Rekomendasi mengikuti stack project saat ini:
 - AuthN/AuthZ: `NextAuth` + role-based access
 - Validation: `Zod`
 - Logging: service-level structured logging
-- Background jobs (opsional tahap lanjut): queue worker untuk payroll batch
 
-## 3. Arsitektur Modular
+## 4. Arsitektur Modular
 Setiap modul memiliki layer:
-- `router` (tRPC/API endpoint)
-- `service` (business rules)
-- `repository` (query DB via Prisma)
-- `schema` (zod validation)
-- `types` (DTO dan type internal)
+- `router`
+- `service`
+- `repository`
+- `schema`
+- `types`
 
 Contoh struktur direktori:
 ```txt
@@ -45,36 +56,30 @@ src/server/modules/hc/
   shared/
 ```
 
-`shared/` berisi komponen lintas modul:
-- approval workflow helper
-- status enum
-- date/time utility
-- audit log helper
+## 5. Relasi Domain Tingkat Tinggi
+- `User` memiliki banyak data `absensi`, `lembur`, `cuti`, `payroll`, `bonus`
+- `Department` dipakai dari schema existing untuk struktur organisasi
+- `hc_workdays` menjadi referensi kalender kerja
+- `lembur` dan `cuti` memakai approval flow
+- `payroll` mengambil data periodik dari absensi, lembur approved, cuti approved, dan bonus
 
-## 4. Relasi Domain Tingkat Tinggi
-- `karyawan` memiliki banyak data `absensi`, `lembur`, `cuti`, `payroll`, `bonus`.
-- `hari_kerja` menjadi referensi kalender kerja untuk validasi absensi/cuti/lembur.
-- `lembur` dan `cuti` bisa memakai alur approval.
-- `payroll` mengambil data periodik dari absensi, lembur approved, cuti approved, dan bonus.
+## 6. Tabel Inti HC (Draft Revisi)
 
-## 5. Tabel Inti (Draft)
+## 6.1 `User` (existing master employee)
+Bukan tabel HC baru. Dipakai sebagai sumber utama data employee.
 
-## 5.1 `hc_employees`
-Master data karyawan.
+Field existing yang relevan:
+- `id`
+- `name`
+- `email`
+- `employeeId`
+- `role`
+- `departmentId`
+- `supervisorId`
+- `phoneNumber`
+- `deletedAt`
 
-Kolom utama:
-- `id` (uuid, pk)
-- `employee_code` (varchar, unique)
-- `full_name` (varchar)
-- `email` (varchar, unique)
-- `department_id` (uuid, nullable)
-- `position` (varchar)
-- `employment_status` (enum: probation, permanent, contract, inactive)
-- `join_date` (date)
-- `resign_date` (date, nullable)
-- `created_at`, `updated_at`
-
-## 5.2 `hc_workdays`
+## 6.2 `hc_workdays`
 Referensi hari kerja dan hari libur.
 
 Kolom utama:
@@ -85,12 +90,12 @@ Kolom utama:
 - `description` (varchar, nullable)
 - `created_at`, `updated_at`
 
-## 5.3 `hc_attendance`
-Catatan absensi harian karyawan.
+## 6.3 `hc_attendance`
+Catatan absensi harian user.
 
 Kolom utama:
 - `id` (uuid, pk)
-- `employee_id` (uuid, fk -> hc_employees.id)
+- `user_id` (text, fk -> `User.id`)
 - `attendance_date` (date)
 - `check_in_at` (timestamp, nullable)
 - `check_out_at` (timestamp, nullable)
@@ -100,64 +105,64 @@ Kolom utama:
 - `created_at`, `updated_at`
 
 Constraint:
-- unique (`employee_id`, `attendance_date`)
+- unique (`user_id`, `attendance_date`)
 
-## 5.4 `hc_overtime_requests`
+## 6.4 `hc_overtime_requests`
 Permintaan lembur.
 
 Kolom utama:
 - `id` (uuid, pk)
 - `request_no` (varchar, unique)
-- `employee_id` (uuid, fk)
+- `user_id` (text, fk -> `User.id`)
 - `overtime_date` (date)
 - `start_time` (timestamp)
 - `end_time` (timestamp)
 - `duration_minutes` (int)
 - `reason` (text)
 - `status` (enum: draft, submitted, approved, rejected, cancelled)
-- `approved_by` (uuid, nullable)
+- `approved_by_user_id` (text, nullable, fk -> `User.id`)
 - `approved_at` (timestamp, nullable)
 - `rejection_reason` (text, nullable)
 - `created_at`, `updated_at`
 
-## 5.5 `hc_leave_requests`
+## 6.5 `hc_leave_requests`
 Permintaan cuti.
 
 Kolom utama:
 - `id` (uuid, pk)
 - `request_no` (varchar, unique)
-- `employee_id` (uuid, fk)
+- `user_id` (text, fk -> `User.id`)
 - `leave_type` (enum: annual, sick, unpaid, maternity, paternity, special)
 - `start_date` (date)
 - `end_date` (date)
 - `total_days` (numeric(5,2))
 - `reason` (text, nullable)
 - `status` (enum: draft, submitted, approved, rejected, cancelled)
-- `approved_by` (uuid, nullable)
+- `approved_by_user_id` (text, nullable, fk -> `User.id`)
 - `approved_at` (timestamp, nullable)
 - `rejection_reason` (text, nullable)
 - `created_at`, `updated_at`
 
-## 5.6 `hc_payroll_periods`
+## 6.6 `hc_payroll_periods`
 Header periode payroll.
 
 Kolom utama:
 - `id` (uuid, pk)
-- `period_code` (varchar, unique) contoh: `2026-03`
+- `period_code` (varchar, unique)
 - `start_date` (date)
 - `end_date` (date)
 - `status` (enum: draft, processing, finalized, paid)
 - `processed_at` (timestamp, nullable)
-- `processed_by` (uuid, nullable)
+- `processed_by_user_id` (text, nullable, fk -> `User.id`)
 - `created_at`, `updated_at`
 
-## 5.7 `hc_payroll_items`
-Rincian payroll per karyawan per periode.
+## 6.7 `hc_payroll_items`
+Rincian payroll per user per periode.
 
 Kolom utama:
 - `id` (uuid, pk)
 - `payroll_period_id` (uuid, fk -> hc_payroll_periods.id)
-- `employee_id` (uuid, fk -> hc_employees.id)
+- `user_id` (text, fk -> `User.id`)
 - `basic_salary` (numeric(14,2))
 - `attendance_deduction` (numeric(14,2), default 0)
 - `overtime_amount` (numeric(14,2), default 0)
@@ -171,63 +176,62 @@ Kolom utama:
 - `created_at`, `updated_at`
 
 Constraint:
-- unique (`payroll_period_id`, `employee_id`)
+- unique (`payroll_period_id`, `user_id`)
 
-## 5.8 `hc_bonus`
-Bonus karyawan (insentif, performance bonus, dsb).
+## 6.8 `hc_bonus`
+Bonus user.
 
 Kolom utama:
 - `id` (uuid, pk)
-- `employee_id` (uuid, fk -> hc_employees.id)
+- `user_id` (text, fk -> `User.id`)
 - `bonus_type` (enum: performance, attendance, project, retention, other)
 - `bonus_date` (date)
 - `amount` (numeric(14,2))
 - `description` (text, nullable)
 - `payroll_period_id` (uuid, nullable, fk -> hc_payroll_periods.id)
 - `status` (enum: proposed, approved, rejected, paid)
-- `approved_by` (uuid, nullable)
+- `approved_by_user_id` (text, nullable, fk -> `User.id`)
 - `approved_at` (timestamp, nullable)
 - `created_at`, `updated_at`
 
-## 5.9 `hc_approval_logs`
-Audit approval lintas modul (lembur/cuti/bonus/payroll opsional).
+## 6.9 `hc_approval_logs`
+Audit approval lintas modul.
 
 Kolom utama:
 - `id` (uuid, pk)
 - `module_name` (enum: overtime, leave, bonus, payroll)
 - `reference_id` (uuid)
 - `action` (enum: submit, approve, reject, cancel, revise)
-- `actor_id` (uuid)
+- `actor_user_id` (text, fk -> `User.id`)
 - `notes` (text, nullable)
 - `created_at`
 
-## 6. Alur Proses Inti
+## 7. Alur Proses Inti
 
-## 6.1 Absensi
-1. Karyawan check-in/check-out.
+## 7.1 Absensi
+1. User check-in/check-out.
 2. Sistem validasi terhadap `hc_workdays`.
 3. Sistem hitung status hadir/lambat/absen.
 4. Data dipakai untuk rekap payroll.
 
-## 6.2 Lembur
-1. Karyawan submit lembur.
+## 7.2 Lembur
+1. User submit lembur.
 2. Atasan melakukan approve/reject.
 3. Hanya status `approved` yang dihitung ke payroll.
 
-## 6.3 Cuti
-1. Karyawan submit cuti.
-2. Sistem cek bentrok tanggal + saldo cuti (tabel saldo ditambahkan fase berikutnya).
+## 7.3 Cuti
+1. User submit cuti.
+2. Sistem cek bentrok tanggal + saldo cuti.
 3. Atasan/HR approve atau reject.
 4. Cuti approved mempengaruhi status absensi/perhitungan payroll.
 
-## 6.4 Penggajian
+## 7.4 Penggajian
 1. Buat payroll period.
 2. Generate payroll items dari absensi + lembur + bonus + potongan.
 3. Review dan finalize.
 4. Tandai paid setelah pembayaran.
 
-## 7. API Kontrak Minimum (Draft)
-Endpoint/route yang disarankan:
+## 8. API Kontrak Minimum (Draft)
 - `attendance.createCheckIn`
 - `attendance.createCheckOut`
 - `attendance.listByPeriod`
@@ -243,25 +247,7 @@ Endpoint/route yang disarankan:
 - `bonus.create`
 - `bonus.approve`
 
-## 8. Role dan Akses (Minimum)
-- `employee`: input absensi, ajukan lembur/cuti.
-- `manager`: approve/reject lembur & cuti tim.
-- `hr`: kelola kalender kerja, monitoring, payroll preparation.
-- `payroll_admin`: generate/finalize payroll.
-- `super_admin`: akses penuh + audit.
-
-## 9. Non-Functional Requirement (Awal)
-- Semua perubahan status approval tercatat di `hc_approval_logs`.
-- Gunakan transaksi DB untuk proses payroll generate/finalize.
-- Idempotent operation untuk endpoint payroll generate.
-- Timezone diset konsisten (mis. `Asia/Makassar` atau UTC + konversi terkontrol).
-
-## 10. Rencana Fase Lanjutan
-- Tambah tabel saldo cuti tahunan (`hc_leave_balances`).
-- Tambah komponen komplain payroll + revisi.
-- Integrasi notifikasi (email/WA/in-app) untuk approval.
-- Tambah laporan: rekap kehadiran, biaya lembur, biaya payroll per departemen.
-
----
-
-Dokumen ini adalah blueprint backend tahap awal. Struktur tabel dan enum dapat disesuaikan dengan kebijakan perusahaan dan regulasi yang berlaku.
+## 9. Catatan Revisi Penting
+- `hc_employees` tidak lagi dipakai sebagai master employee
+- semua relasi employee di HC harus diarahkan ke `User.id`
+- naming lama seperti `employeeId`, `employee_id`, `approved_by`, `actor_id` harus diganti agar konsisten dengan model baru
