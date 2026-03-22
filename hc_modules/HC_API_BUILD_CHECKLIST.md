@@ -150,7 +150,7 @@ Dokumen ini menjadi sumber utama tracking implementasi HC berbasis blueprint.
 - [ ] Metric endpoint HC
 
 ## 12. Testing
-- [ ] Unit test service layer
+- [x] Unit test service layer (`hc_modules/hc_backend/tests`)
 - [ ] Integration test endpoint HC
 - [ ] Concurrency test (double approve)
 - [ ] Regression test perubahan workday vs attendance

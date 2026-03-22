@@ -63,7 +63,7 @@ export class AttendanceService {
     });
   }
 
-  async listByEmployeePeriod(input: AttendanceListByPeriodInput): Promise<Paginated<AttendanceRow>> {
+  async listByPeriod(input: AttendanceListByPeriodInput): Promise<Paginated<AttendanceRow>> {
     if (input.endDate < input.startDate) throw new Error("endDate must be >= startDate");
 
     const skip = (input.page - 1) * input.pageSize;

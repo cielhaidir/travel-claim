@@ -160,6 +160,7 @@ Jika dinilai **khusus dalam batas `hc_modules`**, maka status saat ini adalah:
 - **arsitektur:** siap
 - **kontrak modul:** siap
 - **service layer draft:** siap
+- **unit test modular (`hc_modules` only):** tersedia dan lulus
 - **migration draft:** siap direview
 - **seed modular:** siap sebagai contoh
 - **runtime aktif di app utama:** belum
