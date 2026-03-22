@@ -152,8 +152,8 @@ Dokumen ini menjadi sumber utama tracking implementasi HC berbasis blueprint.
 ## 12. Testing
 - [x] Unit test service layer (`hc_modules/hc_backend/tests`)
 - [ ] Integration test endpoint HC
-- [ ] Concurrency test (double approve)
-- [ ] Regression test perubahan workday vs attendance
+- [x] Concurrency/guard test dasar (double approve / repeated reject di service layer modular)
+- [x] Regression test perubahan workday vs attendance di service layer modular
 - [x] Audit kontrak internal setelah migrasi `employeeId -> userId` di area `hc_modules`
 - [ ] Test runtime/integration kontrak setelah HC di-wire ke app utama
 

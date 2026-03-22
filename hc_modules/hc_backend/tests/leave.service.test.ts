@@ -98,3 +98,30 @@ test("leave approve syncs attendance for approved leave dates", async () => {
   assert.equal(attendanceLeave.length, 2);
   assert.equal(attendanceLeave[0]?.userId, "u-1");
 });
+
+test("leave reject blocks second rejection after status changes", async () => {
+  const { repo, rows } = createRepo();
+  const service = new LeaveService(repo);
+
+  rows.push({
+    id: "lv-2",
+    requestNo: "LV-2",
+    userId: "u-1",
+    leaveType: "annual",
+    startDate: new Date("2026-03-20T00:00:00.000Z"),
+    endDate: new Date("2026-03-20T00:00:00.000Z"),
+    totalDays: 1,
+    reason: "Leave",
+    status: "submitted",
+    approvedByUserId: null,
+    approvedAt: null,
+    rejectionReason: null,
+  });
+
+  const first = await service.reject({ requestId: "lv-2", approverId: "mgr-1", rejectionReason: "quota" });
+  assert.equal(first.status, "rejected");
+
+  await assert.rejects(() =>
+    service.reject({ requestId: "lv-2", approverId: "mgr-2", rejectionReason: "again" }),
+  );
+});

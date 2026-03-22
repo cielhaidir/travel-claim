@@ -57,3 +57,30 @@ test("overtime submit stores request with userId and logs actorUserId", async ()
   assert.equal(rows[0]?.status, "submitted");
   assert.deepEqual(logs[0], { actorUserId: "u-1", action: "submit" });
 });
+
+test("overtime approve rejects second approval after status changes", async () => {
+  const { repo, rows } = createRepo();
+  const service = new OvertimeService(repo);
+
+  rows.push({
+    id: "ot-1",
+    requestNo: "OT-1",
+    userId: "u-1",
+    overtimeDate: new Date("2026-03-17T00:00:00.000Z"),
+    startTime: new Date("2026-03-17T10:00:00.000Z"),
+    endTime: new Date("2026-03-17T12:00:00.000Z"),
+    durationMinutes: 120,
+    reason: "Support",
+    status: "submitted",
+    approvedByUserId: null,
+    approvedAt: null,
+    rejectionReason: null,
+  });
+
+  const first = await service.approve({ requestId: "ot-1", approverId: "mgr-1", notes: "ok" });
+  assert.equal(first.status, "approved");
+
+  await assert.rejects(() =>
+    service.approve({ requestId: "ot-1", approverId: "mgr-2", notes: "again" }),
+  );
+});

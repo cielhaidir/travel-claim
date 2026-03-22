@@ -77,3 +77,33 @@ test("workday syncImpactedAttendance converts absent to holiday on non-workday",
   assert.equal(result.updated, 1);
   assert.equal(attendanceRows[0]?.attendanceStatus, "holiday");
 });
+
+test("workday syncImpactedAttendance converts holiday back to absent on workday without checkin", async () => {
+  const { repo, workdays, attendanceRows } = createRepo();
+  const service = new WorkdayService(repo);
+
+  workdays.push({
+    id: "wd-2",
+    workDate: new Date("2026-03-24T00:00:00.000Z"),
+    isWorkday: true,
+    workType: "regular",
+    description: "Tuesday",
+  });
+
+  attendanceRows.push({
+    id: "att-2",
+    userId: "u-1",
+    attendanceDate: new Date("2026-03-24T00:00:00.000Z"),
+    attendanceStatus: "holiday",
+    checkInAt: null,
+    checkOutAt: null,
+  });
+
+  const result = await service.syncImpactedAttendance({
+    startDate: new Date("2026-03-24T00:00:00.000Z"),
+    endDate: new Date("2026-03-24T00:00:00.000Z"),
+  });
+
+  assert.equal(result.updated, 1);
+  assert.equal(attendanceRows[0]?.attendanceStatus, "absent");
+});
