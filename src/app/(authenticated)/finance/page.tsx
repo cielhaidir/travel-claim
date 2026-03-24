@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/features/EmptyState";
 import { StatusBadge } from "@/components/features/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type {
   BailoutStatus,
@@ -94,12 +95,44 @@ export default function FinanceDashboard() {
   const { data: session } = useSession();
   const router = useRouter();
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
+  const isRoot = session?.user?.isRoot ?? false;
+  const permissions = session?.user?.permissions;
+  const canReadBailout = isRoot || hasPermissionMap(permissions, "bailout", "read");
+  const canDisburseBailout =
+    isRoot || hasPermissionMap(permissions, "bailout", "disburse");
+  const canReadClaims = isRoot || hasPermissionMap(permissions, "claims", "read");
+  const canPayClaims = isRoot || hasPermissionMap(permissions, "claims", "pay");
+  const canReadTravel = isRoot || hasPermissionMap(permissions, "travel", "read");
+  const canLockTravel = isRoot || hasPermissionMap(permissions, "travel", "lock");
+  const canCloseTravel =
+    isRoot || hasPermissionMap(permissions, "travel", "close");
+  const canReadJournals =
+    isRoot || hasPermissionMap(permissions, "journals", "read");
+  const canCreateJournals =
+    isRoot || hasPermissionMap(permissions, "journals", "create");
+  const canReadAccounting =
+    isRoot || hasPermissionMap(permissions, "accounting", "read");
+  const canReadCoa =
+    isRoot ||
+    hasPermissionMap(permissions, "chart-of-accounts", "read");
+  const canReadBalanceAccounts =
+    isRoot || hasPermissionMap(permissions, "balance-accounts", "read");
+  const canUseBailoutDisbursement =
+    canReadBailout &&
+    canDisburseBailout &&
+    canReadCoa &&
+    canReadBalanceAccounts;
+  const canUseClaimPayment =
+    canReadClaims && canPayClaims && canReadCoa && canReadBalanceAccounts;
+  const canUseSettlement =
+    canReadBailout && canReadJournals && canCreateJournals && canReadCoa;
+  const canUseTravelActions =
+    canReadTravel && (canLockTravel || canCloseTravel);
   const isAllowed =
-    session?.user?.isRoot === true ||
-    userRole === "FINANCE" ||
-    userRole === "ADMIN" ||
-    userRole === "ROOT";
+    canUseBailoutDisbursement ||
+    canUseClaimPayment ||
+    canUseSettlement ||
+    canUseTravelActions;
 
   useEffect(() => {
     if (session && !isAllowed) {
@@ -150,7 +183,7 @@ export default function FinanceDashboard() {
     refetch: refetchBailouts,
   } = api.bailout.getAll.useQuery(
     { status: "APPROVED_DIRECTOR", limit: 50 },
-    { enabled: isAllowed },
+    { enabled: canUseBailoutDisbursement },
   );
   const bailouts =
     (bailoutsRaw as { bailouts: Bailout[] } | undefined)?.bailouts ?? [];
@@ -162,7 +195,7 @@ export default function FinanceDashboard() {
     refetch: refetchBailoutSettlements,
   } = api.bailout.getAll.useQuery(
     { status: "DISBURSED", limit: 50 },
-    { enabled: isAllowed },
+    { enabled: canUseSettlement },
   );
   const bailoutSettlements =
     (bailoutSettlementsRaw as { bailouts: Bailout[] } | undefined)?.bailouts ?? [];
@@ -174,7 +207,7 @@ export default function FinanceDashboard() {
     refetch: refetchClaims,
   } = api.claim.getAll.useQuery(
     { status: "APPROVED", limit: 50 },
-    { enabled: isAllowed },
+    { enabled: canUseClaimPayment },
   );
   const claims =
     (claimsRaw as { claims: Claim[] } | undefined)?.claims ?? [];
@@ -186,7 +219,7 @@ export default function FinanceDashboard() {
     refetch: refetchTravelApproved,
   } = api.travelRequest.getAll.useQuery(
     { status: "APPROVED", limit: 50 },
-    { enabled: isAllowed },
+    { enabled: canUseTravelActions && canLockTravel },
   );
   const travelApproved =
     (
@@ -200,7 +233,7 @@ export default function FinanceDashboard() {
     refetch: refetchTravelLocked,
   } = api.travelRequest.getAll.useQuery(
     { status: "LOCKED", limit: 50 },
-    { enabled: isAllowed },
+    { enabled: canUseTravelActions && canCloseTravel },
   );
   const travelLocked =
     (travelLockedRaw as { requests: TravelRequest[] } | undefined)?.requests ??
@@ -208,13 +241,23 @@ export default function FinanceDashboard() {
 
   const { data: activeCoasRaw } = api.chartOfAccount.getActiveAccounts.useQuery(
     {},
-    { enabled: isAllowed, refetchOnWindowFocus: false },
+    {
+      enabled:
+        canReadCoa &&
+        (canUseBailoutDisbursement || canUseClaimPayment || canUseSettlement),
+      refetchOnWindowFocus: false,
+    },
   );
   const activeCoas = (activeCoasRaw as COAOption[] | undefined) ?? [];
 
   const { data: balanceAccountsRaw } = api.balanceAccount.list.useQuery(
     { isActive: true, limit: 100 },
-    { enabled: isAllowed, refetchOnWindowFocus: false },
+    {
+      enabled:
+        canReadBalanceAccounts &&
+        (canUseBailoutDisbursement || canUseClaimPayment),
+      refetchOnWindowFocus: false,
+    },
   );
   const balanceAccounts =
     (balanceAccountsRaw as { balanceAccounts: BalanceAccountOption[] } | undefined)
@@ -227,7 +270,7 @@ export default function FinanceDashboard() {
         status: "POSTED",
         limit: 100,
       },
-      { enabled: isAllowed, refetchOnWindowFocus: false },
+      { enabled: canUseSettlement, refetchOnWindowFocus: false },
     );
   const settlementJournals =
     (settlementJournalsRaw as { journalEntries: Array<{ bailout?: { id: string } | null }> } | undefined)
@@ -241,7 +284,7 @@ export default function FinanceDashboard() {
   const {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     data: statsRaw,
-  } = api.claim.getStatistics.useQuery(isAllowed ? {} : skipToken);
+  } = api.claim.getStatistics.useQuery(canUseClaimPayment ? {} : skipToken);
   const stats = statsRaw as
     | {
         total: number;
@@ -321,6 +364,7 @@ export default function FinanceDashboard() {
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   function openDisburse(b: Bailout) {
+    if (!canUseBailoutDisbursement) return;
     setSelectedBailout(b);
     setDisbursementRef("");
     setBailoutStorageUrl("");
@@ -337,6 +381,7 @@ export default function FinanceDashboard() {
   }
 
   function openMarkPaid(c: Claim) {
+    if (!canUseClaimPayment) return;
     setSelectedClaim(c);
     setPaymentRef("");
     setClaimStorageUrl("");
@@ -353,6 +398,7 @@ export default function FinanceDashboard() {
   }
 
   function openSettlement(b: Bailout) {
+    if (!canUseSettlement) return;
     setSelectedSettlementBailout(b);
     setSettlementExpenseCoaId(
       activeCoas.find((coa) => coa.accountType === "EXPENSE")?.id ?? "",
@@ -365,11 +411,13 @@ export default function FinanceDashboard() {
   }
 
   function openLock(t: TravelRequest) {
+    if (!canLockTravel) return;
     setSelectedTravel(t);
     setLockConfirmOpen(true);
   }
 
   function openClose(t: TravelRequest) {
+    if (!canCloseTravel) return;
     setSelectedTravel(t);
     setCloseConfirmOpen(true);
   }
@@ -377,14 +425,79 @@ export default function FinanceDashboard() {
   if (!session || !isAllowed) return null;
 
   const tabs: Array<{ id: ActiveTab; label: string; badge?: number }> = [
-    { id: "bailouts", label: "Pencairan Bailout", badge: bailouts.length },
-    { id: "claims", label: "Pembayaran Klaim", badge: claims.length },
-    { id: "settlement", label: "Settlement Bailout", badge: unsettledBailouts.length },
-    {
-      id: "travel",
-      label: "Perjalanan Dinas",
-      badge: travelApproved.length + travelLocked.length,
-    },
+    ...(canUseBailoutDisbursement
+      ? [{ id: "bailouts" as const, label: "Pencairan Bailout", badge: bailouts.length }]
+      : []),
+    ...(canUseClaimPayment
+      ? [{ id: "claims" as const, label: "Pembayaran Klaim", badge: claims.length }]
+      : []),
+    ...(canUseSettlement
+      ? [{
+          id: "settlement" as const,
+          label: "Settlement Bailout",
+          badge: unsettledBailouts.length,
+        }]
+      : []),
+    ...(canUseTravelActions
+      ? [{
+          id: "travel" as const,
+          label: "Perjalanan Dinas",
+          badge:
+            (canLockTravel ? travelApproved.length : 0) +
+            (canCloseTravel ? travelLocked.length : 0),
+        }]
+      : []),
+  ];
+
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0]?.id ?? "bailouts");
+    }
+  }, [activeTab, tabs]);
+
+  const summaryCards = [
+    ...(canUseBailoutDisbursement
+      ? [{
+          label: "Pencairan Tertunda",
+          value: bailouts.length,
+          unit: "bailout",
+          color: "yellow" as const,
+        }]
+      : []),
+    ...(canUseSettlement
+      ? [{
+          label: "Bailout Belum Settlement",
+          value: unsettledBailouts.length,
+          unit: "siap diproses",
+          color: "gray" as const,
+        }]
+      : []),
+    ...(canUseClaimPayment
+      ? [
+          {
+            label: "Klaim Disetujui",
+            value: pendingClaimsCount,
+            unit: "menunggu pembayaran",
+            color: "blue" as const,
+          },
+          {
+            label: "Nominal Pembayaran Tertunda",
+            value: formatCurrency(pendingPaymentAmount),
+            color: "green" as const,
+          },
+        ]
+      : []),
+    ...(canUseTravelActions
+      ? [{
+          label: "Perjalanan Siap Diproses",
+          value:
+            (canLockTravel ? travelApproved.length : 0) +
+            (canCloseTravel ? travelLocked.length : 0),
+          unit: "perjalanan",
+          color: "purple" as const,
+        }]
+      : []),
   ];
 
   return (
@@ -392,65 +505,61 @@ export default function FinanceDashboard() {
       <PageHeader
         title="Dasbor Keuangan"
         description="Kelola pencairan bailout, pembayaran klaim, dan siklus perjalanan dinas"
-        primaryAction={{
-          label: "Lihat Jurnal",
-          href: "/journal",
-        }}
-        secondaryAction={{
-          label: "Akuntansi Perusahaan",
-          href: "/accounting",
-        }}
+        primaryAction={
+          canReadJournals
+            ? {
+                label: "Lihat Jurnal",
+                href: "/journal",
+              }
+            : undefined
+        }
+        secondaryAction={
+          canReadAccounting
+            ? {
+                label: "Akuntansi Perusahaan",
+                href: "/accounting",
+              }
+            : undefined
+        }
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard
-          label="Pencairan Tertunda"
-          value={bailouts.length}
-          unit="bailout"
-          color="yellow"
-        />
-        <SummaryCard
-          label="Bailout Belum Settlement"
-          value={unsettledBailouts.length}
-          unit="siap diproses"
-          color="gray"
-        />
-        <SummaryCard
-          label="Klaim Disetujui"
-          value={pendingClaimsCount}
-          unit="menunggu pembayaran"
-          color="blue"
-        />
-        <SummaryCard
-          label="Perjalanan Siap Dikunci"
-          value={travelApproved.length}
-          unit="disetujui"
-          color="purple"
-        />
-        <SummaryCard
-          label="Nominal Pembayaran Tertunda"
-          value={formatCurrency(pendingPaymentAmount)}
-          color="green"
-        />
-      </div>
+      {summaryCards.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {summaryCards.map((card) => (
+            <SummaryCard
+              key={card.label}
+              label={card.label}
+              value={card.value}
+              unit={card.unit}
+              color={card.color}
+            />
+          ))}
+        </div>
+      ) : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <QuickLinkCard
+      {canReadJournals || canReadAccounting ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {canReadJournals ? (
+            <QuickLinkCard
           title="Jurnal"
           description="Lihat seluruh transaksi debit dan kredit yang sudah tercatat."
           href="/journal"
           cta="Buka Jurnal"
           icon="🧾"
-        />
-        <QuickLinkCard
+            />
+          ) : null}
+          {canReadAccounting ? (
+            <QuickLinkCard
           title="Akuntansi Perusahaan"
           description="Kelola akun saldo perusahaan dan lakukan penyesuaian saldo."
           href="/accounting"
           cta="Buka Halaman Akuntansi"
           icon="🏦"
-        />
-      </div>
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Tab Navigation */}
       <div className="border-b border-gray-200">
@@ -503,13 +612,15 @@ export default function FinanceDashboard() {
           approved={travelApproved}
           locked={travelLocked}
           isLoading={loadingTravelApproved || loadingTravelLocked}
+          canLock={canLockTravel}
+          canClose={canCloseTravel}
           onLock={openLock}
           onClose={openClose}
         />
       )}
       {/* ── Disburse Bailout Modal ───────────────────────────────────────── */}
       <Modal
-        isOpen={disburseOpen}
+        isOpen={disburseOpen && canUseBailoutDisbursement}
         onClose={() => setDisburseOpen(false)}
         title="Cairkan Bailout"
       >
@@ -636,7 +747,7 @@ export default function FinanceDashboard() {
 
       {/* ── Mark Claim as Paid Modal ─────────────────────────────────────── */}
       <Modal
-        isOpen={markPaidOpen}
+        isOpen={markPaidOpen && canUseClaimPayment}
         onClose={() => setMarkPaidOpen(false)}
         title="Tandai Klaim Sudah Dibayar"
       >
@@ -761,7 +872,7 @@ export default function FinanceDashboard() {
       </Modal>
 
       <Modal
-        isOpen={settlementOpen}
+        isOpen={settlementOpen && canUseSettlement}
         onClose={() => setSettlementOpen(false)}
         title="Settlement Bailout"
       >
@@ -1153,20 +1264,24 @@ function TravelTab({
   approved,
   locked,
   isLoading,
+  canLock,
+  canClose,
   onLock,
   onClose,
 }: {
   approved: TravelRequest[];
   locked: TravelRequest[];
   isLoading: boolean;
+  canLock: boolean;
+  canClose: boolean;
   onLock: (t: TravelRequest) => void;
   onClose: (t: TravelRequest) => void;
 }) {
   if (isLoading) return <Skeleton />;
 
   const allRows = [
-    ...approved.map((t) => ({ ...t, action: "lock" as const })),
-    ...locked.map((t) => ({ ...t, action: "close" as const })),
+    ...(canLock ? approved.map((t) => ({ ...t, action: "lock" as const })) : []),
+    ...(canClose ? locked.map((t) => ({ ...t, action: "close" as const })) : []),
   ];
 
   if (allRows.length === 0)

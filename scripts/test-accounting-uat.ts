@@ -1,5 +1,6 @@
 import { TRPCClientError } from "@trpc/client";
 import { createCaller } from "../src/server/api/root";
+import { resolveEffectivePermissions } from "../src/server/auth/permission-store";
 import { db } from "../src/server/db";
 import { Role, MembershipStatus, JournalSourceType, JournalStatus } from "../generated/prisma";
 
@@ -44,6 +45,12 @@ async function makeCaller(input: {
   isRoot?: boolean;
 }) {
   const memberships = await getMemberships(input.userId);
+  const isRoot = input.isRoot ?? input.role === Role.ROOT;
+  const permissions = await resolveEffectivePermissions(db, {
+    tenantId: input.activeTenantId,
+    roles: [input.role],
+    isRoot,
+  });
   return createCaller({
     db,
     headers: new Headers(),
@@ -57,7 +64,8 @@ async function makeCaller(input: {
         role: input.role,
         roles: [input.role],
         activeTenantId: input.activeTenantId,
-        isRoot: input.isRoot ?? input.role === Role.ROOT,
+        permissions,
+        isRoot,
         memberships,
       },
       expires: new Date(Date.now() + 60_000).toISOString(),

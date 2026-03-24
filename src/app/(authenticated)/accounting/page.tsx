@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency } from "@/lib/utils/format";
 import type { JournalEntryType } from "../../../../generated/prisma";
 
@@ -57,8 +58,56 @@ export default function AccountingPage() {
   const { data: session } = useSession();
   const router = useRouter();
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN";
+  const isRoot = session?.user?.isRoot ?? false;
+  const canReadAccounting =
+    isRoot || hasPermissionMap(session?.user?.permissions, "accounting", "read");
+  const canReadBalanceAccounts =
+    isRoot ||
+    hasPermissionMap(session?.user?.permissions, "balance-accounts", "read");
+  const canReadCoa =
+    isRoot ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "read");
+  const canReadJournals =
+    isRoot || hasPermissionMap(session?.user?.permissions, "journals", "read");
+  const canReadReports =
+    isRoot ||
+    (hasPermissionMap(session?.user?.permissions, "reports", "read") &&
+      canReadJournals);
+  const canAccessFinanceDashboard =
+    isRoot ||
+    (hasPermissionMap(session?.user?.permissions, "bailout", "read") &&
+      hasPermissionMap(session?.user?.permissions, "bailout", "disburse") &&
+      canReadCoa &&
+      canReadBalanceAccounts) ||
+    (hasPermissionMap(session?.user?.permissions, "claims", "read") &&
+      hasPermissionMap(session?.user?.permissions, "claims", "pay") &&
+      canReadCoa &&
+      canReadBalanceAccounts) ||
+    (hasPermissionMap(session?.user?.permissions, "bailout", "read") &&
+      canReadJournals &&
+      hasPermissionMap(session?.user?.permissions, "journals", "create") &&
+      canReadCoa) ||
+    (hasPermissionMap(session?.user?.permissions, "travel", "read") &&
+      (hasPermissionMap(session?.user?.permissions, "travel", "lock") ||
+        hasPermissionMap(session?.user?.permissions, "travel", "close")));
+  const canCreateBalanceAccounts =
+    (isRoot ||
+      hasPermissionMap(
+        session?.user?.permissions,
+        "balance-accounts",
+        "create",
+      )) &&
+    canReadBalanceAccounts &&
+    canReadCoa;
+  const canUpdateBalanceAccounts =
+    (isRoot ||
+      hasPermissionMap(
+        session?.user?.permissions,
+        "balance-accounts",
+        "update",
+      )) &&
+    canReadBalanceAccounts &&
+    canReadCoa;
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<BalanceAccount | null>(null);
@@ -74,10 +123,10 @@ export default function AccountingPage() {
   const [adjustForm, setAdjustForm] = useState(DEFAULT_ADJUST_FORM);
 
   useEffect(() => {
-    if (session && !isAllowed) {
+    if (session && !canReadAccounting) {
       void router.replace("/dashboard");
     }
-  }, [session, isAllowed, router]);
+  }, [canReadAccounting, router, session]);
 
   const {
     data: accountsRaw,
@@ -90,7 +139,7 @@ export default function AccountingPage() {
         activeFilter === "ALL" ? undefined : activeFilter === "ACTIVE",
     },
     {
-      enabled: isAllowed,
+      enabled: canReadBalanceAccounts,
       refetchOnWindowFocus: false,
     },
   );
@@ -98,7 +147,9 @@ export default function AccountingPage() {
   const { data: coaRaw } = api.chartOfAccount.getActiveAccounts.useQuery(
     {},
     {
-      enabled: isAllowed,
+      enabled:
+        canReadCoa &&
+        (canCreateBalanceAccounts || canUpdateBalanceAccounts),
       refetchOnWindowFocus: false,
     },
   );
@@ -136,6 +187,7 @@ export default function AccountingPage() {
   });
 
   function openEdit(account: BalanceAccount) {
+    if (!canUpdateBalanceAccounts) return;
     setEditingAccount(account);
     setEditForm({
       name: account.name,
@@ -146,6 +198,7 @@ export default function AccountingPage() {
   }
 
   function openAdjust(account: BalanceAccount) {
+    if (!canUpdateBalanceAccounts) return;
     setAdjustingAccount(account);
     setAdjustForm({
       ...DEFAULT_ADJUST_FORM,
@@ -154,17 +207,21 @@ export default function AccountingPage() {
     });
   }
 
-  if (!session || !isAllowed) return null;
+  if (!session || !canReadAccounting) return null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Akuntansi & Keuangan"
         description="Pusat menu finance, jurnal, laporan, COA, dan pengelolaan akun saldo dalam satu halaman"
-        primaryAction={{
-          label: "Tambah Akun",
-          onClick: () => setIsCreateOpen(true),
-        }}
+        primaryAction={
+          canCreateBalanceAccounts
+            ? {
+                label: "Tambah Akun",
+                onClick: () => setIsCreateOpen(true),
+              }
+            : undefined
+        }
         secondaryAction={{
           label: "Muat Ulang",
           onClick: () => void refetch(),
@@ -172,41 +229,55 @@ export default function AccountingPage() {
       />
 
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
-        <ModuleLinkCard
-          href="/finance"
-          title="Keuangan"
-          description="Proses claim, bailout, settlement, dan transaksi operasional finance"
-        />
-        <ModuleLinkCard
-          href="/journal"
-          title="Jurnal"
-          description="Lihat daftar jurnal tenant aktif dan detail double-entry"
-        />
-        <ModuleLinkCard
-          href="/chart-of-accounts"
-          title="Bagan Akun"
-          description="Kelola COA tenant aktif, struktur akun, dan status akun"
-        />
-        <ModuleLinkCard
-          href="/reports/journal"
-          title="Laporan Jurnal"
-          description="Rekap jurnal per tenant berdasarkan periode, status, dan sumber"
-        />
-        <ModuleLinkCard
-          href="/reports/trial-balance"
-          title="Trial Balance"
-          description="Lihat neraca saldo tenant aktif dari jurnal pada periode tertentu"
-        />
-        <ModuleLinkCard
-          href="/reports/general-ledger"
-          title="General Ledger"
-          description="Buku besar per akun COA dengan running balance tenant aktif"
-        />
-        <ModuleLinkCard
-          href="/reports/expense-summary"
-          title="Expense Summary"
-          description="Ringkasan beban tenant aktif per akun expense dan sumber jurnal"
-        />
+        {canAccessFinanceDashboard ? (
+          <ModuleLinkCard
+            href="/finance"
+            title="Keuangan"
+            description="Proses claim, bailout, settlement, dan transaksi operasional finance"
+          />
+        ) : null}
+        {canReadJournals ? (
+          <ModuleLinkCard
+            href="/journal"
+            title="Jurnal"
+            description="Lihat daftar jurnal tenant aktif dan detail double-entry"
+          />
+        ) : null}
+        {canReadCoa ? (
+          <ModuleLinkCard
+            href="/chart-of-accounts"
+            title="Bagan Akun"
+            description="Kelola COA tenant aktif, struktur akun, dan status akun"
+          />
+        ) : null}
+        {canReadReports ? (
+          <ModuleLinkCard
+            href="/reports/journal"
+            title="Laporan Jurnal"
+            description="Rekap jurnal per tenant berdasarkan periode, status, dan sumber"
+          />
+        ) : null}
+        {canReadReports ? (
+          <ModuleLinkCard
+            href="/reports/trial-balance"
+            title="Trial Balance"
+            description="Lihat neraca saldo tenant aktif dari jurnal pada periode tertentu"
+          />
+        ) : null}
+        {canReadReports ? (
+          <ModuleLinkCard
+            href="/reports/general-ledger"
+            title="General Ledger"
+            description="Buku besar per akun COA dengan running balance tenant aktif"
+          />
+        ) : null}
+        {canReadReports ? (
+          <ModuleLinkCard
+            href="/reports/expense-summary"
+            title="Expense Summary"
+            description="Ringkasan beban tenant aktif per akun expense dan sumber jurnal"
+          />
+        ) : null}
         <ModuleLinkCard
           href="/dashboard"
           title="Dashboard Tenant"
@@ -241,7 +312,15 @@ export default function AccountingPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {!canReadBalanceAccounts ? (
+        <div className="rounded-lg border bg-white">
+          <EmptyState
+            icon="🏦"
+            title="Akses akun saldo dibatasi"
+            description="Halaman ini tetap menampilkan pintasan akuntansi, tetapi daftar akun saldo memerlukan izin baca akun saldo."
+          />
+        </div>
+      ) : isLoading ? (
         <Skeleton />
       ) : accounts.length === 0 ? (
         <div className="rounded-lg border bg-white">
@@ -249,10 +328,14 @@ export default function AccountingPage() {
             icon="🏦"
             title="Belum ada akun saldo"
             description="Tambahkan akun perusahaan untuk mulai mencatat saldo dan penyesuaian jurnal."
-            action={{
-              label: "Tambah Akun",
-              onClick: () => setIsCreateOpen(true),
-            }}
+            action={
+              canCreateBalanceAccounts
+                ? {
+                    label: "Tambah Akun",
+                    onClick: () => setIsCreateOpen(true),
+                  }
+                : undefined
+            }
           />
         </div>
       ) : (
@@ -302,12 +385,16 @@ export default function AccountingPage() {
                       >
                         Detail
                       </Link>
-                      <Button size="sm" variant="secondary" onClick={() => openEdit(account)}>
-                        Ubah
-                      </Button>
-                      <Button size="sm" variant="primary" onClick={() => openAdjust(account)}>
-                        Sesuaikan
-                      </Button>
+                      {canUpdateBalanceAccounts ? (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => openEdit(account)}>
+                            Ubah
+                          </Button>
+                          <Button size="sm" variant="primary" onClick={() => openAdjust(account)}>
+                            Sesuaikan
+                          </Button>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -318,7 +405,7 @@ export default function AccountingPage() {
       )}
 
       <Modal
-        isOpen={isCreateOpen}
+        isOpen={isCreateOpen && canCreateBalanceAccounts}
         onClose={() => {
           setIsCreateOpen(false);
           setCreateForm(DEFAULT_CREATE_FORM);
@@ -415,7 +502,7 @@ export default function AccountingPage() {
       </Modal>
 
       <Modal
-        isOpen={!!editingAccount}
+        isOpen={!!editingAccount && canUpdateBalanceAccounts}
         onClose={() => setEditingAccount(null)}
         title="Ubah Akun Saldo"
       >
@@ -499,7 +586,7 @@ export default function AccountingPage() {
       </Modal>
 
       <Modal
-        isOpen={!!adjustingAccount}
+        isOpen={!!adjustingAccount && canUpdateBalanceAccounts}
         onClose={() => {
           setAdjustingAccount(null);
           setAdjustForm(DEFAULT_ADJUST_FORM);

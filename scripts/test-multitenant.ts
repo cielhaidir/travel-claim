@@ -1,6 +1,7 @@
 import { TRPCClientError } from "@trpc/client";
 import { bootstrapTenantAccounting } from "../src/lib/accounting/bootstrap";
 import { createCaller } from "../src/server/api/root";
+import { resolveEffectivePermissions } from "../src/server/auth/permission-store";
 import { db } from "../src/server/db";
 import { Role, MembershipStatus } from "../generated/prisma";
 
@@ -46,6 +47,12 @@ async function createCallerForUser(input: {
   activeTenantId: string;
 }) {
   const memberships = await getMemberships(input.userId);
+  const isRoot = input.role === Role.ROOT;
+  const permissions = await resolveEffectivePermissions(db, {
+    tenantId: input.activeTenantId,
+    roles: [input.role],
+    isRoot,
+  });
 
   return createCaller({
     db,
@@ -60,7 +67,8 @@ async function createCallerForUser(input: {
         role: input.role,
         roles: [input.role],
         activeTenantId: input.activeTenantId,
-        isRoot: input.role === Role.ROOT,
+        permissions,
+        isRoot,
         memberships,
       },
       expires: new Date(Date.now() + 60_000).toISOString(),

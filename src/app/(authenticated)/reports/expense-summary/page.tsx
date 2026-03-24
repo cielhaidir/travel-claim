@@ -7,6 +7,7 @@ import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency } from "@/lib/utils/format";
 import type { JournalSourceType, JournalStatus } from "../../../../../generated/prisma";
 
@@ -48,8 +49,10 @@ export default function ExpenseSummaryPage() {
   const [statusFilter, setStatusFilter] = useState<JournalStatus | "ALL">("POSTED");
   const [sourceFilter, setSourceFilter] = useState<JournalSourceType | "ALL">("ALL");
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN" || session?.user?.isRoot === true;
+  const isAllowed =
+    (session?.user?.isRoot ?? false) ||
+    (hasPermissionMap(session?.user?.permissions, "reports", "read") &&
+      hasPermissionMap(session?.user?.permissions, "journals", "read"));
 
   useEffect(() => {
     if (session && !isAllowed) {

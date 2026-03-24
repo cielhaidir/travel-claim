@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { TenantDashboard } from "@/components/features/dashboard/TenantDashboard";
+import { userHasPermission } from "@/lib/auth/role-check";
 import { auth } from "@/server/auth";
 
 export const metadata: Metadata = {
@@ -17,6 +18,10 @@ export default async function DashboardPage() {
 
   if (!session?.user) {
     redirect("/login");
+  }
+
+  if (!userHasPermission(session.user, "dashboard", "read")) {
+    redirect("/");
   }
 
   return <TenantDashboard />;

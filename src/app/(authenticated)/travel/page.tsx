@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { TravelRequestForm, type TravelRequestFormData } from "@/components/features/travel/TravelRequestForm";
 import { BailoutPanel } from "@/components/features/travel/BailoutPanel";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatDate } from "@/lib/utils/format";
 import type { TravelType, TravelStatus } from "../../../../generated/prisma";
 
@@ -141,8 +143,23 @@ export default function TravelRequestsPage() {
 
 function PengajuanTab() {
   const { data: session } = useSession();
+  const router = useRouter();
   const userId = session?.user?.id;
-  const canCreateTrip = !!userId;
+  const canReadTravel =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "travel", "read");
+  const canCreateTrip =
+    !!userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "travel", "create"));
+  const canOpenBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "bailout", "read");
+
+  if (session && !canReadTravel) {
+    router.replace("/");
+    return null;
+  }
 
   const [statusFilter, setStatusFilter] = useState<TravelStatus | "ALL">("ALL");
   const [typeFilter, setTypeFilter] = useState<TravelType | "ALL">("ALL");
@@ -160,7 +177,7 @@ function PengajuanTab() {
       travelType: typeFilter === "ALL" ? undefined : typeFilter,
       limit: 50,
     },
-    { refetchOnWindowFocus: false }
+    { refetchOnWindowFocus: false, enabled: canReadTravel }
   );
   const data = rawData as { requests: TravelRequest[] } | undefined;
   const requests = data?.requests ?? [];
@@ -246,11 +263,20 @@ function PengajuanTab() {
   };
 
   const canEdit = (req: TravelRequest) =>
-    EDITABLE_STATUSES.includes(req.status) && req.requester.id === userId;
+    EDITABLE_STATUSES.includes(req.status) &&
+    req.requester.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "travel", "update"));
   const canDelete = (req: TravelRequest) =>
-    DELETABLE_STATUSES.includes(req.status) && req.requester.id === userId;
+    DELETABLE_STATUSES.includes(req.status) &&
+    req.requester.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "travel", "delete"));
   const canSubmit = (req: TravelRequest) =>
-    SUBMITTABLE_STATUSES.includes(req.status) && req.requester.id === userId;
+    SUBMITTABLE_STATUSES.includes(req.status) &&
+    req.requester.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "travel", "submit"));
 
   return (
     <div className="space-y-4">
@@ -359,12 +385,14 @@ function PengajuanTab() {
                         </button>
                       )}
                       {/* Bailout button — visible for all trips */}
-                      <button
-                        onClick={() => setBailoutTrip(req)}
-                        className="rounded px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 border border-amber-200"
-                      >
+                      {canOpenBailout ? (
+                        <button
+                          onClick={() => setBailoutTrip(req)}
+                          className="rounded px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 border border-amber-200"
+                        >
                         💰 Bailout
                       </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>

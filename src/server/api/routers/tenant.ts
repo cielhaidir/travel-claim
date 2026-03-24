@@ -7,6 +7,16 @@ import {
 } from "../../../../generated/prisma";
 import { bootstrapTenantAccounting } from "@/lib/accounting/bootstrap";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import {
+  isRolePermissionTableMissing,
+  listTenantRolePermissionProfiles,
+  resetTenantRolePermissionProfile,
+  upsertTenantRolePermissionProfile,
+} from "@/server/auth/permission-store";
+import {
+  hasPermissionMap,
+  type PermissionMap,
+} from "@/lib/auth/permissions";
 
 const ROLE_PRECEDENCE: Role[] = [
   Role.ROOT,
@@ -26,6 +36,76 @@ function requireRoot(ctx: unknown) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Only root users can manage tenants",
+    });
+  }
+}
+
+function requireRolePermissionAccess(
+  ctx: unknown,
+  tenantId: string,
+  action: "read" | "update",
+) {
+  const typed = ctx as {
+    isRoot?: boolean;
+    tenantId?: string | null;
+    session?: {
+      user?: {
+        permissions?: PermissionMap;
+      };
+    } | null;
+  };
+
+  if (typed.isRoot) {
+    return;
+  }
+
+  if (typed.tenantId !== tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "You can only manage role permissions for the currently active tenant",
+    });
+  }
+
+  if (!hasPermissionMap(typed.session?.user?.permissions, "roles", action)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Insufficient permissions to manage role permissions",
+    });
+  }
+}
+
+function requireTenantMembershipAccess(
+  ctx: unknown,
+  tenantId: string,
+  action: "read" | "update",
+) {
+  const typed = ctx as {
+    isRoot?: boolean;
+    tenantId?: string | null;
+    session?: {
+      user?: {
+        permissions?: PermissionMap;
+      };
+    } | null;
+  };
+
+  if (typed.isRoot) {
+    return;
+  }
+
+  if (typed.tenantId !== tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "You can only manage memberships for the currently active tenant",
+    });
+  }
+
+  if (!hasPermissionMap(typed.session?.user?.permissions, "tenants", action)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Insufficient permissions to manage tenant memberships",
     });
   }
 }
@@ -179,7 +259,7 @@ export const tenantRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      requireRoot(ctx);
+      requireTenantMembershipAccess(ctx, input.tenantId, "read");
 
       const tenant = await ctx.db.tenant.findFirst({
         where: {
@@ -216,6 +296,148 @@ export const tenantRouter = createTRPCRouter({
       return tenant;
     }),
 
+  getRolePermissions: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+      }),
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      requireRolePermissionAccess(ctx, input.tenantId, "read");
+
+      const tenant = await ctx.db.tenant.findFirst({
+        where: {
+          id: input.tenantId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      return listTenantRolePermissionProfiles(ctx.db, input.tenantId);
+    }),
+
+  updateRolePermissions: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        role: z.nativeEnum(Role),
+        permissions: z.record(z.string(), z.array(z.string())),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      requireRolePermissionAccess(ctx, input.tenantId, "update");
+
+      const tenant = await ctx.db.tenant.findFirst({
+        where: {
+          id: input.tenantId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      if (input.role === Role.ROOT) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "ROOT permissions are fixed and cannot be customized",
+        });
+      }
+
+      try {
+        await upsertTenantRolePermissionProfile(ctx.db, {
+          tenantId: input.tenantId,
+          role: input.role,
+          permissions: input.permissions as PermissionMap,
+        });
+      } catch (error) {
+        if (isRolePermissionTableMissing(error)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Role permission storage is not migrated yet. Run the latest Prisma migration first.",
+          });
+        }
+
+        throw error;
+      }
+
+      return listTenantRolePermissionProfiles(ctx.db, input.tenantId);
+    }),
+
+  resetRolePermissions: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        role: z.nativeEnum(Role),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      requireRolePermissionAccess(ctx, input.tenantId, "update");
+
+      const tenant = await ctx.db.tenant.findFirst({
+        where: {
+          id: input.tenantId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      if (input.role === Role.ROOT) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "ROOT permissions are fixed and cannot be reset",
+        });
+      }
+
+      try {
+        await resetTenantRolePermissionProfile(ctx.db, {
+          tenantId: input.tenantId,
+          role: input.role,
+        });
+      } catch (error) {
+        if (isRolePermissionTableMissing(error)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Role permission storage is not migrated yet. Run the latest Prisma migration first.",
+          });
+        }
+
+        throw error;
+      }
+
+      return listTenantRolePermissionProfiles(ctx.db, input.tenantId);
+    }),
+
   create: protectedProcedure
     .input(
       z.object({
@@ -227,7 +449,7 @@ export const tenantRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       requireRoot(ctx);
 
-      const baseSlug = slugifyTenantName(input.slug || input.name);
+      const baseSlug = slugifyTenantName(input.slug ?? input.name);
       if (!baseSlug) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -288,7 +510,7 @@ export const tenantRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      requireRoot(ctx);
+      requireTenantMembershipAccess(ctx, input.tenantId, "update");
 
       const tenant = await ctx.db.tenant.findFirst({
         where: {

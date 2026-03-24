@@ -5,6 +5,7 @@ import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { env } from "@/env";
 import { normalizeRoles, type Role } from "@/lib/constants/roles";
+import { resolveEffectivePermissions } from "@/server/auth/permission-store";
 
 /**
  * MCP Server Endpoint
@@ -92,6 +93,11 @@ async function handleMcpRequest(request: Request) {
 
         const roles = normalizeRoles({ roles: [], role: tokenUser.role });
         const isRoot = roles.includes("ROOT");
+        const permissions = await resolveEffectivePermissions(db, {
+          tenantId: activeTenantId,
+          roles,
+          isRoot,
+        });
 
         // Build a synthetic session object matching the NextAuth session shape
         session = {
@@ -101,6 +107,7 @@ async function handleMcpRequest(request: Request) {
             email: tokenUser.email ?? "",
             role: tokenUser.role,
             roles,
+            permissions,
             employeeId: tokenUser.employeeId,
             departmentId: tokenUser.departmentId,
             activeTenantId,

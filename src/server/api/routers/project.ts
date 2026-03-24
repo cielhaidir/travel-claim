@@ -3,8 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { AuditAction } from "../../../../generated/prisma";
 import {
   createTRPCRouter,
-  protectedProcedure,
-  managerProcedure,
+  permissionProcedure,
 } from "@/server/api/trpc";
 
 function getTenantScope(ctx: unknown): {
@@ -31,7 +30,7 @@ function withTenantWhere<T extends Record<string, unknown>>(
 
 export const projectRouter = createTRPCRouter({
   // ─── GET ALL ──────────────────────────────────────────────────────────────
-  getAll: protectedProcedure
+  getAll: permissionProcedure("projects", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -85,7 +84,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   // ─── GET BY ID ────────────────────────────────────────────────────────────
-  getById: protectedProcedure
+  getById: permissionProcedure("projects", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -116,7 +115,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   // ─── CREATE ───────────────────────────────────────────────────────────────
-  create: managerProcedure
+  create: permissionProcedure("projects", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -170,7 +169,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   // ─── UPDATE ───────────────────────────────────────────────────────────────
-  update: managerProcedure
+  update: permissionProcedure("projects", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -234,7 +233,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   // ─── DELETE (soft) ────────────────────────────────────────────────────────
-  delete: managerProcedure
+  delete: permissionProcedure("projects", "delete")
     .meta({
       openapi: {
         method: "DELETE",

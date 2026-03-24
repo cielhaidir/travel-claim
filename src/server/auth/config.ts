@@ -13,11 +13,14 @@ import {
   normalizeRoles,
   type Role,
 } from "@/lib/constants/roles";
+import { type PermissionMap } from "@/lib/auth/permissions";
+import { resolveEffectivePermissions } from "@/server/auth/permission-store";
 
 type AuthToken = {
   id?: string;
   role?: Role;
   roles?: Role[];
+  permissions?: PermissionMap;
   employeeId?: string | null;
   departmentId?: string | null;
   activeTenantId?: string | null;
@@ -50,6 +53,7 @@ declare module "next-auth" {
       id: string;
       role: Role;
       roles: Role[];
+      permissions: PermissionMap;
       email: string;
       employeeId: string | null;
       departmentId: string | null;
@@ -62,6 +66,7 @@ declare module "next-auth" {
   interface User {
     role: Role;
     roles: Role[];
+    permissions: PermissionMap;
     employeeId: string | null;
     departmentId: string | null;
     activeTenantId: string | null;
@@ -122,6 +127,18 @@ function resolveScopedRoles(input: {
   return normalizeRoles({
     roles: [],
     role: input.fallbackRole,
+  });
+}
+
+async function resolveScopedPermissions(input: {
+  activeTenantId: string | null;
+  roles: Role[];
+  isRoot: boolean;
+}): Promise<PermissionMap> {
+  return resolveEffectivePermissions(db, {
+    tenantId: input.activeTenantId,
+    roles: input.roles,
+    isRoot: input.isRoot,
   });
 }
 
@@ -370,6 +387,11 @@ export const authConfig = {
               fallbackRole: user.role as Role,
               isRoot,
             });
+            const permissions = await resolveScopedPermissions({
+              activeTenantId,
+              roles,
+              isRoot,
+            });
             console.log(
               `[auth] authorize: bypass key accepted for ${user.email}.`,
             );
@@ -382,6 +404,7 @@ export const authConfig = {
               email: user.email,
               role: user.role,
               roles,
+              permissions,
               employeeId: user.employeeId,
               departmentId: user.departmentId,
             };
@@ -426,6 +449,11 @@ export const authConfig = {
             fallbackRole: user.role as Role,
             isRoot,
           });
+          const permissions = await resolveScopedPermissions({
+            activeTenantId,
+            roles,
+            isRoot,
+          });
 
           return {
             activeTenantId,
@@ -436,6 +464,7 @@ export const authConfig = {
             email: user.email,
             role: user.role,
             roles,
+            permissions,
             employeeId: user.employeeId,
             departmentId: user.departmentId,
           };
@@ -572,6 +601,7 @@ export const authConfig = {
             roles: user.roles,
             role: user.role,
           });
+          authToken.permissions = user.permissions;
           authToken.employeeId = user.employeeId;
           authToken.departmentId = user.departmentId;
           authToken.memberships = user.memberships;
@@ -613,6 +643,11 @@ export const authConfig = {
               memberships,
               activeTenantId: authToken.activeTenantId,
               fallbackRole: dbUser.role as Role,
+              isRoot: authToken.isRoot,
+            });
+            authToken.permissions = await resolveScopedPermissions({
+              activeTenantId: authToken.activeTenantId,
+              roles: authToken.roles,
               isRoot: authToken.isRoot,
             });
             authToken.role = derivePrimaryRole(authToken.roles);
@@ -676,6 +711,11 @@ export const authConfig = {
             fallbackRole: dbUser.role as Role,
             isRoot: authToken.isRoot,
           });
+          authToken.permissions = await resolveScopedPermissions({
+            activeTenantId: authToken.activeTenantId ?? null,
+            roles: authToken.roles,
+            isRoot: authToken.isRoot,
+          });
           authToken.role = derivePrimaryRole(authToken.roles);
           authToken.email = dbUser.email ?? undefined;
           authToken.name = dbUser.name;
@@ -697,6 +737,7 @@ export const authConfig = {
         });
         session.user.roles = roles;
         session.user.role = derivePrimaryRole(roles);
+        session.user.permissions = authToken.permissions ?? {};
         session.user.employeeId = authToken.employeeId as string | null;
         session.user.departmentId = authToken.departmentId as string | null;
         session.user.activeTenantId = authToken.activeTenantId ?? null;

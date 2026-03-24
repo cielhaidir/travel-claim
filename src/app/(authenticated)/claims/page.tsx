@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { ClaimForm, type ClaimFormData } from "@/components/features/claims/ClaimForm";
 import { ClaimAttachments } from "@/components/features/claims/ClaimAttachments";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { ClaimType, ClaimStatus, TravelType, TravelStatus } from "../../../../generated/prisma";
 
@@ -85,7 +87,20 @@ function toEditableClaim(raw: Claim): Claim {
 
 export default function ClaimsPage() {
   const { data: session } = useSession();
+  const router = useRouter();
   const userId = session?.user?.id;
+  const canReadClaims =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "claims", "read");
+  const canCreateClaims =
+    !!userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "create"));
+
+  if (session && !canReadClaims) {
+    router.replace("/");
+    return null;
+  }
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<ClaimStatus | "ALL">("ALL");
@@ -106,7 +121,7 @@ export default function ClaimsPage() {
       claimType: typeFilter === "ALL" ? undefined : typeFilter,
       limit: 50,
     },
-    { refetchOnWindowFocus: false }
+    { refetchOnWindowFocus: false, enabled: canReadClaims }
   );
   const claimsData = rawClaims as { claims: Claim[] } | undefined;
   const claims = claimsData?.claims ?? [];
@@ -235,8 +250,20 @@ export default function ClaimsPage() {
   };
 
   const canEdit = (c: Claim) => EDITABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
-  const canDelete = (c: Claim) => DELETABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
-  const canSubmit = (c: Claim) => SUBMITTABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
+  const canDelete = (c: Claim) =>
+    DELETABLE_STATUSES.includes(c.status) &&
+    c.submitter.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "delete"));
+  const canSubmit = (c: Claim) =>
+    SUBMITTABLE_STATUSES.includes(c.status) &&
+    c.submitter.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "submit"));
+  const canEditClaim = (c: Claim) =>
+    canEdit(c) &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "update"));
 
   const isCreateLoading = createEntMutation.isPending || createNonEntMutation.isPending;
 
@@ -245,7 +272,11 @@ export default function ClaimsPage() {
       <PageHeader
         title="Expense Claims"
         description="Submit and track your expense claims"
-        primaryAction={{ label: "New Claim", onClick: () => setIsFormOpen(true) }}
+        primaryAction={
+          canCreateClaims
+            ? { label: "New Claim", onClick: () => setIsFormOpen(true) }
+            : undefined
+        }
       />
 
       {/* Filters */}
@@ -282,7 +313,11 @@ export default function ClaimsPage() {
           icon="💰"
           title="No claims yet"
           description="Submit your first expense claim to get reimbursed"
-          action={{ label: "Create Claim", onClick: () => setIsFormOpen(true) }}
+          action={
+            canCreateClaims
+              ? { label: "Create Claim", onClick: () => setIsFormOpen(true) }
+              : undefined
+          }
         />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-white">
@@ -328,7 +363,7 @@ export default function ClaimsPage() {
                           Submit
                         </button>
                       )}
-                      {canEdit(c) && (
+                      {canEditClaim(c) && (
                         <button
                           onClick={() => setEditingClaim(toEditableClaim(c))}
                           className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
@@ -428,13 +463,13 @@ export default function ClaimsPage() {
               onEdit={() => { setEditingClaim(toEditableClaim(viewingClaim)); setViewingClaim(null); }}
               onSubmit={() => { setSubmittingClaim(viewingClaim); setViewingClaim(null); }}
               onDelete={() => { setDeletingClaim(viewingClaim); setViewingClaim(null); }}
-              canEdit={canEdit(viewingClaim)}
+              canEdit={canEditClaim(viewingClaim)}
               canDelete={canDelete(viewingClaim)}
               canSubmit={canSubmit(viewingClaim)}
             />
             <ClaimAttachments
               claimId={viewingClaim.id}
-              canManage={canEdit(viewingClaim)}
+              canManage={canEditClaim(viewingClaim)}
             />
           </div>
         )}

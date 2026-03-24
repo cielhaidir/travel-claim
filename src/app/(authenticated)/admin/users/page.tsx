@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils/format";
 import type { MembershipStatus, Role } from "../../../../../generated/prisma";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -131,9 +132,9 @@ function buildDefaultForm(defaultTenantId = ""): UserFormData {
 export default function UserManagementPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const userRole = session?.user?.role ?? "EMPLOYEE";
   const canAccess =
-    session?.user?.isRoot || userRole === "ADMIN" || userRole === "ROOT";
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "users", "read");
 
   if (status === "loading") {
     return (
@@ -183,6 +184,18 @@ function UserManagementContent({
   canQuery: boolean;
   session: NonNullable<ReturnType<typeof useSession>["data"]>;
 }) {
+  const canCreateUser =
+    session.user.isRoot ||
+    hasPermissionMap(session.user.permissions, "users", "create");
+  const canUpdateUser =
+    session.user.isRoot ||
+    hasPermissionMap(session.user.permissions, "users", "update");
+  const canDeleteUser =
+    session.user.isRoot ||
+    hasPermissionMap(session.user.permissions, "users", "delete");
+  const canImportUser =
+    session.user.isRoot ||
+    hasPermissionMap(session.user.permissions, "users", "import");
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Role | "ALL">("ALL");
   const [deptFilter, setDeptFilter] = useState("");
@@ -212,12 +225,7 @@ function UserManagementContent({
   const [formError, setFormError] = useState("");
 
   // Queries
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const {
-    data: rawUsers,
-    isLoading,
-    refetch,
-  } = api.user.getAll.useQuery(
+  const usersQuery = api.user.getAll.useQuery(
     {
       role: roleFilter === "ALL" ? undefined : roleFilter,
       departmentId: deptFilter || undefined,
@@ -226,7 +234,10 @@ function UserManagementContent({
     },
     { refetchOnWindowFocus: false, enabled: canQuery },
   );
-  const users = (rawUsers as { users: UserRef[] } | undefined)?.users ?? [];
+  const isLoading = usersQuery.isLoading;
+  const refetch = usersQuery.refetch;
+  const rawUsers = usersQuery.data as { users: UserRef[] } | undefined;
+  const users = rawUsers?.users ?? [];
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawDepts } = api.department.getAll.useQuery(
@@ -319,6 +330,7 @@ function UserManagementContent({
 
   // Import helpers
   const openImport = () => {
+    if (!canImportUser) return;
     setImportRows([]);
     setImportError("");
     setImportResults(null);
@@ -394,6 +406,7 @@ function UserManagementContent({
   };
 
   const handleImportSubmit = () => {
+    if (!canImportUser) return;
     if (importRows.length === 0) return;
     if (importPassword.length < 8) {
       setImportError("Default password must be at least 8 characters.");
@@ -412,6 +425,7 @@ function UserManagementContent({
 
   // Helpers
   const openCreate = () => {
+    if (!canCreateUser) return;
     setForm(
       buildDefaultForm(
         session.user.activeTenantId ?? tenantOptions[0]?.id ?? "",
@@ -421,6 +435,7 @@ function UserManagementContent({
     setIsCreateOpen(true);
   };
   const openEdit = (user: UserRef) => {
+    if (!canUpdateUser) return;
     setForm({
       name: user.name ?? "",
       email: user.email ?? "",
@@ -470,7 +485,7 @@ function UserManagementContent({
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingUser) return;
+    if (!editingUser || !canUpdateUser) return;
     setFormError("");
     updateMutation.mutate({
       id: editingUser.id,
@@ -485,7 +500,7 @@ function UserManagementContent({
   };
 
   const handleResetPw = () => {
-    if (!resetPwUser || newPassword.length < 8) return;
+    if (!resetPwUser || !canUpdateUser || newPassword.length < 8) return;
     resetPwMutation.mutate({ id: resetPwUser.id, newPassword });
   };
 
@@ -494,8 +509,14 @@ function UserManagementContent({
       <PageHeader
         title="User Management"
         description="Manage users, roles, and organisational hierarchy"
-        primaryAction={{ label: "Add User", onClick: openCreate }}
-        secondaryAction={{ label: "Import Users", onClick: openImport }}
+        primaryAction={
+          canCreateUser ? { label: "Add User", onClick: openCreate } : undefined
+        }
+        secondaryAction={
+          canImportUser
+            ? { label: "Import Users", onClick: openImport }
+            : undefined
+        }
       />
 
       {/* Department / Group Summary Cards */}
@@ -606,7 +627,7 @@ function UserManagementContent({
           icon="👥"
           title="No users found"
           description="Create your first user or adjust the filters"
-          action={{ label: "Add User", onClick: openCreate }}
+          action={canCreateUser ? { label: "Add User", onClick: openCreate } : undefined}
         />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-white">
@@ -682,27 +703,33 @@ function UserManagementContent({
                       >
                         View
                       </button>
-                      <button
-                        onClick={() => openEdit(user)}
-                        className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => {
-                          setResetPwUser(user);
-                          setNewPassword("");
-                        }}
-                        className="rounded px-2 py-1 text-xs text-amber-600 hover:bg-amber-50"
-                      >
-                        Reset PW
-                      </button>
-                      <button
-                        onClick={() => setDeletingUser(user)}
-                        className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
+                      {canUpdateUser ? (
+                        <>
+                          <button
+                            onClick={() => openEdit(user)}
+                            className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => {
+                              setResetPwUser(user);
+                              setNewPassword("");
+                            }}
+                            className="rounded px-2 py-1 text-xs text-amber-600 hover:bg-amber-50"
+                          >
+                            Reset PW
+                          </button>
+                        </>
+                      ) : null}
+                      {canDeleteUser ? (
+                        <button
+                          onClick={() => setDeletingUser(user)}
+                          className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -719,7 +746,7 @@ function UserManagementContent({
 
       {/* Create */}
       <Modal
-        isOpen={isCreateOpen}
+        isOpen={isCreateOpen && canCreateUser}
         onClose={() => setIsCreateOpen(false)}
         title="Add New User"
         size="lg"
@@ -741,7 +768,7 @@ function UserManagementContent({
 
       {/* Edit */}
       <Modal
-        isOpen={!!editingUser}
+        isOpen={!!editingUser && canUpdateUser}
         onClose={() => setEditingUser(null)}
         title={`Edit User — ${editingUser?.name ?? ""}`}
         size="lg"
@@ -827,35 +854,41 @@ function UserManagementContent({
               />
             </div>
             <div className="flex justify-end gap-3 border-t pt-4">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setDeletingUser(viewingUser);
-                  setViewingUser(null);
-                }}
-              >
-                Delete
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setResetPwUser(viewingUser);
-                  setViewingUser(null);
-                }}
-              >
-                Reset Password
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  openEdit(viewingUser);
-                  setViewingUser(null);
-                }}
-              >
-                Edit
-              </Button>
+              {canDeleteUser ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    setDeletingUser(viewingUser);
+                    setViewingUser(null);
+                  }}
+                >
+                  Delete
+                </Button>
+              ) : null}
+              {canUpdateUser ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setResetPwUser(viewingUser);
+                      setViewingUser(null);
+                    }}
+                  >
+                    Reset Password
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      openEdit(viewingUser);
+                      setViewingUser(null);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                </>
+              ) : null}
             </div>
           </div>
         )}
@@ -866,7 +899,9 @@ function UserManagementContent({
         isOpen={!!deletingUser}
         onClose={() => setDeletingUser(null)}
         onConfirm={() =>
-          deletingUser && deleteMutation.mutate({ id: deletingUser.id })
+          canDeleteUser &&
+          deletingUser &&
+          deleteMutation.mutate({ id: deletingUser.id })
         }
         title="Delete User"
         message={`Delete "${deletingUser?.name ?? "this user"}"? This will soft-delete the account. Users with active direct reports cannot be deleted.`}
@@ -877,7 +912,7 @@ function UserManagementContent({
 
       {/* Reset Password */}
       <Modal
-        isOpen={!!resetPwUser}
+        isOpen={!!resetPwUser && canUpdateUser}
         onClose={() => setResetPwUser(null)}
         title={`Reset Password — ${resetPwUser?.name ?? ""}`}
         size="sm"
@@ -919,7 +954,7 @@ function UserManagementContent({
       </Modal>
       {/* Import Users Modal */}
       <Modal
-        isOpen={isImportOpen}
+        isOpen={isImportOpen && canImportUser}
         onClose={() => setIsImportOpen(false)}
         title="Import Users from Excel / CSV"
         size="lg"

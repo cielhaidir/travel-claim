@@ -528,8 +528,8 @@ async function main() {
   ]);
   console.log("  ✅ UserRole rows synchronized from legacy role\n");
 
-  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, true);
-  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, false);
+  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, false);
+  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, true);
   await upsertDefaultMembership(executive.id, executive.role, defaultTenantId);
   await upsertDefaultMembership(director.id, director.role, defaultTenantId);
   await upsertDefaultMembership(

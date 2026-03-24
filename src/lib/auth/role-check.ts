@@ -1,9 +1,15 @@
 import { normalizeRoles } from "@/lib/constants/roles";
+import {
+  hasPermissionMap,
+  type PermissionAction,
+  type PermissionMap,
+} from "@/lib/auth/permissions";
 
 type SessionUserLike = {
   roles?: string[] | null;
   role?: string | null;
   isRoot?: boolean | null;
+  permissions?: PermissionMap | null;
   memberships?:
     | Array<{
         role?: string | null;
@@ -54,4 +60,16 @@ export function userHasRole(user: SessionUserLike, role: string): boolean {
   }
 
   return getSessionUserRoles(user).includes(role);
+}
+
+export function userHasPermission(
+  user: SessionUserLike,
+  moduleKey: string,
+  action: PermissionAction = "read",
+): boolean {
+  if (hasRootSessionAccess(user)) {
+    return true;
+  }
+
+  return hasPermissionMap(user.permissions, moduleKey, action);
 }

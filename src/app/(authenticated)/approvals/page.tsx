@@ -8,13 +8,9 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
 import type { ApprovalStatus } from "../../../../generated/prisma";
-import {
-  APPROVER_ROLES,
-  hasAnyRole,
-  normalizeRoles,
-} from "@/lib/constants/roles";
 
 interface TravelRequestRef {
   id: string;
@@ -137,25 +133,47 @@ function getBailoutCategoryLabel(category: string) {
 export default function ApprovalsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const userRoles = normalizeRoles({
-    roles: session?.user?.roles,
-    role: session?.user?.role,
-  });
+  const canReadApprovals =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "read");
+  const canApprove =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "approve");
+  const canReject =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "reject");
+  const canRevision =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "revision");
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!hasAnyRole(userRoles, APPROVER_ROLES)) {
+    if (!canReadApprovals) {
       router.replace("/");
     }
-  }, [userRoles, status, router]);
+  }, [canReadApprovals, status, router]);
 
   if (status === "loading") return null;
-  if (!hasAnyRole(userRoles, APPROVER_ROLES)) return null;
+  if (!canReadApprovals) return null;
 
-  return <ApprovalsContent />;
+  return (
+    <ApprovalsContent
+      canApprove={canApprove}
+      canReject={canReject}
+      canRevision={canRevision}
+    />
+  );
 }
 
-function ApprovalsContent() {
+function ApprovalsContent({
+  canApprove,
+  canReject,
+  canRevision,
+}: {
+  canApprove: boolean;
+  canReject: boolean;
+  canRevision: boolean;
+}) {
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "ALL">(
     "ALL",
   );
@@ -394,24 +412,30 @@ function ApprovalsContent() {
                         </button>
                         {a.status === "PENDING" && (
                           <>
-                            <button
-                              onClick={() => openAction(a, "approve")}
-                              className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => openAction(a, "revision")}
-                              className="rounded px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-50"
-                            >
-                              Revise
-                            </button>
-                            <button
-                              onClick={() => openAction(a, "reject")}
-                              className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              Reject
-                            </button>
+                            {canApprove && (
+                              <button
+                                onClick={() => openAction(a, "approve")}
+                                className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {canRevision && (
+                              <button
+                                onClick={() => openAction(a, "revision")}
+                                className="rounded px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-50"
+                              >
+                                Revise
+                              </button>
+                            )}
+                            {canReject && (
+                              <button
+                                onClick={() => openAction(a, "reject")}
+                                className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              >
+                                Reject
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -434,6 +458,9 @@ function ApprovalsContent() {
         {viewingApproval && (
           <RichApprovalDetail
             approval={viewingApproval}
+            canApprove={canApprove}
+            canReject={canReject}
+            canRevision={canRevision}
             onApprove={() => {
               openAction(viewingApproval, "approve");
               setViewingApproval(null);
@@ -515,11 +542,17 @@ function ApprovalsContent() {
 
 function RichApprovalDetail({
   approval,
+  canApprove,
+  canReject,
+  canRevision,
   onApprove,
   onReject,
   onRevision,
 }: {
   approval: Approval;
+  canApprove: boolean;
+  canReject: boolean;
+  canRevision: boolean;
   onApprove: () => void;
   onReject: () => void;
   onRevision: () => void;
@@ -813,15 +846,21 @@ function RichApprovalDetail({
 
       {approval.status === "PENDING" && (
         <div className="flex justify-end gap-3 border-t pt-4">
-          <Button variant="destructive" size="sm" onClick={onReject}>
-            Reject
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onRevision}>
-            Request Revision
-          </Button>
-          <Button size="sm" onClick={onApprove}>
-            Approve
-          </Button>
+          {canReject && (
+            <Button variant="destructive" size="sm" onClick={onReject}>
+              Reject
+            </Button>
+          )}
+          {canRevision && (
+            <Button variant="secondary" size="sm" onClick={onRevision}>
+              Request Revision
+            </Button>
+          )}
+          {canApprove && (
+            <Button size="sm" onClick={onApprove}>
+              Approve
+            </Button>
+          )}
         </div>
       )}
     </div>

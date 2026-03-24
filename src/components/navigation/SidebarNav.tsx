@@ -2,78 +2,85 @@
 
 import Link from "next/link";
 import type { Session } from "next-auth";
-import { hasAnyRole, normalizeRoles, type Role } from "@/lib/constants/roles";
+import {
+  hasPermissionMap,
+  type PermissionAction,
+} from "@/lib/auth/permissions";
 
 interface NavItem {
   label: string;
   href: string;
   icon: string;
-  roles?: Role[];
+  moduleKey: string;
+  action?: PermissionAction;
 }
 
 const navigationItems: NavItem[] = [
   {
     label: "Dasbor",
     href: "/dashboard",
-    icon: "📊",
+    icon: "DS",
+    moduleKey: "dashboard",
   },
   {
     label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
-    icon: "✈️",
+    icon: "PD",
+    moduleKey: "travel",
   },
   {
     label: "Proyek",
     href: "/projects",
-    icon: "📁",
-    roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
+    icon: "PR",
+    moduleKey: "projects",
   },
   {
     label: "Persetujuan Bailout",
     href: "/bailout",
-    icon: "💼",
-    roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
+    icon: "BO",
+    moduleKey: "bailout",
   },
   {
     label: "Klaim",
     href: "/claims",
-    icon: "💰",
+    icon: "KL",
+    moduleKey: "claims",
   },
   {
     label: "Persetujuan",
     href: "/approvals",
-    icon: "✅",
-    roles: [
-      "SUPERVISOR",
-      "MANAGER",
-      "DIRECTOR",
-      "FINANCE",
-      "ADMIN",
-      "SALES_CHIEF",
-    ],
+    icon: "AP",
+    moduleKey: "approvals",
   },
   {
     label: "Akuntansi & Keuangan",
     href: "/accounting",
-    icon: "🏦",
-    roles: ["FINANCE", "ADMIN"],
+    icon: "AK",
+    moduleKey: "accounting",
   },
   {
     label: "Manajemen Pengguna",
     href: "/admin/users",
-    icon: "👥",
-    roles: ["ADMIN"],
+    icon: "US",
+    moduleKey: "users",
   },
   {
     label: "Master Tenant",
     href: "/admin/tenants",
-    icon: "🏢",
-    roles: ["ROOT"],
+    icon: "TN",
+    moduleKey: "tenants",
   },
   {
-    label: "Profile",
+    label: "Manajemen Peran",
+    href: "/admin/roles",
+    icon: "RB",
+    moduleKey: "roles",
+  },
+  {
+    label: "Profil",
     href: "/profile",
-    icon: "👤",
+    icon: "PF",
+    moduleKey: "profile",
   },
 ];
 
@@ -88,19 +95,19 @@ export function SidebarNav({
   currentPath,
   onNavigate,
 }: SidebarNavProps) {
-  const userRole = session.user.role ?? "EMPLOYEE";
-  const userRoles = normalizeRoles({
-    roles: session.user.roles,
-    role: userRole,
-  });
   const canAccessAsRoot = session.user.isRoot === true;
 
-  const allowedItems = navigationItems.filter(
-    (item) =>
-      !item.roles ||
-      canAccessAsRoot ||
-      hasAnyRole(userRoles, [...item.roles, "ROOT"]),
-  );
+  const allowedItems = navigationItems.filter((item) => {
+    if (canAccessAsRoot) {
+      return true;
+    }
+
+    return hasPermissionMap(
+      session.user.permissions,
+      item.moduleKey,
+      item.action ?? "read",
+    );
+  });
 
   return (
     <nav className="flex-1 space-y-1 overflow-y-auto p-4">
@@ -120,7 +127,9 @@ export function SidebarNav({
                 : "text-gray-700 hover:bg-gray-100"
             }`}
           >
-            <span className="text-xl">{item.icon}</span>
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-[10px] font-semibold tracking-[0.14em] text-gray-600">
+              {item.icon}
+            </span>
             <span>{item.label}</span>
           </Link>
         );

@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type {
   JournalSourceType,
@@ -74,8 +75,9 @@ export default function JournalPage() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("ALL");
   const [selectedJournal, setSelectedJournal] = useState<JournalEntry | null>(null);
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN";
+  const isAllowed =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "journals", "read");
 
   useEffect(() => {
     if (session && !isAllowed) {

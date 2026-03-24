@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { BailoutFileUpload } from "@/components/features/BailoutFileUpload";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -365,12 +367,20 @@ function ActionModal({
   onDone,
   userRole,
   currentUserId,
+  canSubmit,
+  canApprove,
+  canReject,
+  canDisburse,
 }: {
   bailout: Bailout;
   onClose: () => void;
   onDone: () => void;
   userRole: string;
   currentUserId: string;
+  canSubmit: boolean;
+  canApprove: boolean;
+  canReject: boolean;
+  canDisburse: boolean;
 }) {
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
@@ -393,8 +403,23 @@ function ActionModal({
   const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending || submit.isPending;
   const isLegacyReady = isLegacyTravelBailoutReady(bailout);
   const canFinanceDisburse =
+    canDisburse &&
     financeRoles.includes(userRole) &&
     (bailout.status === "APPROVED_DIRECTOR" || isLegacyReady);
+  const canApproveChief =
+    canApprove && chiefRoles.includes(userRole) && bailout.status === "SUBMITTED";
+  const canApproveDirector =
+    canApprove &&
+    directorRoles.includes(userRole) &&
+    bailout.status === "APPROVED_CHIEF";
+  const canShowReject =
+    canReject &&
+    chiefRoles.includes(userRole) &&
+    ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
+  const canSubmitOwnDraft =
+    canSubmit &&
+    bailout.status === "DRAFT" &&
+    bailout.requester.id === currentUserId;
 
   return (
     <div className="space-y-5">
@@ -501,23 +526,23 @@ function ActionModal({
       {/* Action Buttons */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
         <Button variant="secondary" onClick={onClose}>Tutup</Button>
-        {bailout.status === "DRAFT" && bailout.requester.id === currentUserId && (
+        {canSubmitOwnDraft && (
           <Button isLoading={submit.isPending} onClick={() => submit.mutate({ id: bailout.id })}>
             Kirim Pengajuan
           </Button>
         )}
-        {!showReject && chiefRoles.includes(userRole) && ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status) && (
+        {!showReject && canShowReject && (
           <button onClick={() => setShowReject(true)} disabled={isActing}
             className="rounded px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200">
             Tolak
           </button>
         )}
-        {chiefRoles.includes(userRole) && bailout.status === "SUBMITTED" && (
+        {canApproveChief && (
           <Button isLoading={approveChief.isPending} onClick={() => approveChief.mutate({ id: bailout.id })}>
             ✓ Setujui (Chief)
           </Button>
         )}
-        {directorRoles.includes(userRole) && bailout.status === "APPROVED_CHIEF" && (
+        {canApproveDirector && (
           <Button isLoading={approveDirector.isPending} onClick={() => approveDirector.mutate({ id: bailout.id })}>
             ✓ Setujui (Direktur)
           </Button>
@@ -538,8 +563,28 @@ function selectBailouts(d: { bailouts: Bailout[] }) {
 
 export default function BailoutApprovalPage() {
   const { data: session } = useSession();
+  const router = useRouter();
   const userRole = session?.user?.role ?? "EMPLOYEE";
   const currentUserId = session?.user?.id ?? "";
+  const permissions = session?.user?.permissions;
+  const canReadBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "read");
+  const canCreateBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "create");
+  const canSubmitBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "submit");
+  const canApproveBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "approve");
+  const canRejectBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "reject");
+  const canDisburseBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "disburse");
 
   const [statusFilter, setStatusFilter] = useState<BailoutStatus | "ALL">("ALL");
   const [selected, setSelected] = useState<Bailout | null>(null);
@@ -558,7 +603,7 @@ export default function BailoutApprovalPage() {
   // „select" uses a stable function reference to avoid infinite re-fetches.
   const { data: allBailouts = [], isLoading } = api.bailout.getAll.useQuery(
     { limit: 100 },
-    { select: selectBailouts },
+    { enabled: canReadBailout, select: selectBailouts },
   );
 
   // Derive the filtered list and the pending count from the same data.
@@ -570,10 +615,16 @@ export default function BailoutApprovalPage() {
   ).length;
 
   useEffect(() => {
-    if (!["FINANCE", "ADMIN"].includes(userRole)) return;
+    if (session && !canReadBailout) {
+      void router.replace("/dashboard");
+    }
+  }, [canReadBailout, router, session]);
+
+  useEffect(() => {
+    if (!canDisburseBailout || !["FINANCE", "ADMIN"].includes(userRole)) return;
     if (repairLegacyMutation.isPending || repairLegacyMutation.isSuccess) return;
     repairLegacyMutation.mutate({});
-  }, [repairLegacyMutation, userRole]);
+  }, [canDisburseBailout, repairLegacyMutation, userRole]);
 
   const statusFilters: { value: BailoutStatus | "ALL"; label: string }[] = [
     { value: "ALL", label: "Semua" },
@@ -584,15 +635,21 @@ export default function BailoutApprovalPage() {
     { value: "REJECTED", label: "Ditolak" },
   ];
 
+  if (!session || !canReadBailout) return null;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Bailout Approval"
         description="Kelola dan setujui pengajuan dana talangan perjalanan dinas"
-        primaryAction={{
-          label: "Ajukan Bailout Manual",
-          onClick: () => setIsCreateOpen(true),
-        }}
+        primaryAction={
+          canCreateBailout
+            ? {
+                label: "Ajukan Bailout Manual",
+                onClick: () => setIsCreateOpen(true),
+              }
+            : undefined
+        }
       />
 
       {/* Pending Summary */}
@@ -696,13 +753,17 @@ export default function BailoutApprovalPage() {
             onDone={() => void utils.bailout.getAll.invalidate()}
             userRole={userRole}
             currentUserId={currentUserId}
+            canSubmit={canSubmitBailout}
+            canApprove={canApproveBailout}
+            canReject={canRejectBailout}
+            canDisburse={canDisburseBailout}
           />
         )}
       </Modal>
 
       {/* Create Bailout Modal */}
       <Modal
-        isOpen={isCreateOpen}
+        isOpen={isCreateOpen && canCreateBailout}
         onClose={() => setIsCreateOpen(false)}
         title="Ajukan Dana Talangan Manual"
         size="lg"

@@ -11,10 +11,9 @@ import bcrypt from "bcryptjs";
 import {
   createTRPCRouter,
   protectedProcedure,
-  adminProcedure,
-  managerProcedure,
+  permissionProcedure,
 } from "@/server/api/trpc";
-import { userHasAnyRole } from "@/lib/auth/role-check";
+import { userHasPermission } from "@/lib/auth/role-check";
 
 // Role precedence for deriving primary role from a set of roles
 const ROLE_PRECEDENCE_ORDER = [
@@ -309,7 +308,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get user by phone number (dedicated MCP tool)
-  getByPhone: managerProcedure
+  getByPhone: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -378,7 +377,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get all users with filters
-  getAll: managerProcedure
+  getAll: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -546,11 +545,7 @@ export const userRouter = createTRPCRouter({
 
       // Only allow viewing own profile or if user is manager/admin
       const isOwn = user.id === ctx.session.user.id;
-      const canView = userHasAnyRole(ctx.session.user, [
-        "MANAGER",
-        "DIRECTOR",
-        "ADMIN",
-      ]);
+      const canView = userHasPermission(ctx.session.user, "users", "read");
 
       if (!isOwn && !canView) {
         throw new TRPCError({
@@ -598,7 +593,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get organizational hierarchy
-  getHierarchy: managerProcedure
+  getHierarchy: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -647,7 +642,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Create user
-  create: adminProcedure
+  create: permissionProcedure("users", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -758,7 +753,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Update user
-  update: adminProcedure
+  update: permissionProcedure("users", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -1017,7 +1012,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Admin reset password
-  resetPassword: adminProcedure
+  resetPassword: permissionProcedure("users", "update")
     .input(z.object({ id: z.string(), newPassword: z.string().min(8) }))
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -1036,7 +1031,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Soft delete user
-  delete: adminProcedure
+  delete: permissionProcedure("users", "delete")
     .meta({
       openapi: {
         method: "DELETE",
@@ -1082,7 +1077,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Restore deleted user
-  restore: adminProcedure
+  restore: permissionProcedure("users", "update")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -1113,7 +1108,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Bulk import users from Excel/CSV (only userType = member)
-  bulkImport: adminProcedure
+  bulkImport: permissionProcedure("users", "import")
     .input(
       z.object({
         users: z.array(

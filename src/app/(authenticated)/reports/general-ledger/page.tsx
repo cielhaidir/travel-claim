@@ -7,6 +7,7 @@ import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { JournalStatus } from "../../../../../generated/prisma";
 
@@ -62,26 +63,16 @@ export default function GeneralLedgerPage() {
   const [statusFilter, setStatusFilter] = useState<JournalStatus | "ALL">("POSTED");
   const [selectedCoaId, setSelectedCoaId] = useState("");
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN" || session?.user?.isRoot === true;
+  const isAllowed =
+    (session?.user?.isRoot ?? false) ||
+    (hasPermissionMap(session?.user?.permissions, "reports", "read") &&
+      hasPermissionMap(session?.user?.permissions, "journals", "read"));
 
   useEffect(() => {
     if (session && !isAllowed) {
       void router.replace("/dashboard");
     }
   }, [session, isAllowed, router]);
-
-  const coaQuery = api.chartOfAccount.getActiveAccounts.useQuery(
-    {},
-    { enabled: isAllowed, refetchOnWindowFocus: false },
-  );
-  const coaOptions = (coaQuery.data as CoaOption[] | undefined) ?? [];
-
-  useEffect(() => {
-    if (!selectedCoaId && coaOptions.length > 0) {
-      setSelectedCoaId(coaOptions[0]?.id ?? "");
-    }
-  }, [coaOptions, selectedCoaId]);
 
   const journalQuery = api.journalEntry.list.useQuery(
     {
@@ -97,6 +88,34 @@ export default function GeneralLedgerPage() {
   );
 
   const journals = ((journalQuery.data as { journalEntries: JournalEntry[] } | undefined)?.journalEntries ?? []);
+
+  const coaOptions = useMemo<CoaOption[]>(() => {
+    const options = new Map<string, CoaOption>();
+
+    for (const journal of journals) {
+      for (const line of journal.lines) {
+        options.set(line.chartOfAccount.id, {
+          id: line.chartOfAccount.id,
+          code: line.chartOfAccount.code,
+          name: line.chartOfAccount.name,
+          accountType: line.chartOfAccount.accountType,
+        });
+      }
+    }
+
+    return Array.from(options.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [journals]);
+
+  useEffect(() => {
+    if (!selectedCoaId && coaOptions.length > 0) {
+      setSelectedCoaId(coaOptions[0]?.id ?? "");
+      return;
+    }
+
+    if (selectedCoaId && !coaOptions.some((coa) => coa.id === selectedCoaId)) {
+      setSelectedCoaId(coaOptions[0]?.id ?? "");
+    }
+  }, [coaOptions, selectedCoaId]);
 
   const ledgerRows = useMemo(() => {
     const rows = journals.flatMap((journal) =>
@@ -241,7 +260,7 @@ export default function GeneralLedgerPage() {
           <h2 className="text-lg font-semibold text-gray-900">Detail General Ledger</h2>
           <p className="text-sm text-gray-500">Mutasi jurnal untuk akun COA terpilih</p>
         </div>
-        {journalQuery.isLoading || coaQuery.isLoading ? (
+        {journalQuery.isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat data general ledger...</div>
         ) : !selectedCoaId ? (
           <EmptyState icon="📙" title="Pilih akun COA" description="Pilih akun COA terlebih dahulu untuk melihat buku besar tenant aktif." />
