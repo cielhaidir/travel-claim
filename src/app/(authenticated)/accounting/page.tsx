@@ -208,6 +208,11 @@ export default function AccountingPage() {
           description="Ringkasan beban tenant aktif per akun expense dan sumber jurnal"
         />
         <ModuleLinkCard
+          href="/reports/employee-advance-control"
+          title="Employee Advance Control"
+          description="Kontrol uang muka perjalanan, piutang karyawan, dan hutang karyawan tenant aktif"
+        />
+        <ModuleLinkCard
           href="/dashboard"
           title="Dashboard Tenant"
           description="Kembali ke ringkasan operasional dan keuangan tenant aktif"

@@ -185,6 +185,49 @@ enum MembershipStatus {
   SUSPENDED
 }
 
+enum CrmLeadStage {
+  NEW
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CrmLeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CrmLeadSource {
+  REFERRAL
+  WEBSITE
+  EVENT
+  OUTBOUND
+  PARTNER
+}
+
+enum CrmCustomerSegment {
+  ENTERPRISE
+  SMB
+  GOVERNMENT
+  EDUCATION
+}
+
+enum CrmCustomerStatus {
+  ACTIVE
+  INACTIVE
+  VIP
+}
+
+enum CrmActivityType {
+  CALL
+  MEETING
+  EMAIL
+  FOLLOW_UP
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
@@ -214,6 +257,9 @@ model Tenant {
   balanceAccounts     BalanceAccount[]
   journalTransactions JournalTransaction[]
   journalEntries      JournalEntry[]
+  crmCustomers        CrmCustomer[]
+  crmLeads            CrmLead[]
+  crmActivities       CrmActivity[]
 
   @@index([isRoot])
 }
@@ -427,11 +473,11 @@ model ChartOfAccount {
   updatedAt DateTime @updatedAt
 
   // Relations
-  claims                Claim[]
-  auditLogs             AuditLog[]           @relation("COAAuditLogs")
-  journalTransactions   JournalTransaction[]
-  journalEntryLines     JournalEntryLine[]
-  defaultForBalanceAccounts BalanceAccount[] @relation("BalanceAccountDefaultCOA")
+  claims                    Claim[]
+  auditLogs                 AuditLog[]           @relation("COAAuditLogs")
+  journalTransactions       JournalTransaction[]
+  journalEntryLines         JournalEntryLine[]
+  defaultForBalanceAccounts BalanceAccount[]     @relation("BalanceAccountDefaultCOA")
 
   @@unique([tenantId, code])
   @@index([code])
@@ -468,6 +514,97 @@ model Project {
   @@index([tenantId])
   @@index([tenantId, isActive])
   @@index([isActive])
+}
+
+// ============================================================================
+// CRM
+// ============================================================================
+
+model CrmCustomer {
+  id            String             @id @default(cuid())
+  tenantId      String?
+  name          String             @db.VarChar(150)
+  company       String             @db.VarChar(200)
+  email         String             @db.VarChar(200)
+  phone         String?            @db.VarChar(30)
+  segment       CrmCustomerSegment
+  city          String?            @db.VarChar(100)
+  ownerName     String             @db.VarChar(150)
+  status        CrmCustomerStatus  @default(ACTIVE)
+  totalValue    Decimal            @default(0) @db.Decimal(15, 2)
+  notes         String?            @db.Text
+  lastContactAt DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  tenant     Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  leads      CrmLead[]
+  activities CrmActivity[]
+
+  @@index([tenantId])
+  @@index([tenantId, company])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerName])
+  @@index([deletedAt])
+}
+
+model CrmLead {
+  id                String          @id @default(cuid())
+  tenantId          String?
+  customerId        String?
+  name              String          @db.VarChar(150)
+  company           String          @db.VarChar(200)
+  email             String          @db.VarChar(200)
+  phone             String?         @db.VarChar(30)
+  stage             CrmLeadStage    @default(NEW)
+  value             Decimal         @default(0) @db.Decimal(15, 2)
+  probability       Int             @default(0)
+  source            CrmLeadSource   @default(REFERRAL)
+  priority          CrmLeadPriority @default(MEDIUM)
+  ownerName         String          @db.VarChar(150)
+  expectedCloseDate DateTime?
+  lastActivityAt    DateTime?
+  notes             String?         @db.Text
+  deletedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant     Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer   CrmCustomer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  activities CrmActivity[]
+
+  @@index([tenantId])
+  @@index([tenantId, stage])
+  @@index([tenantId, ownerName])
+  @@index([customerId])
+  @@index([deletedAt])
+}
+
+model CrmActivity {
+  id          String          @id @default(cuid())
+  tenantId    String?
+  customerId  String?
+  leadId      String?
+  title       String          @db.VarChar(200)
+  description String?         @db.Text
+  type        CrmActivityType @default(FOLLOW_UP)
+  ownerName   String          @db.VarChar(150)
+  scheduledAt DateTime
+  completedAt DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant   Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, scheduledAt])
+  @@index([customerId])
+  @@index([leadId])
+  @@index([deletedAt])
 }
 
 // ============================================================================

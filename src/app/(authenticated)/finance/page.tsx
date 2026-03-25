@@ -133,6 +133,19 @@ export default function FinanceDashboard() {
   const [settlementExpenseCoaId, setSettlementExpenseCoaId] = useState("");
   const [settlementAdvanceCoaId, setSettlementAdvanceCoaId] = useState("");
   const [settlementRef, setSettlementRef] = useState("");
+  const [settlementExpenseLines, setSettlementExpenseLines] = useState<
+    Array<{ chartOfAccountId: string; amount: string; description: string }>
+  >([]);
+  const [settlementVarianceHandling, setSettlementVarianceHandling] = useState<
+    "REQUIRE_EXACT" | "REFUND_TO_BANK" | "REFUND_TO_RECEIVABLE" | "TOPUP_TO_PAYABLE"
+  >("REQUIRE_EXACT");
+  const [settlementRefundBankCoaId, setSettlementRefundBankCoaId] = useState("");
+  const [settlementRefundBalanceAccountId, setSettlementRefundBalanceAccountId] =
+    useState("");
+  const [settlementEmployeeReceivableCoaId, setSettlementEmployeeReceivableCoaId] =
+    useState("");
+  const [settlementEmployeePayableCoaId, setSettlementEmployeePayableCoaId] =
+    useState("");
 
   // ── Lock / Close confirm state ────────────────────────────────────────────
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
@@ -232,6 +245,30 @@ export default function FinanceDashboard() {
   const settlementJournals =
     (settlementJournalsRaw as { journalEntries: Array<{ bailout?: { id: string } | null }> } | undefined)
       ?.journalEntries ?? [];
+
+  const { data: postedJournalLinesRaw } = api.journalEntry.list.useQuery(
+    {
+      status: "POSTED",
+      limit: 200,
+    },
+    { enabled: isAllowed, refetchOnWindowFocus: false },
+  );
+  const postedJournalEntries =
+    (postedJournalLinesRaw as {
+      journalEntries: Array<{
+        id: string;
+        journalNumber: string;
+        transactionDate: string | Date;
+        description: string;
+        sourceType?: string | null;
+        bailout?: { id: string; bailoutNumber: string } | null;
+        lines: Array<{
+          debitAmount: number;
+          creditAmount: number;
+          chartOfAccount: { code: string; name: string };
+        }>;
+      }>;
+    } | undefined)?.journalEntries ?? [];
   const settledBailoutIds = new Set(
     settlementJournals
       .map((journal) => journal.bailout?.id)
@@ -299,6 +336,12 @@ export default function FinanceDashboard() {
       setSettlementExpenseCoaId("");
       setSettlementAdvanceCoaId("");
       setSettlementRef("");
+      setSettlementExpenseLines([]);
+      setSettlementVarianceHandling("REQUIRE_EXACT");
+      setSettlementRefundBankCoaId("");
+      setSettlementRefundBalanceAccountId("");
+      setSettlementEmployeeReceivableCoaId("");
+      setSettlementEmployeePayableCoaId("");
     },
   });
 
@@ -353,13 +396,35 @@ export default function FinanceDashboard() {
   }
 
   function openSettlement(b: Bailout) {
+    const defaultExpenseCoaId = activeCoas.find((coa) => coa.code === "6130" && coa.accountType === "EXPENSE")?.id
+      ?? activeCoas.find((coa) => coa.accountType === "EXPENSE")?.id
+      ?? "";
+    const defaultAdvanceCoaId = activeCoas.find((coa) => coa.code === "1131")?.id
+      ?? activeCoas.find((coa) => coa.code === "1130")?.id
+      ?? activeCoas.find((coa) => coa.accountType === "ASSET")?.id
+      ?? "";
+    const defaultRefundBankCoaId = balanceAccounts[0]?.defaultChartOfAccountId
+      ?? activeCoas.find((coa) => coa.code === "1120")?.id
+      ?? activeCoas.find((coa) => coa.accountType === "ASSET")?.id
+      ?? "";
+    const defaultEmployeeReceivableCoaId = activeCoas.find((coa) => coa.code === "1132")?.id ?? "";
+    const defaultEmployeePayableCoaId = activeCoas.find((coa) => coa.code === "2110")?.id ?? "";
+
     setSelectedSettlementBailout(b);
-    setSettlementExpenseCoaId(
-      activeCoas.find((coa) => coa.accountType === "EXPENSE")?.id ?? "",
-    );
-    setSettlementAdvanceCoaId(
-      activeCoas.find((coa) => coa.accountType === "ASSET")?.id ?? "",
-    );
+    setSettlementExpenseCoaId(defaultExpenseCoaId);
+    setSettlementAdvanceCoaId(defaultAdvanceCoaId);
+    setSettlementExpenseLines([
+      {
+        chartOfAccountId: defaultExpenseCoaId,
+        amount: Number(b.amount ?? 0).toString(),
+        description: `Settlement ${b.travelRequest.requestNumber}`,
+      },
+    ]);
+    setSettlementVarianceHandling("REQUIRE_EXACT");
+    setSettlementRefundBankCoaId(defaultRefundBankCoaId);
+    setSettlementRefundBalanceAccountId(balanceAccounts[0]?.id ?? "");
+    setSettlementEmployeeReceivableCoaId(defaultEmployeeReceivableCoaId);
+    setSettlementEmployeePayableCoaId(defaultEmployeePayableCoaId);
     setSettlementRef("");
     setSettlementOpen(true);
   }
@@ -372,6 +437,156 @@ export default function FinanceDashboard() {
   function openClose(t: TravelRequest) {
     setSelectedTravel(t);
     setCloseConfirmOpen(true);
+  }
+
+  const expenseCoaOptions = activeCoas
+    .filter((coa) => coa.accountType === "EXPENSE")
+    .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }));
+  const assetCoaOptions = activeCoas
+    .filter((coa) => coa.accountType === "ASSET")
+    .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }));
+  const liabilityCoaOptions = activeCoas
+    .filter((coa) => coa.accountType === "LIABILITY")
+    .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }));
+  const balanceAccountOptions = balanceAccounts.map((account) => ({
+    value: account.id,
+    label: `${account.code} - ${account.name}`,
+  }));
+
+  const settlementRealizationAmount = settlementExpenseLines.reduce(
+    (sum, line) => sum + (Number(line.amount) || 0),
+    0,
+  );
+  const settlementAdvanceAmount = Number(selectedSettlementBailout?.amount ?? 0);
+  const settlementVariance = Number(
+    (settlementAdvanceAmount - settlementRealizationAmount).toFixed(2),
+  );
+  const requiresRefundBank = settlementVariance > 0 && settlementVarianceHandling === "REFUND_TO_BANK";
+  const requiresReceivable = settlementVariance > 0 && settlementVarianceHandling === "REFUND_TO_RECEIVABLE";
+  const requiresPayable = settlementVariance < 0 && settlementVarianceHandling === "TOPUP_TO_PAYABLE";
+  const settlementVarianceModeMismatch =
+    (settlementVariance > 0 && settlementVarianceHandling === "TOPUP_TO_PAYABLE") ||
+    (settlementVariance < 0 && ["REFUND_TO_BANK", "REFUND_TO_RECEIVABLE"].includes(settlementVarianceHandling));
+
+  const settlementPreviewLines: Array<{
+    label: string;
+    debit: number;
+    credit: number;
+    note?: string;
+  }> = [
+    ...settlementExpenseLines
+      .filter((line) => line.chartOfAccountId && Number(line.amount) > 0)
+      .map((line) => ({
+        label: activeCoas.find((coa) => coa.id === line.chartOfAccountId)
+          ? `${activeCoas.find((coa) => coa.id === line.chartOfAccountId)?.code} - ${activeCoas.find((coa) => coa.id === line.chartOfAccountId)?.name}`
+          : "Akun beban",
+        debit: Number(line.amount),
+        credit: 0,
+        note: line.description || undefined,
+      })),
+  ];
+
+  if (requiresRefundBank && settlementRefundBankCoaId) {
+    const coa = activeCoas.find((item) => item.id === settlementRefundBankCoaId);
+    settlementPreviewLines.push({
+      label: coa ? `${coa.code} - ${coa.name}` : "Akun kas/bank refund",
+      debit: Math.max(settlementVariance, 0),
+      credit: 0,
+      note: "Pengembalian selisih ke kas/bank",
+    });
+  }
+
+  if (requiresReceivable && settlementEmployeeReceivableCoaId) {
+    const coa = activeCoas.find((item) => item.id === settlementEmployeeReceivableCoaId);
+    settlementPreviewLines.push({
+      label: coa ? `${coa.code} - ${coa.name}` : "Akun piutang karyawan",
+      debit: Math.max(settlementVariance, 0),
+      credit: 0,
+      note: "Selisih lebih menjadi piutang karyawan",
+    });
+  }
+
+  if (settlementAdvanceCoaId) {
+    const coa = activeCoas.find((item) => item.id === settlementAdvanceCoaId);
+    settlementPreviewLines.push({
+      label: coa ? `${coa.code} - ${coa.name}` : "Akun uang muka",
+      debit: 0,
+      credit: settlementAdvanceAmount,
+      note: "Penutupan uang muka perjalanan",
+    });
+  }
+
+  if (requiresPayable && settlementEmployeePayableCoaId) {
+    const coa = activeCoas.find((item) => item.id === settlementEmployeePayableCoaId);
+    settlementPreviewLines.push({
+      label: coa ? `${coa.code} - ${coa.name}` : "Akun hutang karyawan",
+      debit: 0,
+      credit: Math.abs(settlementVariance),
+      note: "Kekurangan bayar menjadi hutang karyawan",
+    });
+  }
+
+  const settlementPreviewTotals = settlementPreviewLines.reduce(
+    (acc, line) => ({ debit: acc.debit + line.debit, credit: acc.credit + line.credit }),
+    { debit: 0, credit: 0 },
+  );
+
+  const outstandingAdvanceAmount = unsettledBailouts.reduce(
+    (sum, bailout) => sum + Number(bailout.amount ?? 0),
+    0,
+  );
+  const accountExposureMap = postedJournalEntries
+    .flatMap((journal) => journal.lines)
+    .reduce((map, line) => {
+      const code = line.chartOfAccount.code;
+      const amount = Number(line.debitAmount ?? 0) - Number(line.creditAmount ?? 0);
+      map.set(code, (map.get(code) ?? 0) + amount);
+      return map;
+    }, new Map<string, number>());
+  const outstandingEmployeeReceivable = accountExposureMap.get("1132") ?? 0;
+  const outstandingEmployeePayable = Math.abs(accountExposureMap.get("2110") ?? 0);
+  const receivablePayableJournalRows = postedJournalEntries
+    .flatMap((journal) =>
+      journal.lines
+        .filter((line) => ["1132", "2110"].includes(line.chartOfAccount.code))
+        .map((line) => ({
+          journalId: journal.id,
+          journalNumber: journal.journalNumber,
+          transactionDate: journal.transactionDate,
+          description: journal.description,
+          sourceType: journal.sourceType ?? "MANUAL",
+          accountCode: line.chartOfAccount.code,
+          accountName: line.chartOfAccount.name,
+          amount: Math.abs(Number(line.debitAmount ?? 0) - Number(line.creditAmount ?? 0)),
+          position: Number(line.debitAmount ?? 0) > 0 ? "DEBIT" : "CREDIT",
+          bailoutNumber: journal.bailout?.bailoutNumber,
+        })),
+    )
+    .sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime())
+    .slice(0, 8);
+
+  function updateSettlementExpenseLine(
+    index: number,
+    patch: Partial<{ chartOfAccountId: string; amount: string; description: string }>,
+  ) {
+    setSettlementExpenseLines((prev) => prev.map((line, lineIndex) => (
+      lineIndex === index ? { ...line, ...patch } : line
+    )));
+  }
+
+  function addSettlementExpenseLine() {
+    setSettlementExpenseLines((prev) => ([
+      ...prev,
+      {
+        chartOfAccountId: settlementExpenseCoaId || expenseCoaOptions[0]?.value || "",
+        amount: "",
+        description: "",
+      },
+    ]));
+  }
+
+  function removeSettlementExpenseLine(index: number) {
+    setSettlementExpenseLines((prev) => prev.filter((_, lineIndex) => lineIndex !== index));
   }
 
   if (!session || !isAllowed) return null;
@@ -432,6 +647,24 @@ export default function FinanceDashboard() {
           label="Nominal Pembayaran Tertunda"
           value={formatCurrency(pendingPaymentAmount)}
           color="green"
+        />
+        <SummaryCard
+          label="Outstanding Uang Muka"
+          value={formatCurrency(outstandingAdvanceAmount)}
+          unit={`${unsettledBailouts.length} bailout`}
+          color="yellow"
+        />
+        <SummaryCard
+          label="Piutang Karyawan"
+          value={formatCurrency(outstandingEmployeeReceivable)}
+          unit="saldo akun 1132"
+          color="blue"
+        />
+        <SummaryCard
+          label="Hutang Karyawan"
+          value={formatCurrency(outstandingEmployeePayable)}
+          unit="saldo akun 2110"
+          color="purple"
         />
       </div>
 
@@ -496,6 +729,10 @@ export default function FinanceDashboard() {
           bailouts={unsettledBailouts}
           isLoading={loadingBailoutSettlements}
           onSettle={openSettlement}
+          outstandingAdvanceAmount={outstandingAdvanceAmount}
+          outstandingEmployeeReceivable={outstandingEmployeeReceivable}
+          outstandingEmployeePayable={outstandingEmployeePayable}
+          receivablePayableRows={receivablePayableJournalRows}
         />
       )}
       {activeTab === "travel" && (
@@ -775,26 +1012,169 @@ export default function FinanceDashboard() {
                 {selectedSettlementBailout.travelRequest.requestNumber} · {selectedSettlementBailout.travelRequest.destination}
               </p>
               <p className="mt-1 font-mono text-gray-500">Settlement untuk bailout yang sudah dicairkan</p>
-              <p className="mt-2 text-lg font-bold text-blue-700">
-                {formatCurrency(selectedSettlementBailout.amount)}
-              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-blue-500">Uang Muka</p>
+                  <p className="mt-1 text-lg font-bold text-blue-700">{formatCurrency(settlementAdvanceAmount)}</p>
+                </div>
+                <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-500">Total Realisasi</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-700">{formatCurrency(settlementRealizationAmount)}</p>
+                </div>
+                <div className={`rounded-md px-3 py-3 ${settlementVariance === 0 ? "border border-gray-200 bg-gray-50" : settlementVariance > 0 ? "border border-amber-100 bg-amber-50" : "border border-purple-100 bg-purple-50"}`}>
+                  <p className={`text-xs font-medium uppercase tracking-wide ${settlementVariance === 0 ? "text-gray-500" : settlementVariance > 0 ? "text-amber-500" : "text-purple-500"}`}>Selisih</p>
+                  <p className={`mt-1 text-lg font-bold ${settlementVariance === 0 ? "text-gray-700" : settlementVariance > 0 ? "text-amber-700" : "text-purple-700"}`}>
+                    {formatCurrency(Math.abs(settlementVariance))}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {settlementVariance === 0
+                      ? "Realisasi pas dengan uang muka"
+                      : settlementVariance > 0
+                        ? "Sisa uang muka / refund"
+                        : "Kekurangan bayar / top-up"}
+                  </p>
+                </div>
+              </div>
             </div>
-            <SelectField
-              label="Bagan Akun Beban"
-              value={settlementExpenseCoaId}
-              onChange={setSettlementExpenseCoaId}
-              options={activeCoas
-                .filter((coa) => coa.accountType === "EXPENSE")
-                .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }))}
-            />
+
             <SelectField
               label="Bagan Akun Uang Muka"
               value={settlementAdvanceCoaId}
               onChange={setSettlementAdvanceCoaId}
-              options={activeCoas
-                .filter((coa) => coa.accountType === "ASSET")
-                .map((coa) => ({ value: coa.id, label: `${coa.code} - ${coa.name}` }))}
+              options={assetCoaOptions}
             />
+
+            <div className="rounded-lg border border-gray-200 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Rincian Beban Settlement</p>
+                  <p className="text-xs text-gray-500">Pisahkan realisasi biaya ke beberapa akun beban bila diperlukan.</p>
+                </div>
+                <Button size="sm" variant="secondary" onClick={addSettlementExpenseLine}>
+                  Tambah Baris
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {settlementExpenseLines.map((line, index) => (
+                  <div key={`settlement-line-${index}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <div className="grid gap-3 md:grid-cols-12">
+                      <div className="md:col-span-6">
+                        <SelectField
+                          label={`Akun Beban ${index + 1}`}
+                          value={line.chartOfAccountId}
+                          onChange={(value) => {
+                            updateSettlementExpenseLine(index, { chartOfAccountId: value });
+                            if (index === 0) setSettlementExpenseCoaId(value);
+                          }}
+                          options={expenseCoaOptions}
+                        />
+                      </div>
+                      <div className="md:col-span-3">
+                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                          Nominal <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={line.amount}
+                          onChange={(e) => updateSettlementExpenseLine(index, { amount: e.target.value })}
+                          placeholder="0"
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="md:col-span-3">
+                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                          Deskripsi
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={line.description}
+                            onChange={(e) => updateSettlementExpenseLine(index, { description: e.target.value })}
+                            placeholder="Opsional"
+                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={settlementExpenseLines.length <= 1}
+                            onClick={() => removeSettlementExpenseLine(index)}
+                          >
+                            Hapus
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-900">Penanganan Selisih</p>
+              <p className="mt-1 text-xs text-gray-500">Pilih perlakuan akuntansi jika total realisasi berbeda dengan uang muka.</p>
+              <div className="mt-3">
+                <label className="mb-1 block text-sm font-medium text-gray-700">Mode Settlement</label>
+                <select
+                  value={settlementVarianceHandling}
+                  onChange={(e) => setSettlementVarianceHandling(e.target.value as "REQUIRE_EXACT" | "REFUND_TO_BANK" | "REFUND_TO_RECEIVABLE" | "TOPUP_TO_PAYABLE")}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="REQUIRE_EXACT">Wajib sama persis dengan uang muka</option>
+                  <option value="REFUND_TO_BANK">Selisih lebih dikembalikan ke kas/bank</option>
+                  <option value="REFUND_TO_RECEIVABLE">Selisih lebih jadi piutang karyawan</option>
+                  <option value="TOPUP_TO_PAYABLE">Selisih kurang jadi hutang karyawan</option>
+                </select>
+              </div>
+
+              {requiresRefundBank && (
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <SelectField
+                    label="Akun Kas/Bank Refund"
+                    value={settlementRefundBankCoaId}
+                    onChange={setSettlementRefundBankCoaId}
+                    options={assetCoaOptions}
+                  />
+                  <SelectField
+                    label="Balance Account Refund"
+                    value={settlementRefundBalanceAccountId}
+                    onChange={(value) => {
+                      setSettlementRefundBalanceAccountId(value);
+                      const selected = balanceAccounts.find((account) => account.id === value);
+                      if (selected?.defaultChartOfAccountId) {
+                        setSettlementRefundBankCoaId(selected.defaultChartOfAccountId);
+                      }
+                    }}
+                    options={balanceAccountOptions}
+                  />
+                </div>
+              )}
+
+              {requiresReceivable && (
+                <div className="mt-3">
+                  <SelectField
+                    label="Akun Piutang Karyawan"
+                    value={settlementEmployeeReceivableCoaId}
+                    onChange={setSettlementEmployeeReceivableCoaId}
+                    options={assetCoaOptions}
+                  />
+                </div>
+              )}
+
+              {requiresPayable && (
+                <div className="mt-3">
+                  <SelectField
+                    label="Akun Hutang Karyawan"
+                    value={settlementEmployeePayableCoaId}
+                    onChange={setSettlementEmployeePayableCoaId}
+                    options={liabilityCoaOptions}
+                  />
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 Nomor Referensi <span className="text-gray-400">(opsional)</span>
@@ -807,6 +1187,54 @@ export default function FinanceDashboard() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+
+            <div className="rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Preview Jurnal Settlement</p>
+                  <p className="text-xs text-gray-500">Pratinjau line debit dan kredit sebelum jurnal diposting.</p>
+                </div>
+                <div className={`rounded-full px-3 py-1 text-xs font-semibold ${Math.abs(settlementPreviewTotals.debit - settlementPreviewTotals.credit) < 0.001 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                  {Math.abs(settlementPreviewTotals.debit - settlementPreviewTotals.credit) < 0.001 ? "Balanced" : "Belum Balance"}
+                </div>
+              </div>
+              <div className="mt-3 overflow-x-auto rounded-md border border-gray-100">
+                <table className="min-w-full divide-y divide-gray-100 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Akun</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Keterangan</th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Debit</th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Kredit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {settlementPreviewLines.map((line, index) => (
+                      <tr key={`preview-line-${index}`}>
+                        <td className="px-3 py-2 font-medium text-gray-900">{line.label}</td>
+                        <td className="px-3 py-2 text-gray-500">{line.note ?? "—"}</td>
+                        <td className="px-3 py-2 text-right font-medium text-blue-700">{line.debit > 0 ? formatCurrency(line.debit) : "—"}</td>
+                        <td className="px-3 py-2 text-right font-medium text-green-700">{line.credit > 0 ? formatCurrency(line.credit) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan={2} className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Total</td>
+                      <td className="px-3 py-2 text-right font-semibold text-blue-700">{formatCurrency(settlementPreviewTotals.debit)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(settlementPreviewTotals.credit)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {settlementVarianceModeMismatch ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                Mode settlement yang dipilih belum sesuai dengan arah selisih saat ini. Ubah mode agar cocok dengan kondisi refund atau top-up.
+              </p>
+            ) : null}
+
             {settlementMutation.error && (
               <p className="text-sm text-red-600">{settlementMutation.error.message}</p>
             )}
@@ -816,13 +1244,32 @@ export default function FinanceDashboard() {
               </Button>
               <Button
                 isLoading={settlementMutation.isPending}
-                disabled={!settlementExpenseCoaId || !settlementAdvanceCoaId}
+                disabled={
+                  settlementExpenseLines.length === 0 ||
+                  settlementExpenseLines.some((line) => !line.chartOfAccountId || !line.amount || Number(line.amount) <= 0) ||
+                  !settlementAdvanceCoaId ||
+                  settlementVarianceModeMismatch ||
+                  Math.abs(settlementPreviewTotals.debit - settlementPreviewTotals.credit) > 0.001 ||
+                  (requiresRefundBank && (!settlementRefundBankCoaId || !settlementRefundBalanceAccountId)) ||
+                  (requiresReceivable && !settlementEmployeeReceivableCoaId) ||
+                  (requiresPayable && !settlementEmployeePayableCoaId)
+                }
                 onClick={() => {
                   if (!selectedSettlementBailout) return;
                   settlementMutation.mutate({
                     bailoutId: selectedSettlementBailout.id,
-                    expenseChartOfAccountId: settlementExpenseCoaId,
+                    expenseChartOfAccountId: settlementExpenseCoaId || settlementExpenseLines[0]?.chartOfAccountId || undefined,
+                    expenseLines: settlementExpenseLines.map((line) => ({
+                      chartOfAccountId: line.chartOfAccountId,
+                      amount: Number(line.amount),
+                      description: line.description.trim() || undefined,
+                    })),
                     advanceChartOfAccountId: settlementAdvanceCoaId,
+                    varianceHandling: settlementVarianceHandling,
+                    refundBankChartOfAccountId: requiresRefundBank ? settlementRefundBankCoaId : undefined,
+                    refundBankBalanceAccountId: requiresRefundBank ? settlementRefundBalanceAccountId : undefined,
+                    employeeReceivableChartOfAccountId: requiresReceivable ? settlementEmployeeReceivableCoaId : undefined,
+                    employeePayableChartOfAccountId: requiresPayable ? settlementEmployeePayableCoaId : undefined,
                     referenceNumber: settlementRef.trim() || undefined,
                   });
                 }}
@@ -1097,54 +1544,130 @@ function BailoutSettlementTab({
   bailouts,
   isLoading,
   onSettle,
+  outstandingAdvanceAmount,
+  outstandingEmployeeReceivable,
+  outstandingEmployeePayable,
+  receivablePayableRows,
 }: {
   bailouts: Bailout[];
   isLoading: boolean;
   onSettle: (b: Bailout) => void;
+  outstandingAdvanceAmount: number;
+  outstandingEmployeeReceivable: number;
+  outstandingEmployeePayable: number;
+  receivablePayableRows: Array<{
+    journalId: string;
+    journalNumber: string;
+    transactionDate: string | Date;
+    description: string;
+    sourceType: string;
+    accountCode: string;
+    accountName: string;
+    amount: number;
+    position: string;
+    bailoutNumber?: string;
+  }>;
 }) {
   if (isLoading) return <Skeleton />;
-  if (bailouts.length === 0)
-    return (
-      <EmptyState
-        title="Tidak ada bailout untuk settlement"
-        description="Semua bailout yang sudah dicairkan sudah diselesaikan atau belum tersedia untuk settlement."
-      />
-    );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <table className="min-w-full divide-y divide-gray-200 text-sm">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pemohon</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">No. Perjalanan</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Tujuan</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Nominal</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 bg-white">
-          {bailouts.map((b) => (
-            <tr key={b.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium">{b.requester.name ?? "—"}</td>
-              <td className="px-4 py-3 font-mono text-gray-600">{b.travelRequest.requestNumber}</td>
-              <td className="px-4 py-3 text-gray-600">{b.travelRequest.destination}</td>
-              <td className="px-4 py-3 text-right font-semibold">{formatCurrency(b.amount)}</td>
-              <td className="px-4 py-3 text-center">
-                <span className="inline-flex rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
-                  Siap Settlement
-                </span>
-              </td>
-              <td className="px-4 py-3 text-right">
-                <Button size="sm" variant="primary" onClick={() => onSettle(b)}>
-                  Settlement
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <SummaryCard
+          label="Outstanding Uang Muka"
+          value={formatCurrency(outstandingAdvanceAmount)}
+          unit={`${bailouts.length} bailout belum settlement`}
+          color="yellow"
+        />
+        <SummaryCard
+          label="Piutang Karyawan"
+          value={formatCurrency(outstandingEmployeeReceivable)}
+          unit="saldo akun 1132"
+          color="blue"
+        />
+        <SummaryCard
+          label="Hutang Karyawan"
+          value={formatCurrency(outstandingEmployeePayable)}
+          unit="saldo akun 2110"
+          color="purple"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.4fr_1fr]">
+        {bailouts.length === 0 ? (
+          <EmptyState
+            title="Tidak ada bailout untuk settlement"
+            description="Semua bailout yang sudah dicairkan sudah diselesaikan atau belum tersedia untuk settlement."
+          />
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pemohon</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">No. Perjalanan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Tujuan</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Nominal</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {bailouts.map((b) => (
+                  <tr key={b.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{b.requester.name ?? "—"}</td>
+                    <td className="px-4 py-3 font-mono text-gray-600">{b.travelRequest.requestNumber}</td>
+                    <td className="px-4 py-3 text-gray-600">{b.travelRequest.destination}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(b.amount)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="inline-flex rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
+                        Siap Settlement
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button size="sm" variant="primary" onClick={() => onSettle(b)}>
+                        Settlement
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-gray-200 bg-white">
+          <div className="border-b border-gray-100 px-4 py-3">
+            <p className="text-sm font-semibold text-gray-900">Mutasi Piutang / Hutang Karyawan</p>
+            <p className="text-xs text-gray-500">Ringkasan jurnal posted terbaru untuk akun 1132 dan 2110.</p>
+          </div>
+          {receivablePayableRows.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-gray-500">Belum ada mutasi piutang atau hutang karyawan pada tenant aktif.</div>
+          ) : (
+            <div className="max-h-[420px] overflow-auto">
+              <div className="divide-y divide-gray-100">
+                {receivablePayableRows.map((row, index) => (
+                  <div key={`${row.journalId}-${row.accountCode}-${row.position}-${index}`} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-sm font-semibold text-gray-900">{row.journalNumber}</p>
+                        <p className="text-xs text-gray-500">{formatDate(row.transactionDate)} · {row.sourceType}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-900">{formatCurrency(row.amount)}</p>
+                        <p className="text-xs text-gray-500">{row.position}</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-gray-800">{row.accountCode} · {row.accountName}</p>
+                    <p className="mt-1 text-xs text-gray-500">{row.description}</p>
+                    {row.bailoutNumber ? <p className="mt-1 text-xs text-gray-400">Bailout: {row.bailoutNumber}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

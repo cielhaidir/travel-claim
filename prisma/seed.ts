@@ -691,7 +691,7 @@ async function createSampleBusinessData(input: {
     await Promise.all([
       findCoaByCode(tenantId, "1110"),
       findCoaByCode(tenantId, "1120"),
-      findCoaByCode(tenantId, "1130"),
+      findCoaByCode(tenantId, "1131"),
       findCoaByCode(tenantId, "3100"),
       findCoaByCode(tenantId, "6110"),
       findCoaByCode(tenantId, "6130"),

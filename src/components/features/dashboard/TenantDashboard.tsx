@@ -312,6 +312,7 @@ export function TenantDashboard() {
                 <QuickLink href="/reports/trial-balance" label="Trial Balance" description="Neraca saldo tenant aktif" />
                 <QuickLink href="/reports/general-ledger" label="General Ledger" description="Buku besar per akun tenant aktif" />
                 <QuickLink href="/reports/expense-summary" label="Expense Summary" description="Ringkasan beban tenant aktif" />
+                <QuickLink href="/reports/employee-advance-control" label="Advance Control" description="Kontrol uang muka, piutang, dan hutang karyawan" />
                 <QuickLink href="/accounting" label="Accounting" description="Kelola balance account" />
                 <QuickLink href="/accounting" label="Detail Akun Saldo" description="Masuk ke daftar dan drill-down mutasi akun" />
                 <QuickLink href="/chart-of-accounts" label="Bagan Akun" description="Kelola COA tenant aktif" />
