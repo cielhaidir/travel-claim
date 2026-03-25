@@ -293,50 +293,54 @@ function ApprovalsContent({
       />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(e.target.value as ApprovalStatus | "ALL")
-          }
-        >
-          <option value="ALL">All Status</option>
-          <option value="PENDING">Pending</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="REVISION_REQUESTED">Revision Requested</option>
-        </select>
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          value={entityFilter}
-          onChange={(e) =>
-            setEntityFilter(e.target.value as "ALL" | "TravelRequest" | "Claim")
-          }
-        >
-          <option value="ALL">All Types</option>
-          <option value="TravelRequest">Travel Requests</option>
-          <option value="Claim">Claims</option>
-        </select>
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-3">
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as ApprovalStatus | "ALL")
+            }
+          >
+            <option value="ALL">All Status</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="REVISION_REQUESTED">Revision Requested</option>
+          </select>
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={entityFilter}
+            onChange={(e) =>
+              setEntityFilter(e.target.value as "ALL" | "TravelRequest" | "Claim")
+            }
+          >
+            <option value="ALL">All Types</option>
+            <option value="TravelRequest">Travel Requests</option>
+            <option value="Claim">Claims</option>
+          </select>
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+        <div className="content-section p-12 text-center text-gray-500">
           Loading...
         </div>
       ) : approvals.length === 0 ? (
-        <EmptyState
-          icon="✅"
-          title="No approvals found"
-          description={
-            statusFilter === "PENDING"
-              ? "You're all caught up! No pending approvals."
-              : "No approvals match the selected filters."
-          }
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="✅"
+            title="No approvals found"
+            description={
+              statusFilter === "PENDING"
+                ? "You're all caught up! No pending approvals."
+                : "No approvals match the selected filters."
+            }
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
               <tr>
@@ -590,7 +594,7 @@ function RichApprovalDetail({
 
       {isTravel && tr && (
         <div className="space-y-4">
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Trip Request Details
             </p>
@@ -638,7 +642,7 @@ function RichApprovalDetail({
             </div>
           )}
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">Peserta</p>
             {tr.participants.length === 0 ? (
               <p className="text-sm text-gray-500">Tidak ada peserta tambahan.</p>
@@ -647,7 +651,7 @@ function RichApprovalDetail({
                 {tr.participants.map((participant) => (
                   <div
                     key={participant.userId}
-                    className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm"
+                    className="content-subcard px-3 py-2 text-sm"
                   >
                     <p className="font-medium text-gray-900">
                       {participant.user.name ?? "—"}
@@ -664,7 +668,7 @@ function RichApprovalDetail({
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Bailout / Biaya
             </p>
@@ -675,7 +679,7 @@ function RichApprovalDetail({
                 {tr.bailouts.map((bailout) => (
                   <div
                     key={bailout.id}
-                    className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                    className="content-subcard p-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -777,7 +781,7 @@ function RichApprovalDetail({
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Riwayat Approval
             </p>
@@ -785,7 +789,7 @@ function RichApprovalDetail({
               {tr.approvals.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                  className="content-subcard p-3"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium text-gray-900">
@@ -811,7 +815,7 @@ function RichApprovalDetail({
       )}
 
       {!isTravel && claim && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">Claim Details</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Field label="Claim #" value={claim.claimNumber} />
@@ -915,7 +919,7 @@ function ApprovalDetail({
 
       {/* Travel request details */}
       {isTravel && tr && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">
             Trip Request Details
           </p>
@@ -949,7 +953,7 @@ function ApprovalDetail({
 
       {/* Claim details */}
       {!isTravel && claim && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">Claim Details</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Field label="Claim #" value={claim.claimNumber} />

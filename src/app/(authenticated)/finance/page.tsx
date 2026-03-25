@@ -562,8 +562,8 @@ export default function FinanceDashboard() {
       ) : null}
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-6 overflow-x-auto">
+      <div className="content-section p-4">
+        <nav className="-mb-px flex space-x-6 overflow-x-auto border-b border-gray-200">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -626,7 +626,7 @@ export default function FinanceDashboard() {
       >
         {selectedBailout && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-gray-50 p-4 text-sm">
+            <div className="content-subcard p-4 text-sm">
               <p className="font-semibold">
                 {selectedBailout.requester.name ?? "—"}
               </p>
@@ -753,7 +753,7 @@ export default function FinanceDashboard() {
       >
         {selectedClaim && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-gray-50 p-4 text-sm">
+            <div className="content-subcard p-4 text-sm">
               <p className="font-mono font-semibold">
                 {selectedClaim.claimNumber}
               </p>
@@ -878,7 +878,7 @@ export default function FinanceDashboard() {
       >
         {selectedSettlementBailout && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-gray-50 p-4 text-sm">
+            <div className="content-subcard p-4 text-sm">
               <p className="font-semibold text-gray-900">
                 {selectedSettlementBailout.requester.name ?? "—"}
               </p>
@@ -994,7 +994,7 @@ function QuickLinkCard({
   return (
     <a
       href={href}
-      className="rounded-xl border border-gray-200 bg-white p-5 transition hover:border-blue-300 hover:shadow-sm"
+      className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -1020,11 +1020,11 @@ function SummaryCard({
   color?: "gray" | "blue" | "green" | "yellow" | "purple";
 }) {
   const border = {
-    gray: "border-gray-200 bg-gray-50",
-    blue: "border-blue-200 bg-blue-50",
-    green: "border-green-200 bg-green-50",
-    yellow: "border-yellow-200 bg-yellow-50",
-    purple: "border-purple-200 bg-purple-50",
+    gray: "border-gray-200 bg-white",
+    blue: "border-blue-200 bg-white",
+    green: "border-green-200 bg-white",
+    yellow: "border-yellow-200 bg-white",
+    purple: "border-purple-200 bg-white",
   } as const;
 
   const text = {
@@ -1036,7 +1036,7 @@ function SummaryCard({
   } as const;
 
   return (
-    <div className={`rounded-xl border p-5 ${border[color]}`}>
+    <div className={`rounded-xl border p-5 shadow-sm ${border[color]}`}>
       <p className="text-sm font-medium text-gray-500">{label}</p>
       <p className={`mt-1 text-3xl font-bold tabular-nums ${text[color]}`}>
         {value}
@@ -1058,14 +1058,16 @@ function BailoutsTab({
   if (isLoading) return <Skeleton />;
   if (bailouts.length === 0)
     return (
-      <EmptyState
-        title="Tidak ada pencairan tertunda"
-        description="Semua bailout yang disetujui direktur sudah dicairkan."
-      />
+      <div className="content-section">
+        <EmptyState
+          title="Tidak ada pencairan tertunda"
+          description="Semua bailout yang disetujui direktur sudah dicairkan."
+        />
+      </div>
     );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="content-table overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -1132,14 +1134,16 @@ function ClaimsTab({
   if (isLoading) return <Skeleton />;
   if (claims.length === 0)
     return (
-      <EmptyState
-        title="Tidak ada klaim yang menunggu pembayaran"
-        description="Semua klaim yang disetujui sudah dibayar."
-      />
+      <div className="content-section">
+        <EmptyState
+          title="Tidak ada klaim yang menunggu pembayaran"
+          description="Semua klaim yang disetujui sudah dibayar."
+        />
+      </div>
     );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="content-table overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -1216,14 +1220,16 @@ function BailoutSettlementTab({
   if (isLoading) return <Skeleton />;
   if (bailouts.length === 0)
     return (
-      <EmptyState
-        title="Tidak ada bailout untuk settlement"
-        description="Semua bailout yang sudah dicairkan sudah diselesaikan atau belum tersedia untuk settlement."
-      />
+      <div className="content-section">
+        <EmptyState
+          title="Tidak ada bailout untuk settlement"
+          description="Semua bailout yang sudah dicairkan sudah diselesaikan atau belum tersedia untuk settlement."
+        />
+      </div>
     );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="content-table overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -1286,14 +1292,16 @@ function TravelTab({
 
   if (allRows.length === 0)
     return (
-      <EmptyState
-        title="Tidak ada perjalanan dinas yang menunggu aksi"
-        description="Semua perjalanan dinas yang disetujui sudah dikunci atau ditutup."
-      />
+      <div className="content-section">
+        <EmptyState
+          title="Tidak ada perjalanan dinas yang menunggu aksi"
+          description="Semua perjalanan dinas yang disetujui sudah dikunci atau ditutup."
+        />
+      </div>
     );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className="content-table overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -1388,10 +1396,12 @@ function SelectField({
 
 function Skeleton() {
   return (
-    <div className="space-y-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
-      ))}
+    <div className="content-section p-4">
+      <div className="space-y-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+        ))}
+      </div>
     </div>
   );
 }

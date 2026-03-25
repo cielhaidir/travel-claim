@@ -390,7 +390,7 @@ export function TenantDashboard() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          <div className="rounded-lg border bg-white">
+          <div className="content-section overflow-hidden">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 className="text-lg font-semibold text-gray-900">
                 Recent Trip Requests
@@ -447,7 +447,7 @@ export function TenantDashboard() {
             </div>
           </div>
 
-          <div className="rounded-lg border bg-white">
+          <div className="content-section overflow-hidden">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 className="text-lg font-semibold text-gray-900">
                 Recent Claims
@@ -508,7 +508,7 @@ export function TenantDashboard() {
 
         <div className="space-y-4">
           {showFinanceSection && canUseClaimPayment ? (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-6">
+            <div className="rounded-2xl border border-orange-200 bg-orange-50 p-6 shadow-sm">
               <h3 className="mb-2 text-lg font-semibold text-orange-900">
                 Action Required
               </h3>
@@ -719,13 +719,13 @@ function MetricCard({
 }) {
   const tones = {
     default: "border-gray-200 bg-white",
-    info: "border-blue-200 bg-blue-50",
-    warning: "border-amber-200 bg-amber-50",
-    success: "border-green-200 bg-green-50",
+    info: "border-blue-200 bg-white",
+    warning: "border-amber-200 bg-white",
+    success: "border-green-200 bg-white",
   };
 
   return (
-    <div className={`rounded-xl border p-5 ${tones[tone]}`}>
+    <div className={`rounded-xl border p-5 shadow-sm ${tones[tone]}`}>
       <p className="text-sm text-gray-600">{label}</p>
       <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
       <p className="mt-2 text-xs text-gray-500">{helper}</p>
@@ -755,7 +755,7 @@ function Panel({
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
       <p className="mt-1 text-sm font-semibold text-gray-900">{value}</p>
     </div>
@@ -772,7 +772,7 @@ function ListRow({
   trailing: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-100 px-3 py-3">
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm">
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-gray-900">{title}</p>
         <p className="truncate text-xs text-gray-500">{subtitle}</p>
@@ -784,7 +784,7 @@ function ListRow({
 
 function EmptyLine({ text }: { text: string }) {
   return (
-    <p className="rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500">
+    <p className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-4 text-sm text-gray-500 shadow-sm">
       {text}
     </p>
   );
@@ -802,7 +802,7 @@ function QuickLink({
   return (
     <a
       href={href}
-      className="rounded-xl border border-gray-200 bg-gray-50 p-4 transition hover:bg-gray-100"
+      className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:shadow-md"
     >
       <p className="text-sm font-semibold text-gray-900">{label}</p>
       <p className="mt-1 text-xs text-gray-500">{description}</p>

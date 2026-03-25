@@ -280,47 +280,51 @@ export default function ClaimsPage() {
       />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ClaimStatus | "ALL")}
-        >
-          <option value="ALL">All Status</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="REVISION">Revision</option>
-          <option value="PAID">Paid</option>
-        </select>
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as ClaimType | "ALL")}
-        >
-          <option value="ALL">All Types</option>
-          <option value="ENTERTAINMENT">Entertainment</option>
-          <option value="NON_ENTERTAINMENT">Non-Entertainment</option>
-        </select>
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-3">
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as ClaimStatus | "ALL")}
+          >
+            <option value="ALL">All Status</option>
+            <option value="DRAFT">Draft</option>
+            <option value="SUBMITTED">Submitted</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="REVISION">Revision</option>
+            <option value="PAID">Paid</option>
+          </select>
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as ClaimType | "ALL")}
+          >
+            <option value="ALL">All Types</option>
+            <option value="ENTERTAINMENT">Entertainment</option>
+            <option value="NON_ENTERTAINMENT">Non-Entertainment</option>
+          </select>
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">Loading...</div>
+        <div className="content-section p-12 text-center text-gray-500">Loading...</div>
       ) : claims.length === 0 ? (
-        <EmptyState
-          icon="💰"
-          title="No claims yet"
-          description="Submit your first expense claim to get reimbursed"
-          action={
-            canCreateClaims
-              ? { label: "Create Claim", onClick: () => setIsFormOpen(true) }
-              : undefined
-          }
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="💰"
+            title="No claims yet"
+            description="Submit your first expense claim to get reimbursed"
+            action={
+              canCreateClaims
+                ? { label: "Create Claim", onClick: () => setIsFormOpen(true) }
+                : undefined
+            }
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold uppercase text-gray-500">
               <tr>
@@ -444,7 +448,10 @@ export default function ClaimsPage() {
             onSubmit={handleUpdate}
             onCancel={() => setEditingClaim(null)}
           >
-            <ClaimAttachments claimId={editingClaim.id} canManage={canEdit(editingClaim)} />
+            <ClaimAttachments
+              claimId={editingClaim.id}
+              canManage={canEditClaim(editingClaim)}
+            />
           </ClaimForm>
         )}
       </Modal>
@@ -577,7 +584,7 @@ function ClaimDetail({
             {claim.approvals.map((a) => (
               <div
                 key={a.id}
-                className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-2 text-xs"
+                className="content-subcard flex items-center justify-between px-4 py-2 text-xs"
               >
                 <span className="text-gray-600">{a.level.replace(/_/g, " ")}</span>
                 <span className="text-gray-700">{a.approver.name ?? "—"}</span>

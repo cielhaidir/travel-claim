@@ -57,6 +57,12 @@ export default function BalanceAccountDetailPage() {
   const isAllowed =
     (session?.user?.isRoot ?? false) ||
     hasPermissionMap(session?.user?.permissions, "balance-accounts", "read");
+  const canReadAccounting =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "accounting", "read");
+  const canReadDashboard =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "dashboard", "read");
 
   useEffect(() => {
     if (session && !isAllowed) {
@@ -101,10 +107,19 @@ export default function BalanceAccountDetailPage() {
           label: "Muat Ulang",
           onClick: () => void refetch(),
         }}
-        secondaryAction={{
-          label: "Kembali ke Accounting",
-          href: "/accounting",
-        }}
+        secondaryAction={
+          canReadAccounting
+            ? {
+                label: "Kembali ke Accounting",
+                href: "/accounting",
+              }
+            : canReadDashboard
+              ? {
+                  label: "Kembali ke Dashboard",
+                  href: "/dashboard",
+                }
+              : undefined
+        }
       />
 
       {isLoading ? (
@@ -117,7 +132,13 @@ export default function BalanceAccountDetailPage() {
             icon="🏦"
             title="Akun saldo tidak ditemukan"
             description="Akun saldo ini tidak tersedia pada tenant aktif atau sudah dihapus."
-            action={{ label: "Kembali ke Accounting", href: "/accounting" }}
+            action={
+              canReadAccounting
+                ? { label: "Kembali ke Accounting", href: "/accounting" }
+                : canReadDashboard
+                  ? { label: "Kembali ke Dashboard", href: "/dashboard" }
+                  : undefined
+            }
           />
         </div>
       ) : (

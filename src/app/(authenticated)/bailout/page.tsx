@@ -365,7 +365,6 @@ function ActionModal({
   bailout,
   onClose,
   onDone,
-  userRole,
   currentUserId,
   canSubmit,
   canApprove,
@@ -375,7 +374,6 @@ function ActionModal({
   bailout: Bailout;
   onClose: () => void;
   onDone: () => void;
-  userRole: string;
   currentUserId: string;
   canSubmit: boolean;
   canApprove: boolean;
@@ -386,10 +384,6 @@ function ActionModal({
   const [showReject, setShowReject] = useState(false);
   const [disbursementRef, setDisbursementRef] = useState("");
   const [currentStorageUrl, setCurrentStorageUrl] = useState(bailout.storageUrl);
-
-  const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
-  const directorRoles = ["DIRECTOR", "ADMIN"];
-  const financeRoles = ["FINANCE", "ADMIN"];
 
   const utils = api.useUtils();
   const refresh = () => { void utils.bailout.getAll.invalidate(); onDone(); onClose(); };
@@ -404,17 +398,14 @@ function ActionModal({
   const isLegacyReady = isLegacyTravelBailoutReady(bailout);
   const canFinanceDisburse =
     canDisburse &&
-    financeRoles.includes(userRole) &&
     (bailout.status === "APPROVED_DIRECTOR" || isLegacyReady);
   const canApproveChief =
-    canApprove && chiefRoles.includes(userRole) && bailout.status === "SUBMITTED";
+    canApprove && bailout.status === "SUBMITTED";
   const canApproveDirector =
     canApprove &&
-    directorRoles.includes(userRole) &&
     bailout.status === "APPROVED_CHIEF";
   const canShowReject =
     canReject &&
-    chiefRoles.includes(userRole) &&
     ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
   const canSubmitOwnDraft =
     canSubmit &&
@@ -458,6 +449,7 @@ function ActionModal({
             category={bailout.category}
             currentUrl={currentStorageUrl}
             onUploaded={(key) => setCurrentStorageUrl(key)}
+            canManage={canFinanceDisburse}
           />
         </div>
       )}
@@ -509,6 +501,7 @@ function ActionModal({
               category={bailout.category}
               currentUrl={currentStorageUrl}
               onUploaded={(key) => setCurrentStorageUrl(key)}
+              canManage={canFinanceDisburse}
             />
           </div>
           <div className="flex gap-2 justify-end">
@@ -564,7 +557,6 @@ function selectBailouts(d: { bailouts: Bailout[] }) {
 export default function BailoutApprovalPage() {
   const { data: session } = useSession();
   const router = useRouter();
-  const userRole = session?.user?.role ?? "EMPLOYEE";
   const currentUserId = session?.user?.id ?? "";
   const permissions = session?.user?.permissions;
   const canReadBailout =
@@ -621,10 +613,10 @@ export default function BailoutApprovalPage() {
   }, [canReadBailout, router, session]);
 
   useEffect(() => {
-    if (!canDisburseBailout || !["FINANCE", "ADMIN"].includes(userRole)) return;
+    if (!canDisburseBailout) return;
     if (repairLegacyMutation.isPending || repairLegacyMutation.isSuccess) return;
     repairLegacyMutation.mutate({});
-  }, [canDisburseBailout, repairLegacyMutation, userRole]);
+  }, [canDisburseBailout, repairLegacyMutation]);
 
   const statusFilters: { value: BailoutStatus | "ALL"; label: string }[] = [
     { value: "ALL", label: "Semua" },
@@ -654,7 +646,7 @@ export default function BailoutApprovalPage() {
 
       {/* Pending Summary */}
       {pendingCount > 0 && (
-        <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 shadow-sm">
           <p className="text-sm font-medium text-yellow-800">
             ⏳ Ada <strong>{pendingCount}</strong> pengajuan bailout yang menunggu tindakan Anda
           </p>
@@ -662,28 +654,32 @@ export default function BailoutApprovalPage() {
       )}
 
       {/* Status Filters */}
-      <div className="flex flex-wrap gap-2">
-        {statusFilters.map(f => (
-          <button key={f.value} onClick={() => setStatusFilter(f.value)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === f.value ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-            {f.label}
-          </button>
-        ))}
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-2">
+          {statusFilters.map(f => (
+            <button key={f.value} onClick={() => setStatusFilter(f.value)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === f.value ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="flex justify-center py-16">
+        <div className="content-section flex justify-center py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
         </div>
       ) : bailouts.length === 0 ? (
-        <EmptyState
-          icon="✅"
-          title={statusFilter === "ALL" ? "Belum Ada Bailout" : `Tidak ada bailout berstatus "${STATUS_LABELS[statusFilter]}"`}
-          description="Bailout akan muncul di sini dari travel yang sudah di-approve atau dari pengajuan manual."
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="✅"
+            title={statusFilter === "ALL" ? "Belum Ada Bailout" : `Tidak ada bailout berstatus "${STATUS_LABELS[statusFilter]}"`}
+            description="Bailout akan muncul di sini dari travel yang sudah di-approve atau dari pengajuan manual."
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
               <tr>
@@ -751,7 +747,6 @@ export default function BailoutApprovalPage() {
             bailout={selected}
             onClose={() => setSelected(null)}
             onDone={() => void utils.bailout.getAll.invalidate()}
-            userRole={userRole}
             currentUserId={currentUserId}
             canSubmit={canSubmitBailout}
             canApprove={canApproveBailout}

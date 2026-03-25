@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/features/EmptyState";
 import { PageHeader } from "@/components/features/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { Pagination } from "@/components/ui/Pagination";
 import { hasPermissionMap } from "@/lib/auth/permissions";
 import { api } from "@/trpc/react";
 
@@ -62,6 +63,7 @@ type SessionMembership = {
 };
 
 const EMPTY_TENANTS: TenantSummary[] = [];
+const MEMBERSHIPS_PER_PAGE = 10;
 const ROLE_OPTIONS: Role[] = [
   "ROOT",
   "ADMIN",
@@ -113,6 +115,7 @@ export default function MasterTenantPage() {
   const utils = api.useUtils();
 
   const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [membershipPage, setMembershipPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isMembershipOpen, setIsMembershipOpen] = useState(false);
   const [membershipSearch, setMembershipSearch] = useState("");
@@ -186,6 +189,21 @@ export default function MasterTenantPage() {
   );
   const tenantDetail =
     (tenantDetailQuery.data as TenantDetail | undefined) ?? null;
+  const membershipPageCount = Math.max(
+    1,
+    Math.ceil((tenantDetail?.memberships.length ?? 0) / MEMBERSHIPS_PER_PAGE),
+  );
+  const paginatedMemberships = useMemo(() => {
+    if (!tenantDetail) {
+      return [];
+    }
+
+    const startIndex = (membershipPage - 1) * MEMBERSHIPS_PER_PAGE;
+    return tenantDetail.memberships.slice(
+      startIndex,
+      startIndex + MEMBERSHIPS_PER_PAGE,
+    );
+  }, [membershipPage, tenantDetail]);
 
   const usersQuery = api.user.getAll.useQuery(
     { search: membershipSearch || undefined, limit: 50 },
@@ -242,6 +260,16 @@ export default function MasterTenantPage() {
     setFormError("");
     setIsMembershipOpen(true);
   };
+
+  useEffect(() => {
+    setMembershipPage(1);
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    setMembershipPage((currentPage) =>
+      Math.min(currentPage, membershipPageCount),
+    );
+  }, [membershipPageCount]);
 
   if (status === "loading") {
     return <div className="rounded-lg border bg-white p-12 text-center text-gray-500">Loading...</div>;
@@ -346,7 +374,7 @@ export default function MasterTenantPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {tenantDetail.memberships.map((membership) => (
+                      {paginatedMemberships.map((membership) => (
                         <tr key={membership.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4">
                             <p className="font-medium text-gray-900">
@@ -382,6 +410,16 @@ export default function MasterTenantPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="border-t border-gray-100 px-6 py-4">
+                  <Pagination
+                    page={membershipPage}
+                    pageSize={MEMBERSHIPS_PER_PAGE}
+                    totalItems={tenantDetail.memberships.length}
+                    onPageChange={setMembershipPage}
+                    itemLabel="members"
+                  />
                 </div>
 
                 <div className="border-t border-gray-100 px-6 py-6">

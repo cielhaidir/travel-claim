@@ -12,7 +12,11 @@ import {
   type Prisma,
 } from "../../../../generated/prisma";
 import { db as dbClient } from "@/server/db";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import {
+  createTRPCRouter,
+  protectedProcedure,
+  permissionProcedure,
+} from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
 import {
   generateJournalEntryNumber,
@@ -536,7 +540,7 @@ export const financeRouter = createTRPCRouter({
    *
    * This is the "create transaction" action mentioned in the requirements.
    */
-  processBailoutTransaction: protectedProcedure
+  processBailoutTransaction: permissionProcedure("bailout", "disburse")
     .meta({
       openapi: {
         method: "POST",
@@ -567,13 +571,6 @@ export const financeRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can process bailout transactions",
-        });
-      }
-
       // ── Validate bailout ──────────────────────────────────────────────────
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.bailoutId, deletedAt: null },
@@ -747,7 +744,7 @@ export const financeRouter = createTRPCRouter({
    *   3. Creating a journal transaction (expense DEBIT)
    *   4. Updating the claim's financeId
    */
-  processClaimTransaction: protectedProcedure
+  processClaimTransaction: permissionProcedure("claims", "pay")
     .meta({
       openapi: {
         method: "POST",
@@ -778,13 +775,6 @@ export const financeRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can process claim transactions",
-        });
-      }
-
       // ── Validate claim ────────────────────────────────────────────────────
       const claim = await ctx.db.claim.findUnique({
         where: { id: input.claimId, deletedAt: null },
@@ -949,7 +939,7 @@ export const financeRouter = createTRPCRouter({
       return result;
     }),
 
-  settleBailoutTransaction: protectedProcedure
+  settleBailoutTransaction: permissionProcedure("journals", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -971,13 +961,6 @@ export const financeRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can settle bailout transactions",
-        });
-      }
-
       const bailout = await ctx.db.bailout.findUnique({
         where: { id: input.bailoutId, deletedAt: null },
       });

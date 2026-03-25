@@ -281,54 +281,58 @@ function PengajuanTab() {
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-3 flex-1">
-          <select
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as TravelStatus | "ALL")}
-          >
-            <option value="ALL">All Status</option>
-            <option value="DRAFT">Draft</option>
-            <option value="SUBMITTED">Submitted</option>
-            <option value="APPROVED">Approved</option>
-            <option value="APPROVED_L1">L1 Approved</option>
-            <option value="APPROVED_L2">L2 Approved</option>
-            <option value="APPROVED_L3">L3 Approved</option>
-            <option value="APPROVED_L4">L4 Approved</option>
-            <option value="APPROVED_L5">L5 Approved</option>
-            <option value="REJECTED">Rejected</option>
-            <option value="REVISION">Revision</option>
-            <option value="LOCKED">Locked</option>
-            <option value="CLOSED">Closed</option>
-          </select>
-          <select
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as TravelType | "ALL")}
-          >
-            <option value="ALL">All Types</option>
-            <option value="SALES">Sales</option>
-            <option value="OPERATIONAL">Operational</option>
-            <option value="MEETING">Meeting</option>
-            <option value="TRAINING">Training</option>
-          </select>
+      <div className="content-section p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap gap-3 flex-1">
+            <select
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as TravelStatus | "ALL")}
+            >
+              <option value="ALL">All Status</option>
+              <option value="DRAFT">Draft</option>
+              <option value="SUBMITTED">Submitted</option>
+              <option value="APPROVED">Approved</option>
+              <option value="APPROVED_L1">L1 Approved</option>
+              <option value="APPROVED_L2">L2 Approved</option>
+              <option value="APPROVED_L3">L3 Approved</option>
+              <option value="APPROVED_L4">L4 Approved</option>
+              <option value="APPROVED_L5">L5 Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="REVISION">Revision</option>
+              <option value="LOCKED">Locked</option>
+              <option value="CLOSED">Closed</option>
+            </select>
+            <select
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as TravelType | "ALL")}
+            >
+              <option value="ALL">All Types</option>
+              <option value="SALES">Sales</option>
+              <option value="OPERATIONAL">Operational</option>
+              <option value="MEETING">Meeting</option>
+              <option value="TRAINING">Training</option>
+            </select>
+          </div>
+          {canCreateTrip && <Button onClick={() => setIsFormOpen(true)}>+ New Request</Button>}
         </div>
-        {canCreateTrip && <Button onClick={() => setIsFormOpen(true)}>+ New Request</Button>}
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">Loading...</div>
+        <div className="content-section p-12 text-center text-gray-500">Loading...</div>
       ) : requests.length === 0 ? (
-        <EmptyState
-          icon="✈️"
-          title="No business trip requests yet"
-          description="Get started by creating your first business trip request"
-          action={canCreateTrip ? { label: "Create Request", onClick: () => setIsFormOpen(true) } : undefined}
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="✈️"
+            title="No business trip requests yet"
+            description="Get started by creating your first business trip request"
+            action={canCreateTrip ? { label: "Create Request", onClick: () => setIsFormOpen(true) } : undefined}
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold uppercase text-gray-500">
               <tr>
@@ -627,7 +631,7 @@ function TravelRequestDetail({
             <Field label="Dibuat" value={formatDate(request.createdAt)} />
             <Field label="Disubmit" value={request.submittedAt ? formatDate(request.submittedAt) : "—"} />
           </div>
-          <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+          <div className="content-subcard p-3">
             <p className="text-xs font-medium text-gray-500 mb-1">Tujuan Perjalanan</p>
             <p className="text-sm text-gray-900 whitespace-pre-wrap">{request.purpose}</p>
           </div>
@@ -676,7 +680,7 @@ function TravelRequestDetail({
             request.bailouts?.map((b, i) => {
               const cat = b.category ?? "OTHER";
               return (
-                <div key={b.id ?? i} className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
+                <div key={b.id ?? i} className="content-subcard p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
@@ -739,7 +743,7 @@ function TravelRequestDetail({
             </div>
           ) : (
             request.approvals.map((a) => (
-              <div key={a.id} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <div key={a.id} className="content-subcard p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-gray-600">{a.level.replace(/_/g, " ")}</span>
                   <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${

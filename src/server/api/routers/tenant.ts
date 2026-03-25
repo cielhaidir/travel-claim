@@ -8,9 +8,11 @@ import {
 import { bootstrapTenantAccounting } from "@/lib/accounting/bootstrap";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import {
+  archiveTenantRoleProfile,
   isRolePermissionTableMissing,
   listTenantRolePermissionProfiles,
   resetTenantRolePermissionProfile,
+  updateTenantRoleDisplayName,
   upsertTenantRolePermissionProfile,
 } from "@/server/auth/permission-store";
 import {
@@ -420,6 +422,135 @@ export const tenantRouter = createTRPCRouter({
 
       try {
         await resetTenantRolePermissionProfile(ctx.db, {
+          tenantId: input.tenantId,
+          role: input.role,
+        });
+      } catch (error) {
+        if (isRolePermissionTableMissing(error)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Role permission storage is not migrated yet. Run the latest Prisma migration first.",
+          });
+        }
+
+        throw error;
+      }
+
+      return listTenantRolePermissionProfiles(ctx.db, input.tenantId);
+    }),
+
+  renameRole: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        role: z.nativeEnum(Role),
+        displayName: z.string().trim().min(2).max(100),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      requireRolePermissionAccess(ctx, input.tenantId, "update");
+
+      const tenant = await ctx.db.tenant.findFirst({
+        where: {
+          id: input.tenantId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          isRoot: true,
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      if (tenant.isRoot || input.role === Role.ROOT) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "ROOT role metadata cannot be changed",
+        });
+      }
+
+      try {
+        await updateTenantRoleDisplayName(ctx.db, {
+          tenantId: input.tenantId,
+          role: input.role,
+          displayName: input.displayName,
+        });
+      } catch (error) {
+        if (isRolePermissionTableMissing(error)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Role permission storage is not migrated yet. Run the latest Prisma migration first.",
+          });
+        }
+
+        throw error;
+      }
+
+      return listTenantRolePermissionProfiles(ctx.db, input.tenantId);
+    }),
+
+  deleteRole: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string(),
+        role: z.nativeEnum(Role),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      requireRolePermissionAccess(ctx, input.tenantId, "update");
+
+      const tenant = await ctx.db.tenant.findFirst({
+        where: {
+          id: input.tenantId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          isRoot: true,
+        },
+      });
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Tenant not found",
+        });
+      }
+
+      if (tenant.isRoot || input.role === Role.ROOT) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "ROOT role cannot be deleted",
+        });
+      }
+
+      const membershipCount = await ctx.db.tenantMembership.count({
+        where: {
+          tenantId: input.tenantId,
+          role: input.role,
+        },
+      });
+
+      if (membershipCount > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "This role is still assigned to tenant memberships and cannot be deleted yet.",
+        });
+      }
+
+      try {
+        await archiveTenantRoleProfile(ctx.db, {
           tenantId: input.tenantId,
           role: input.role,
         });

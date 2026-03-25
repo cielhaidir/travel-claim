@@ -663,21 +663,31 @@ export const authConfig = {
 
       // Refresh user data on update trigger
       if (trigger === "update" && authToken.id) {
-        const dbUser = await db.user.findUnique({
+        const userSelect = {
+          id: true,
+          role: true,
+          employeeId: true,
+          departmentId: true,
+          email: true,
+          name: true,
+          image: true,
+        } as const;
+
+        let dbUser = await db.user.findUnique({
           where: { id: authToken.id },
-          select: {
-            id: true,
-            role: true,
-            employeeId: true,
-            departmentId: true,
-            email: true,
-            name: true,
-            image: true,
-          },
+          select: userSelect,
         });
+
+        if (!dbUser && authToken.email) {
+          dbUser = await db.user.findUnique({
+            where: { email: authToken.email },
+            select: userSelect,
+          });
+        }
 
         if (dbUser) {
           const memberships = await getUserMemberships(dbUser.id);
+          authToken.id = dbUser.id;
           const requestedTenantId =
             typeof sessionUpdate?.activeTenantId === "string" ||
             sessionUpdate?.activeTenantId === null

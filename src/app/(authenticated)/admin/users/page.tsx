@@ -138,7 +138,7 @@ export default function UserManagementPage() {
 
   if (status === "loading") {
     return (
-      <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+      <div className="content-section p-12 text-center text-gray-500">
         Loading...
       </div>
     );
@@ -532,8 +532,8 @@ function UserManagementContent({
               key={dept.id}
               type="button"
               onClick={() => setDeptFilter(isActive ? "" : dept.id)}
-              className={`rounded-lg border p-4 text-left transition-colors hover:border-blue-400 ${
-                isActive ? "border-blue-500 bg-blue-50" : "bg-white"
+              className={`content-section p-4 text-left transition-all hover:border-blue-400 hover:shadow-md ${
+                isActive ? "border-blue-500 bg-blue-50 shadow-md" : ""
               }`}
             >
               <p className="text-xs font-semibold text-gray-500 uppercase">
@@ -552,7 +552,7 @@ function UserManagementContent({
         {(() => {
           const directors = users.filter((u) => u.role === "DIRECTOR");
           return (
-            <div className="rounded-lg border bg-white p-4">
+            <div className="content-section p-4">
               <p className="text-xs font-semibold text-gray-500 uppercase">
                 Director
               </p>
@@ -568,69 +568,73 @@ function UserManagementContent({
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <input
-          type="text"
-          placeholder="Search name, email, employee ID…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-        />
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value as Role | "ALL")}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-        >
-          <option value="ALL">All Roles</option>
-          <option value="EMPLOYEE">Employee</option>
-          <option value="SUPERVISOR">Supervisor</option>
-          <option value="MANAGER">Manager</option>
-          <option value="DIRECTOR">Director</option>
-          <option value="FINANCE">Finance</option>
-          <option value="ADMIN">Admin</option>
-          <option value="SALES_EMPLOYEE">Sales Employee</option>
-          <option value="SALES_CHIEF">Sales Chief</option>
-        </select>
-        <select
-          value={deptFilter}
-          onChange={(e) => setDeptFilter(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-        >
-          <option value="">All Departments</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        {(deptFilter || roleFilter !== "ALL" || search) && (
-          <button
-            onClick={() => {
-              setDeptFilter("");
-              setRoleFilter("ALL");
-              setSearch("");
-            }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-3">
+          <input
+            type="text"
+            placeholder="Search name, email, employee ID…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-64 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as Role | "ALL")}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
-            Clear Filters
-          </button>
-        )}
+            <option value="ALL">All Roles</option>
+            <option value="EMPLOYEE">Employee</option>
+            <option value="SUPERVISOR">Supervisor</option>
+            <option value="MANAGER">Manager</option>
+            <option value="DIRECTOR">Director</option>
+            <option value="FINANCE">Finance</option>
+            <option value="ADMIN">Admin</option>
+            <option value="SALES_EMPLOYEE">Sales Employee</option>
+            <option value="SALES_CHIEF">Sales Chief</option>
+          </select>
+          <select
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          >
+            <option value="">All Departments</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+          {(deptFilter || roleFilter !== "ALL" || search) && (
+            <button
+              onClick={() => {
+                setDeptFilter("");
+                setRoleFilter("ALL");
+                setSearch("");
+              }}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
       </div>
 
       {/* User Table */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+        <div className="content-section p-12 text-center text-gray-500">
           Loading…
         </div>
       ) : users.length === 0 ? (
-        <EmptyState
-          icon="👥"
-          title="No users found"
-          description="Create your first user or adjust the filters"
-          action={canCreateUser ? { label: "Add User", onClick: openCreate } : undefined}
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="👥"
+            title="No users found"
+            description="Create your first user or adjust the filters"
+            action={canCreateUser ? { label: "Add User", onClick: openCreate } : undefined}
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
               <tr>
@@ -1297,7 +1301,7 @@ function UserForm({
             {form.tenantMemberships.map((membership, index) => (
               <div
                 key={`${membership.tenantId}-${index}`}
-                className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                className="content-subcard p-3"
               >
                 <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_auto_auto]">
                   <div>

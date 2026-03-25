@@ -220,14 +220,12 @@ function BailoutTimeline({ b }: { b: Bailout }) {
 
 function BailoutActions({
   bailout,
-  userRole,
   canApprove,
   canReject,
   canDisburse,
   onRefresh,
 }: {
   bailout: Bailout;
-  userRole: string;
   canApprove: boolean;
   canReject: boolean;
   canDisburse: boolean;
@@ -235,10 +233,6 @@ function BailoutActions({
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
-
-  const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
-  const directorRoles = ["DIRECTOR", "ADMIN"];
-  const financeRoles = ["FINANCE", "ADMIN"];
 
   const approveChief = api.bailout.approveByChief.useMutation({ onSuccess: () => { onRefresh(); setShowRejectForm(false); } });
   const approveDirector = api.bailout.approveByDirector.useMutation({ onSuccess: () => { onRefresh(); setShowRejectForm(false); } });
@@ -248,18 +242,15 @@ function BailoutActions({
   const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending;
 
   const canApproveChief =
-    canApprove && chiefRoles.includes(userRole) && bailout.status === "SUBMITTED";
+    canApprove && bailout.status === "SUBMITTED";
   const canApproveDirector =
     canApprove &&
-    directorRoles.includes(userRole) &&
     bailout.status === "APPROVED_CHIEF";
   const canDisburseNow =
     canDisburse &&
-    financeRoles.includes(userRole) &&
     bailout.status === "APPROVED_DIRECTOR";
   const canRejectNow =
     canReject &&
-    chiefRoles.includes(userRole) &&
     ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
 
   if (!canApproveChief && !canApproveDirector && !canDisburseNow && !canRejectNow) return null;
@@ -589,7 +580,6 @@ export function BailoutPanel({
   onClose,
 }: BailoutPanelProps) {
   const { data: session } = useSession();
-  const userRole = session?.user?.role ?? "EMPLOYEE";
   const permissions = session?.user?.permissions;
   const canReadBailout =
     (session?.user?.isRoot ?? false) ||
@@ -688,7 +678,6 @@ export function BailoutPanel({
             {/* Approver Actions */}
             <BailoutActions
               bailout={b}
-              userRole={userRole}
               canApprove={canApproveBailout}
               canReject={canRejectBailout}
               canDisburse={canDisburseBailout}

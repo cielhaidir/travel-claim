@@ -14,6 +14,7 @@ import {
 import {
   createTRPCRouter,
   protectedProcedure,
+  permissionProcedure,
   supervisorProcedure,
   managerProcedure,
 } from "@/server/api/trpc";
@@ -25,7 +26,6 @@ import {
   generateBailoutNumber,
   generateRequestNumber,
 } from "@/lib/utils/numberGenerators";
-import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -62,7 +62,7 @@ function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
 
 export const travelRequestRouter = createTRPCRouter({
   // Get all travel requests with filters
-  getAll: protectedProcedure
+  getAll: permissionProcedure("travel", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -94,21 +94,6 @@ export const travelRequestRouter = createTRPCRouter({
       const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
       });
-
-      // Non-managers can only see their own requests and their team's requests
-      if (
-        !userHasAnyRole(ctx.session.user, [
-          "MANAGER",
-          "DIRECTOR",
-          "ADMIN",
-          "FINANCE",
-        ])
-      ) {
-        where.OR = [
-          { requesterId: ctx.session.user.id },
-          { participants: { some: { userId: ctx.session.user.id } } },
-        ];
-      }
 
       if (input?.status) {
         where.status = input.status;
@@ -215,7 +200,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Get travel requests by participant employee ID (matches requester OR participants)
-  getByParticipantEmployeeId: protectedProcedure
+  getByParticipantEmployeeId: permissionProcedure("travel", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -256,21 +241,6 @@ export const travelRequestRouter = createTRPCRouter({
         throw new TRPCError({
           code: "NOT_FOUND",
           message: `No user found with employee ID: ${input.employeeId}`,
-        });
-      }
-
-      // Non-managers can only query themselves
-      const isPrivileged = userHasAnyRole(ctx.session.user, [
-        "MANAGER",
-        "DIRECTOR",
-        "ADMIN",
-        "FINANCE",
-      ]);
-      if (!isPrivileged && targetUser.id !== ctx.session.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "Not authorized to view travel requests for another employee",
         });
       }
 
@@ -373,7 +343,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Get travel request by ID
-  getById: protectedProcedure
+  getById: permissionProcedure("travel", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -458,25 +428,6 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      // Check access rights
-      const isRequester = request.requesterId === ctx.session.user.id;
-      const isParticipant = request.participants.some(
-        (p) => p.userId === ctx.session.user.id,
-      );
-      const canView = userHasAnyRole(ctx.session.user, [
-        "MANAGER",
-        "DIRECTOR",
-        "ADMIN",
-        "FINANCE",
-      ]);
-
-      if (!isRequester && !isParticipant && !canView) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to view this travel request",
-        });
-      }
-
       return request;
     }),
 
@@ -542,7 +493,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Create travel request
-  create: protectedProcedure
+  create: permissionProcedure("travel", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -722,7 +673,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Update travel request (only in DRAFT or REVISION status)
-  update: protectedProcedure
+  update: permissionProcedure("travel", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -925,7 +876,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Submit travel request for approval
-  submit: protectedProcedure
+  submit: permissionProcedure("travel", "submit")
     .meta({
       openapi: {
         method: "POST",
@@ -1247,7 +1198,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Lock travel request (Finance)
-  lock: protectedProcedure
+  lock: permissionProcedure("travel", "lock")
     .meta({
       openapi: {
         method: "POST",
@@ -1260,13 +1211,6 @@ export const travelRequestRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, ["FINANCE", "ADMIN"])) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can lock travel requests",
-        });
-      }
-
       const request = await ctx.db.travelRequest.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
       });
@@ -1308,7 +1252,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Close travel request (Finance)
-  close: protectedProcedure
+  close: permissionProcedure("travel", "close")
     .meta({
       openapi: {
         method: "POST",
@@ -1321,13 +1265,6 @@ export const travelRequestRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, ["FINANCE", "ADMIN"])) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can close travel requests",
-        });
-      }
-
       const request = await ctx.db.travelRequest.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
         include: {
@@ -1386,7 +1323,7 @@ export const travelRequestRouter = createTRPCRouter({
     }),
 
   // Delete travel request (soft delete)
-  delete: protectedProcedure
+  delete: permissionProcedure("travel", "delete")
     .meta({
       openapi: {
         method: "DELETE",
@@ -1413,12 +1350,7 @@ export const travelRequestRouter = createTRPCRouter({
         });
       }
 
-      // Only requester or admin can delete
-      const canDelete =
-        request.requesterId === ctx.session.user.id ||
-        userHasRole(ctx.session.user, "ADMIN");
-
-      if (!canDelete) {
+      if (request.requesterId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to delete this request",
