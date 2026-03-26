@@ -36,11 +36,16 @@ type TenantSummary = {
 
 type RolePermissionProfile = {
   id: string | null;
+  roleKey: string;
+  roleKind: "SYSTEM" | "CUSTOM";
   tenantId: string;
   tenantName: string;
   tenantSlug: string;
   tenantIsRoot: boolean;
-  role: Role;
+  role: Role | null;
+  systemRole: Role | null;
+  customRoleId: string | null;
+  slug: string | null;
   displayName: string;
   defaultDisplayName: string;
   isArchived: boolean;
@@ -90,20 +95,44 @@ function getPreferredTenant(
   return tenants.find((tenant) => !tenant.isRoot) ?? tenants[0] ?? null;
 }
 
+function getRoleMutationTarget(
+  profile: Pick<RolePermissionProfile, "roleKind" | "systemRole" | "customRoleId">,
+) {
+  if (profile.roleKind === "CUSTOM") {
+    return profile.customRoleId
+      ? {
+          role: undefined,
+          customRoleId: profile.customRoleId,
+        }
+      : null;
+  }
+
+  return profile.systemRole
+    ? {
+        role: profile.systemRole,
+        customRoleId: undefined,
+      }
+    : null;
+}
+
 export default function RoleManagementPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
   const utils = api.useUtils();
 
   const [selectedTenantId, setSelectedTenantId] = useState<string>("");
-  const [selectedRole, setSelectedRole] = useState<Role>("ADMIN");
+  const [selectedRoleKey, setSelectedRoleKey] = useState<string>("system:ADMIN");
   const [permissionDraft, setPermissionDraft] = useState<PermissionMap>({});
   const [permissionError, setPermissionError] = useState("");
   const [roleActionError, setRoleActionError] = useState("");
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
-  const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [isAddRoleModalOpen, setIsAddRoleModalOpen] = useState(false);
+  const [editingRoleKey, setEditingRoleKey] = useState<string | null>(null);
   const [roleNameDraft, setRoleNameDraft] = useState("");
-  const [deleteTargetRole, setDeleteTargetRole] = useState<Role | null>(null);
+  const [deleteTargetRoleKey, setDeleteTargetRoleKey] = useState<string | null>(null);
+  const [roleToRestore, setRoleToRestore] = useState<Role | "">("");
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleSourceId, setNewRoleSourceId] = useState("");
 
   const canAccessRoleAdmin =
     (session?.user.isRoot ?? false) ||
@@ -127,8 +156,10 @@ export default function RoleManagementPage() {
     refetchOnWindowFocus: false,
   });
 
-  const tenantMemberships = (session?.user.memberships ??
-    []) as SessionMembership[];
+  const tenantMemberships = useMemo(
+    () => (session?.user.memberships ?? []) as SessionMembership[],
+    [session?.user.memberships],
+  );
   const manageableTenants = useMemo(() => {
     if (!session?.user) {
       return EMPTY_TENANTS;
@@ -172,7 +203,6 @@ export default function RoleManagementPage() {
     ];
   }, [
     session?.user,
-    session?.user.activeTenantId,
     tenantListQuery.data,
     tenantMemberships,
   ]);
@@ -202,14 +232,14 @@ export default function RoleManagementPage() {
 
   useEffect(() => {
     if (selectedTenant?.isRoot) {
-      setSelectedRole("ROOT");
+      setSelectedRoleKey("system:ROOT");
       return;
     }
 
-    if (selectedRole === "ROOT") {
-      setSelectedRole("ADMIN");
+    if (selectedRoleKey === "system:ROOT") {
+      setSelectedRoleKey("system:ADMIN");
     }
-  }, [selectedRole, selectedTenant?.isRoot]);
+  }, [selectedRoleKey, selectedTenant?.isRoot]);
 
   const rolePermissionsQuery = api.tenant.getRolePermissions.useQuery(
     { tenantId: selectedTenantId },
@@ -220,10 +250,14 @@ export default function RoleManagementPage() {
   );
 
   const isPermissionsLoading = rolePermissionsQuery.isLoading;
-  const permissionProfiles =
-    (rolePermissionsQuery.data as RolePermissionProfile[] | undefined) ?? [];
+  const permissionProfiles = useMemo(
+    () => (rolePermissionsQuery.data as RolePermissionProfile[] | undefined) ?? [],
+    [rolePermissionsQuery.data],
+  );
   const selectedPermissionProfile =
-    permissionProfiles.find((profile) => profile.role === selectedRole) ?? null;
+    permissionProfiles.find((profile) => profile.roleKey === selectedRoleKey) ?? null;
+  const editingPermissionProfile =
+    permissionProfiles.find((profile) => profile.roleKey === editingRoleKey) ?? null;
 
   const roleCards = useMemo(
     () =>
@@ -231,6 +265,16 @@ export default function RoleManagementPage() {
         (profile) =>
           ((selectedTenant?.isRoot ?? false) || profile.role !== "ROOT") &&
           !profile.isArchived,
+      ),
+    [permissionProfiles, selectedTenant?.isRoot],
+  );
+  const archivedRoleCards = useMemo(
+    () =>
+      permissionProfiles.filter(
+        (profile) =>
+          ((selectedTenant?.isRoot ?? false) || profile.role !== "ROOT") &&
+          profile.roleKind === "SYSTEM" &&
+          profile.isArchived,
       ),
     [permissionProfiles, selectedTenant?.isRoot],
   );
@@ -243,21 +287,25 @@ export default function RoleManagementPage() {
       return;
     }
 
-    if (!roleCards.some((profile) => profile.role === selectedRole)) {
-      setSelectedRole(roleCards[0]?.role ?? "ADMIN");
+    if (!roleCards.some((profile) => profile.roleKey === selectedRoleKey)) {
+      setSelectedRoleKey(roleCards[0]?.roleKey ?? "system:ADMIN");
       setIsRoleModalOpen(false);
     }
-  }, [roleCards, selectedRole, selectedTenant?.isRoot]);
+  }, [roleCards, selectedRoleKey, selectedTenant?.isRoot]);
 
   useEffect(() => {
     if (selectedPermissionProfile) {
       setPermissionDraft(selectedPermissionProfile.permissions);
       setPermissionError("");
-      if (editingRole !== selectedPermissionProfile.role) {
-        setRoleNameDraft(selectedPermissionProfile.displayName);
-      }
     }
-  }, [editingRole, selectedPermissionProfile]);
+  }, [selectedPermissionProfile]);
+
+  useEffect(() => {
+    if (editingPermissionProfile) {
+      setRoleNameDraft(editingPermissionProfile.displayName);
+      setRoleActionError("");
+    }
+  }, [editingPermissionProfile]);
 
   const syncPermissionSession = async (tenantId: string) => {
     await utils.tenant.getRolePermissions.invalidate({ tenantId });
@@ -297,7 +345,7 @@ export default function RoleManagementPage() {
     onSuccess: async (_data, variables) => {
       await refreshRoleProfiles(variables.tenantId);
       setRoleActionError("");
-      setEditingRole(null);
+      setEditingRoleKey(null);
     },
     onError: (error) => setRoleActionError(error.message),
   });
@@ -306,8 +354,28 @@ export default function RoleManagementPage() {
     onSuccess: async (_data, variables) => {
       await refreshRoleProfiles(variables.tenantId);
       setRoleActionError("");
-      setDeleteTargetRole(null);
+      setDeleteTargetRoleKey(null);
       setIsRoleModalOpen(false);
+    },
+    onError: (error) => setRoleActionError(error.message),
+  });
+  const restoreRoleMutation = api.tenant.restoreRole.useMutation({
+    onSuccess: async (_data, variables) => {
+      await refreshRoleProfiles(variables.tenantId);
+      setRoleActionError("");
+      setRoleToRestore("");
+      setIsAddRoleModalOpen(false);
+    },
+    onError: (error) => setRoleActionError(error.message),
+  });
+  const createCustomRoleMutation = api.tenant.createCustomRole.useMutation({
+    onSuccess: async (_data, variables) => {
+      await refreshRoleProfiles(variables.tenantId);
+      setRoleActionError("");
+      setNewRoleName("");
+      setNewRoleSourceId("");
+      setRoleToRestore("");
+      setIsAddRoleModalOpen(false);
     },
     onError: (error) => setRoleActionError(error.message),
   });
@@ -316,7 +384,7 @@ export default function RoleManagementPage() {
     canUpdateRolePermissions &&
     !!selectedTenant &&
     !selectedTenant.isRoot &&
-    selectedRole !== "ROOT" &&
+    selectedPermissionProfile?.roleKey !== "system:ROOT" &&
     !!selectedPermissionProfile;
 
   const canEditRoleMetadata =
@@ -324,7 +392,14 @@ export default function RoleManagementPage() {
     !!selectedTenant &&
     !selectedTenant.isRoot &&
     !renameRoleMutation.isPending &&
-    !deleteRoleMutation.isPending;
+    !deleteRoleMutation.isPending &&
+    !restoreRoleMutation.isPending &&
+    !createCustomRoleMutation.isPending;
+  const canRestoreArchivedRole =
+    canUpdateRolePermissions &&
+    !!selectedTenant &&
+    !selectedTenant.isRoot;
+  const canOpenAddRoleModal = canRestoreArchivedRole;
 
   const permissionsDirty = selectedPermissionProfile
     ? JSON.stringify(permissionDraft) !==
@@ -336,10 +411,30 @@ export default function RoleManagementPage() {
     : 0;
 
   const deleteTargetProfile =
-    permissionProfiles.find((profile) => profile.role === deleteTargetRole) ??
+    permissionProfiles.find((profile) => profile.roleKey === deleteTargetRoleKey) ??
     null;
   const deleteBlockedByMembership =
     (deleteTargetProfile?.membershipCount ?? 0) > 0;
+
+  useEffect(() => {
+    if (archivedRoleCards.length === 0) {
+      setRoleToRestore("");
+      return;
+    }
+
+    if (
+      !roleToRestore ||
+      !archivedRoleCards.some((profile) => profile.systemRole === roleToRestore)
+    ) {
+      setRoleToRestore(archivedRoleCards[0]?.systemRole ?? "");
+    }
+  }, [archivedRoleCards, roleToRestore]);
+
+  useEffect(() => {
+    if (!canOpenAddRoleModal && isAddRoleModalOpen) {
+      setIsAddRoleModalOpen(false);
+    }
+  }, [canOpenAddRoleModal, isAddRoleModalOpen]);
 
   const togglePermission = (moduleKey: string, action: PermissionAction) => {
     setPermissionDraft((current) => {
@@ -353,7 +448,7 @@ export default function RoleManagementPage() {
       }
 
       if (nextActions.size === 0) {
-        delete next[moduleKey];
+        next[moduleKey] = [];
       } else {
         next[moduleKey] = [...nextActions].sort();
       }
@@ -362,8 +457,8 @@ export default function RoleManagementPage() {
     });
   };
 
-  const openRoleModal = (role: Role) => {
-    setSelectedRole(role);
+  const openRoleProfileModal = (roleKey: string) => {
+    setSelectedRoleKey(roleKey);
     setPermissionError("");
     setRoleActionError("");
     setIsRoleModalOpen(true);
@@ -374,18 +469,41 @@ export default function RoleManagementPage() {
     setIsRoleModalOpen(false);
   };
 
+  const openAddRoleModal = () => {
+    if (!canOpenAddRoleModal) {
+      return;
+    }
+
+    setRoleActionError("");
+    setNewRoleName("");
+    setNewRoleSourceId("");
+    if (archivedRoleCards.length > 0) {
+      setRoleToRestore(archivedRoleCards[0]?.systemRole ?? "");
+    } else {
+      setRoleToRestore("");
+    }
+    setIsAddRoleModalOpen(true);
+  };
+
+  const closeAddRoleModal = () => {
+    setIsAddRoleModalOpen(false);
+    setRoleToRestore("");
+    setNewRoleName("");
+    setNewRoleSourceId("");
+  };
+
   const startRoleRename = (profile: RolePermissionProfile) => {
     if (!canEditRoleMetadata) {
       return;
     }
 
-    setEditingRole(profile.role);
+    setEditingRoleKey(profile.roleKey);
     setRoleNameDraft(profile.displayName);
     setRoleActionError("");
   };
 
   const cancelRoleRename = (profile: RolePermissionProfile) => {
-    setEditingRole(null);
+    setEditingRoleKey(null);
     setRoleNameDraft(profile.displayName);
   };
 
@@ -396,7 +514,7 @@ export default function RoleManagementPage() {
     }
 
     const nextDisplayName = roleNameDraft.trim();
-    setEditingRole(null);
+    setEditingRoleKey(null);
 
     if (!nextDisplayName) {
       setRoleNameDraft(profile.displayName);
@@ -415,9 +533,16 @@ export default function RoleManagementPage() {
       return;
     }
 
+    const target = getRoleMutationTarget(profile);
+    if (!target) {
+      setRoleNameDraft(profile.displayName);
+      setRoleActionError("Selected role target is invalid.");
+      return;
+    }
+
     renameRoleMutation.mutate({
       tenantId: selectedTenant.id,
-      role: profile.role,
+      ...target,
       displayName: nextDisplayName,
     });
   };
@@ -427,9 +552,15 @@ export default function RoleManagementPage() {
       return;
     }
 
+    const target = getRoleMutationTarget(selectedPermissionProfile);
+    if (!target) {
+      setPermissionError("Selected role target is invalid.");
+      return;
+    }
+
     updateRolePermissionsMutation.mutate({
       tenantId: selectedTenant.id,
-      role: selectedPermissionProfile.role,
+      ...target,
       permissions: permissionDraft,
     });
   };
@@ -439,9 +570,15 @@ export default function RoleManagementPage() {
       return;
     }
 
+    const target = getRoleMutationTarget(selectedPermissionProfile);
+    if (!target) {
+      setPermissionError("Selected role target is invalid.");
+      return;
+    }
+
     resetRolePermissionsMutation.mutate({
       tenantId: selectedTenant.id,
-      role: selectedPermissionProfile.role,
+      ...target,
     });
   };
 
@@ -450,9 +587,44 @@ export default function RoleManagementPage() {
       return;
     }
 
+    const target = getRoleMutationTarget(deleteTargetProfile);
+    if (!target) {
+      setRoleActionError("Selected role target is invalid.");
+      return;
+    }
+
     deleteRoleMutation.mutate({
       tenantId: selectedTenant.id,
-      role: deleteTargetProfile.role,
+      ...target,
+    });
+  };
+
+  const handleRestoreRole = () => {
+    if (!selectedTenant || !roleToRestore) {
+      return;
+    }
+
+    restoreRoleMutation.mutate({
+      tenantId: selectedTenant.id,
+      role: roleToRestore,
+    });
+  };
+
+  const handleCreateCustomRole = () => {
+    if (!selectedTenant) {
+      return;
+    }
+
+    const trimmedName = newRoleName.trim();
+    if (!trimmedName) {
+      setRoleActionError("Role name cannot be empty.");
+      return;
+    }
+
+    createCustomRoleMutation.mutate({
+      tenantId: selectedTenant.id,
+      displayName: trimmedName,
+      sourceRoleId: newRoleSourceId || undefined,
     });
   };
 
@@ -497,10 +669,7 @@ export default function RoleManagementPage() {
         />
         <SummaryCard
           label="Selected Role"
-          value={
-            selectedPermissionProfile?.displayName ??
-            (selectedRole ? ROLE_LABELS[selectedRole] : "-")
-          }
+          value={selectedPermissionProfile?.displayName ?? "-"}
           detail={
             selectedPermissionProfile
               ? `${selectedActionCount} enabled actions`
@@ -594,7 +763,7 @@ export default function RoleManagementPage() {
               <>
                 <div className="border-b border-gray-100 px-6 py-5">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
+                    <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="text-2xl font-semibold text-gray-900">
                           {selectedTenant.name}
@@ -617,12 +786,19 @@ export default function RoleManagementPage() {
                         </p>
                       )}
                     </div>
-
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800 lg:max-w-sm">
-                      Click a role card to open the permission modal. Click the
-                      role name on the card to rename it, or use the trash icon
-                      to delete the role card from this tenant.
-                    </div>
+                    {!selectedTenant.isRoot ? (
+                      <Button
+                        onClick={openAddRoleModal}
+                        disabled={!canOpenAddRoleModal}
+                        title={
+                          canOpenAddRoleModal
+                            ? "Tambah role"
+                            : "Anda tidak dapat menambah role di tenant ini"
+                        }
+                      >
+                        Tambah Role
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
 
@@ -655,21 +831,21 @@ export default function RoleManagementPage() {
                           profile.permissions,
                         );
                         const isActiveRole =
-                          profile.role === selectedRole && isRoleModalOpen;
-                        const isRenaming = editingRole === profile.role;
+                          profile.roleKey === selectedRoleKey && isRoleModalOpen;
+                        const isRenaming = editingRoleKey === profile.roleKey;
                         return (
                           <div
-                            key={profile.role}
+                            key={profile.roleKey}
                             role="button"
                             tabIndex={0}
-                            onClick={() => openRoleModal(profile.role)}
+                            onClick={() => openRoleProfileModal(profile.roleKey)}
                             onKeyDown={(event) => {
                               if (
                                 event.key === "Enter" ||
                                 event.key === " "
                               ) {
                                 event.preventDefault();
-                                openRoleModal(profile.role);
+                                openRoleProfileModal(profile.roleKey);
                               }
                             }}
                             className={`rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-200 ${
@@ -718,6 +894,11 @@ export default function RoleManagementPage() {
                                   </button>
                                 )}
                                 <p className="mt-1 text-xs text-gray-500">
+                                  {profile.roleKind === "CUSTOM"
+                                    ? "Tenant custom role"
+                                    : `Built-in: ${ROLE_LABELS[profile.systemRole ?? "EMPLOYEE"]}`}
+                                </p>
+                                <p className="mt-1 text-xs text-gray-500">
                                   {permissionCount} enabled actions
                                 </p>
                               </div>
@@ -730,14 +911,18 @@ export default function RoleManagementPage() {
                                       : "bg-gray-100 text-gray-600"
                                   }`}
                                 >
-                                  {profile.isCustomized ? "Custom" : "Default"}
+                                  {profile.roleKind === "CUSTOM"
+                                    ? "Custom"
+                                    : profile.isCustomized
+                                      ? "Custom"
+                                      : "Default"}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setRoleActionError("");
-                                    setDeleteTargetRole(profile.role);
+                                    setDeleteTargetRoleKey(profile.roleKey);
                                   }}
                                   disabled={!canEditRoleMetadata}
                                   title={
@@ -788,6 +973,120 @@ export default function RoleManagementPage() {
           </section>
         </div>
       )}
+
+      <Modal
+        isOpen={isAddRoleModalOpen && canOpenAddRoleModal}
+        onClose={closeAddRoleModal}
+        title="Tambah Role"
+        size="md"
+      >
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Buat role tenant baru. Anda bisa mulai dari izin kosong atau menyalin
+            izin dari role yang sudah ada.
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-700">
+                Nama Role
+              </label>
+              <input
+                value={newRoleName}
+                onChange={(event) => setNewRoleName(event.target.value)}
+                placeholder="Mis. HR Admin"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700">
+                Salin Izin Dari
+              </label>
+              <select
+                value={newRoleSourceId}
+                onChange={(event) => setNewRoleSourceId(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              >
+                <option value="">Mulai kosong</option>
+                {roleCards.map((profile) => (
+                  <option
+                    key={profile.roleKey}
+                    value={profile.customRoleId ?? ""}
+                  >
+                    {profile.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <Button variant="secondary" onClick={closeAddRoleModal}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleCreateCustomRole}
+              isLoading={createCustomRoleMutation.isPending}
+              disabled={!newRoleName.trim()}
+            >
+              Buat Role
+            </Button>
+          </div>
+
+          {archivedRoleCards.length > 0 ? (
+            <div className="border-t border-gray-100 pt-5">
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                Atau aktifkan kembali role bawaan yang sebelumnya dihapus dari
+                tenant ini.
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {archivedRoleCards.map((profile) => {
+                  const isSelected = roleToRestore === profile.systemRole;
+
+                  return (
+                    <button
+                      key={profile.roleKey}
+                      type="button"
+                      onClick={() => setRoleToRestore(profile.systemRole ?? "")}
+                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                        isSelected
+                          ? "border-blue-300 bg-blue-50"
+                          : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {profile.displayName}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Default: {profile.defaultDisplayName}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
+                          {countPermissionActions(profile.permissions)} actions
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <Button
+                  onClick={handleRestoreRole}
+                  disabled={!roleToRestore}
+                  isLoading={restoreRoleMutation.isPending}
+                >
+                  Aktifkan Role Bawaan
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
 
       <Modal
         isOpen={
@@ -936,7 +1235,7 @@ export default function RoleManagementPage() {
       <ConfirmModal
         isOpen={!!deleteTargetProfile}
         onClose={() => {
-          setDeleteTargetRole(null);
+          setDeleteTargetRoleKey(null);
           setRoleActionError("");
         }}
         onConfirm={handleConfirmDeleteRole}
@@ -949,7 +1248,9 @@ export default function RoleManagementPage() {
           deleteTargetProfile && selectedTenant
             ? deleteBlockedByMembership
               ? `${deleteTargetProfile.displayName} is still assigned to ${deleteTargetProfile.membershipCount} tenant member${deleteTargetProfile.membershipCount === 1 ? "" : "s"}. Reassign them before deleting this role from ${selectedTenant.name}.`
-              : `This removes the role card and its tenant-specific overrides from ${selectedTenant.name}. Reassign any members using this role before deletion.`
+              : deleteTargetProfile.roleKind === "CUSTOM"
+                ? `This permanently removes the custom role from ${selectedTenant.name}. Reassign any members using this role before deletion.`
+                : `This removes the role card and its tenant-specific overrides from ${selectedTenant.name}. Reassign any members using this role before deletion.`
             : "Delete this role?"
         }
         confirmLabel="Delete"

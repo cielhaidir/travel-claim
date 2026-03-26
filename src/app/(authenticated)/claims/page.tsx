@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
@@ -86,7 +86,7 @@ function toEditableClaim(raw: Claim): Claim {
 }
 
 export default function ClaimsPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const userId = session?.user?.id;
   const canReadClaims =
@@ -97,10 +97,11 @@ export default function ClaimsPage() {
     ((session?.user?.isRoot ?? false) ||
       hasPermissionMap(session?.user?.permissions, "claims", "create"));
 
-  if (session && !canReadClaims) {
-    router.replace("/");
-    return null;
-  }
+  useEffect(() => {
+    if (status !== "loading" && session && !canReadClaims) {
+      void router.replace("/");
+    }
+  }, [canReadClaims, router, session, status]);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<ClaimStatus | "ALL">("ALL");
@@ -121,7 +122,10 @@ export default function ClaimsPage() {
       claimType: typeFilter === "ALL" ? undefined : typeFilter,
       limit: 50,
     },
-    { refetchOnWindowFocus: false, enabled: canReadClaims }
+    {
+      refetchOnWindowFocus: false,
+      enabled: status === "authenticated" && canReadClaims,
+    }
   );
   const claimsData = rawClaims as { claims: Claim[] } | undefined;
   const claims = claimsData?.claims ?? [];
@@ -130,7 +134,10 @@ export default function ClaimsPage() {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawTR } = api.travelRequest.getAll.useQuery(
     { limit: 100 },
-    { refetchOnWindowFocus: false }
+    {
+      refetchOnWindowFocus: false,
+      enabled: status === "authenticated" && canReadClaims,
+    }
   );
   const trData = rawTR as { requests: TravelRequestRef[] } | undefined;
   const eligibleTravelRequests = (trData?.requests ?? []).filter(
@@ -176,6 +183,18 @@ export default function ClaimsPage() {
     onSuccess: () => { void refetch(); setSubmittingClaim(null); },
     onError: (err) => alert(`Error: ${err.message}`),
   });
+
+  if (status === "loading") {
+    return (
+      <div className="content-section p-12 text-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
+
+  if (session && !canReadClaims) {
+    return null;
+  }
 
   const handleCreate = (formData: ClaimFormData) => {
     if (formData.claimType === "ENTERTAINMENT") {

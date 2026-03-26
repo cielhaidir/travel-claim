@@ -6,10 +6,7 @@ import {
   JournalStatus,
   type Prisma,
 } from "../../../../generated/prisma";
-import {
-  createTRPCRouter,
-  permissionProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, permissionProcedure } from "@/server/api/trpc";
 import { generateJournalEntryNumber } from "@/lib/utils/numberGenerators";
 
 function getTenantScope(ctx: unknown): {
@@ -34,7 +31,9 @@ function withTenantWhere<T extends Record<string, unknown>>(
   return where;
 }
 
-function assertBalanced(lines: Array<{ debitAmount: number; creditAmount: number }>) {
+function assertBalanced(
+  lines: Array<{ debitAmount: number; creditAmount: number }>,
+) {
   if (lines.length < 2) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -108,14 +107,20 @@ async function validateJournalSourceLinks(
     });
   }
 
-  if (input.sourceType === JournalSourceType.MANUAL && (input.claimId || input.bailoutId)) {
+  if (
+    input.sourceType === JournalSourceType.MANUAL &&
+    (input.claimId || input.bailoutId)
+  ) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Jurnal MANUAL tidak boleh menghubungkan claim atau bailout",
     });
   }
 
-  const scopedCtx = { tenantId: ctx.tenantId ?? null, isRoot: ctx.isRoot ?? false };
+  const scopedCtx = {
+    tenantId: ctx.tenantId ?? null,
+    isRoot: ctx.isRoot ?? false,
+  };
 
   if (input.claimId) {
     const claim = await ctx.db.claim.findFirst({
@@ -177,8 +182,14 @@ async function assertPostingReferencesBelongToJournalTenant(
     }>;
   },
 ) {
-  const coaIds = [...new Set(journal.lines.map((line) => line.chartOfAccountId))];
-  const balanceIds = [...new Set(journal.lines.map((line) => line.balanceAccountId).filter(Boolean))] as string[];
+  const coaIds = [
+    ...new Set(journal.lines.map((line) => line.chartOfAccountId)),
+  ];
+  const balanceIds = [
+    ...new Set(
+      journal.lines.map((line) => line.balanceAccountId).filter(Boolean),
+    ),
+  ] as string[];
 
   const [coas, balances] = await Promise.all([
     tx.chartOfAccount.findMany({
@@ -205,14 +216,16 @@ async function assertPostingReferencesBelongToJournalTenant(
   if (coas.length !== coaIds.length) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Ada bagan akun jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+      message:
+        "Ada bagan akun jurnal yang tidak sesuai tenant atau sudah tidak aktif",
     });
   }
 
   if (balances.length !== balanceIds.length) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Ada akun saldo jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+      message:
+        "Ada akun saldo jurnal yang tidak sesuai tenant atau sudah tidak aktif",
     });
   }
 }
@@ -234,7 +247,7 @@ export const journalEntryRouter = createTRPCRouter({
         sourceType: z.nativeEnum(JournalSourceType).optional(),
         startDate: z.coerce.date().optional(),
         endDate: z.coerce.date().optional(),
-        limit: z.number().min(1).max(100).default(50),
+        limit: z.number().min(1).max(200).default(50),
         cursor: z.string().optional(),
       }),
     )
@@ -321,7 +334,10 @@ export const journalEntryRouter = createTRPCRouter({
       });
 
       if (!journal) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Jurnal tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Jurnal tidak ditemukan",
+        });
       }
 
       return journal;
@@ -357,9 +373,13 @@ export const journalEntryRouter = createTRPCRouter({
       const tenantId = getTenantScope(ctx).tenantId;
       const journalNumber = await generateJournalEntryNumber(ctx.db, tenantId);
 
-      const coaIds = [...new Set(input.lines.map((line) => line.chartOfAccountId))];
+      const coaIds = [
+        ...new Set(input.lines.map((line) => line.chartOfAccountId)),
+      ];
       const balanceIds = [
-        ...new Set(input.lines.map((line) => line.balanceAccountId).filter(Boolean)),
+        ...new Set(
+          input.lines.map((line) => line.balanceAccountId).filter(Boolean),
+        ),
       ] as string[];
 
       const [coas, balances] = await Promise.all([
@@ -461,14 +481,23 @@ export const journalEntryRouter = createTRPCRouter({
       });
 
       if (!journal) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Jurnal tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Jurnal tidak ditemukan",
+        });
       }
 
       if (journal.status === JournalStatus.POSTED) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Jurnal sudah diposting" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Jurnal sudah diposting",
+        });
       }
       if (journal.status === JournalStatus.VOID) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Jurnal void tidak bisa diposting" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Jurnal void tidak bisa diposting",
+        });
       }
 
       const normalizedLines = journal.lines.map((line) => ({
@@ -491,21 +520,27 @@ export const journalEntryRouter = createTRPCRouter({
         },
       );
 
-      const balanceLines = journal.lines.filter((line) => line.balanceAccountId);
+      const balanceLines = journal.lines.filter(
+        (line) => line.balanceAccountId,
+      );
       const result = await ctx.db.$transaction(async (tx) => {
         await assertPostingReferencesBelongToJournalTenant(tx, journal);
 
         for (const line of balanceLines) {
           if (!line.balanceAccountId) continue;
 
-          const amount = Number(line.debitAmount) > 0
-            ? Number(line.debitAmount)
-            : -Number(line.creditAmount);
+          const amount =
+            Number(line.debitAmount) > 0
+              ? Number(line.debitAmount)
+              : -Number(line.creditAmount);
 
           await tx.balanceAccount.update({
             where: { id: line.balanceAccountId },
             data: {
-              balance: amount >= 0 ? { increment: amount } : { decrement: Math.abs(amount) },
+              balance:
+                amount >= 0
+                  ? { increment: amount }
+                  : { decrement: Math.abs(amount) },
             },
           });
         }
@@ -521,8 +556,12 @@ export const journalEntryRouter = createTRPCRouter({
             lines: {
               orderBy: { lineNumber: "asc" },
               include: {
-                chartOfAccount: { select: { id: true, code: true, name: true } },
-                balanceAccount: { select: { id: true, code: true, name: true, balance: true } },
+                chartOfAccount: {
+                  select: { id: true, code: true, name: true },
+                },
+                balanceAccount: {
+                  select: { id: true, code: true, name: true, balance: true },
+                },
               },
             },
           },
@@ -560,18 +599,28 @@ export const journalEntryRouter = createTRPCRouter({
       });
 
       if (!journal) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Jurnal tidak ditemukan" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Jurnal tidak ditemukan",
+        });
       }
 
       if (journal.status === JournalStatus.VOID) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Jurnal sudah void" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Jurnal sudah void",
+        });
       }
 
       const updated = await ctx.db.journalEntry.update({
         where: { id: input.id },
         data: {
           status: JournalStatus.VOID,
-          notes: input.reason ? [journal.notes, `VOID: ${input.reason}`].filter(Boolean).join("\n") : journal.notes,
+          notes: input.reason
+            ? [journal.notes, `VOID: ${input.reason}`]
+                .filter(Boolean)
+                .join("\n")
+            : journal.notes,
         },
       });
 

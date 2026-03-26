@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -32,10 +32,14 @@ interface UserRef {
   createdAt: string | Date;
   department: Department | null;
   supervisor: { id: string; name: string | null; email: string | null } | null;
-  userRoles: { role: Role }[];
   memberships: {
     tenantId: string;
     role: Role;
+    customRole: {
+      id: string;
+      displayName: string;
+      baseRole: Role | null;
+    } | null;
     status: MembershipStatus;
     isDefault: boolean;
     tenant: {
@@ -58,8 +62,19 @@ interface TenantOption {
 interface TenantAccessForm {
   tenantId: string;
   role: Role;
+  customRoleId: string | null;
   status: MembershipStatus;
   isDefault: boolean;
+}
+
+interface AssignableRoleOption {
+  roleKey: string;
+  roleKind: "SYSTEM" | "CUSTOM";
+  displayName: string;
+  baseRole: Role | null;
+  systemRole: Role | null;
+  customRoleId: string | null;
+  tenantId: string;
 }
 
 interface UserFormData {
@@ -98,6 +113,7 @@ const ROLE_COLORS: Record<Role, string> = {
   SALES_EMPLOYEE: "bg-cyan-100 text-cyan-700",
   SALES_CHIEF: "bg-teal-100 text-teal-700",
 };
+const EMPTY_ASSIGNABLE_ROLES: AssignableRoleOption[] = [];
 
 function createTenantAccess(
   tenantId = "",
@@ -107,9 +123,23 @@ function createTenantAccess(
   return {
     tenantId,
     role,
+    customRoleId: null,
     status: "ACTIVE",
     isDefault,
   };
+}
+
+function getAssignableRoleValue(option: AssignableRoleOption) {
+  return option.customRoleId
+    ? `custom:${option.customRoleId}`
+    : `system:${option.systemRole ?? option.baseRole ?? "EMPLOYEE"}`;
+}
+
+function resolveAssignableRole(
+  option: AssignableRoleOption,
+  fallback: Role = "EMPLOYEE",
+) {
+  return option.baseRole ?? option.systemRole ?? fallback;
 }
 
 function buildDefaultForm(defaultTenantId = ""): UserFormData {
@@ -136,6 +166,12 @@ export default function UserManagementPage() {
     (session?.user?.isRoot ?? false) ||
     hasPermissionMap(session?.user?.permissions, "users", "read");
 
+  useEffect(() => {
+    if (status !== "loading" && session && !canAccess) {
+      void router.replace("/");
+    }
+  }, [canAccess, router, session, status]);
+
   if (status === "loading") {
     return (
       <div className="content-section p-12 text-center text-gray-500">
@@ -144,17 +180,19 @@ export default function UserManagementPage() {
     );
   }
 
+  if (!session) {
+    return null;
+  }
+
   if (!canAccess) {
-    router.replace("/");
     return null;
   }
 
   return (
     <UserManagementContent
-      session={session!}
+      session={session}
       canQuery={
-        !!session?.user &&
-        (session.user.isRoot || !!session.user.activeTenantId)
+        session.user.isRoot || !!session.user.activeTenantId
       }
     />
   );
@@ -275,6 +313,33 @@ function UserManagementContent({
           slug: membership.tenantSlug,
           isRoot: membership.isRootTenant,
         }));
+  const tenantIdsForRoleCatalog = useMemo(() => {
+    const ids = new Set<string>();
+
+    for (const tenant of tenantOptions) {
+      if (tenant.id) {
+        ids.add(tenant.id);
+      }
+    }
+
+    for (const membership of form.tenantMemberships) {
+      if (membership.tenantId) {
+        ids.add(membership.tenantId);
+      }
+    }
+
+    return [...ids];
+  }, [form.tenantMemberships, tenantOptions]);
+  const roleCatalogQuery = api.tenant.getAssignableRolesCatalog.useQuery(
+    { tenantIds: tenantIdsForRoleCatalog },
+    {
+      enabled: canQuery && tenantIdsForRoleCatalog.length > 0,
+      refetchOnWindowFocus: false,
+    },
+  );
+  const roleCatalog =
+    (roleCatalogQuery.data as Record<string, AssignableRoleOption[]> | undefined) ??
+    {};
 
   // Mutations
   const createMutation = api.user.create.useMutation({
@@ -446,6 +511,7 @@ function UserManagementContent({
           ? user.memberships.map((membership) => ({
               tenantId: membership.tenantId,
               role: membership.role,
+              customRoleId: membership.customRole?.id ?? null,
               status: membership.status,
               isDefault: membership.isDefault,
             }))
@@ -669,8 +735,8 @@ function UserManagementContent({
                               (membership) => membership.status === "ACTIVE",
                             )
                             .map((membership) => ({
-                              key: `${membership.tenantId}-${membership.role}`,
-                              label: `${membership.tenant.slug}: ${ROLE_LABELS[membership.role]}`,
+                              key: `${membership.tenantId}-${membership.customRole?.id ?? membership.role}`,
+                              label: `${membership.tenant.slug}: ${membership.customRole?.displayName ?? ROLE_LABELS[membership.role]}`,
                               role: membership.role,
                             }))
                         : [
@@ -760,6 +826,7 @@ function UserManagementContent({
           setForm={setForm}
           departments={departments}
           tenantOptions={tenantOptions}
+          roleCatalog={roleCatalog}
           canManageAllTenants={session.user.isRoot}
           supervisorOptions={users}
           onSubmit={handleCreate}
@@ -782,6 +849,7 @@ function UserManagementContent({
           setForm={setForm}
           departments={departments}
           tenantOptions={tenantOptions}
+          roleCatalog={roleCatalog}
           canManageAllTenants={session.user.isRoot}
           supervisorOptions={users.filter((u) => u.id !== editingUser?.id)}
           onSubmit={handleUpdate}
@@ -810,17 +878,30 @@ function UserManagementContent({
                   {viewingUser.name ?? "—"}
                 </p>
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {((viewingUser.userRoles?.length ?? 0) > 0
-                    ? viewingUser.userRoles.map((r) => r.role)
-                    : [viewingUser.role]
-                  ).map((r) => (
-                    <span
-                      key={r}
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}
-                    >
-                      {ROLE_LABELS[r]}
-                    </span>
-                  ))}
+                  {(() => {
+                    const primaryMembership =
+                      viewingUser.memberships.find(
+                        (membership) =>
+                          membership.status === "ACTIVE" && membership.isDefault,
+                      ) ??
+                      viewingUser.memberships.find(
+                        (membership) => membership.status === "ACTIVE",
+                      ) ??
+                      viewingUser.memberships[0] ??
+                      null;
+                    const primaryRole = primaryMembership?.role ?? viewingUser.role;
+                    const primaryRoleLabel =
+                      primaryMembership?.customRole?.displayName ??
+                      ROLE_LABELS[primaryRole];
+
+                    return (
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[primaryRole]}`}
+                      >
+                        {primaryRoleLabel}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1149,6 +1230,7 @@ function UserForm({
   setForm,
   departments,
   tenantOptions,
+  roleCatalog,
   canManageAllTenants,
   supervisorOptions,
   onSubmit,
@@ -1161,6 +1243,7 @@ function UserForm({
   setForm: React.Dispatch<React.SetStateAction<UserFormData>>;
   departments: Department[];
   tenantOptions: TenantOption[];
+  roleCatalog: Record<string, AssignableRoleOption[]>;
   canManageAllTenants: boolean;
   supervisorOptions: UserRef[];
   onSubmit: (e: React.FormEvent) => void;
@@ -1171,6 +1254,9 @@ function UserForm({
 }) {
   const set = (field: keyof UserFormData, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  const getRoleOptions = (tenantId: string) =>
+    roleCatalog[tenantId] ?? EMPTY_ASSIGNABLE_ROLES;
 
   const updateTenantAccess = (
     index: number,
@@ -1185,11 +1271,25 @@ function UserForm({
   };
 
   const addTenantAccess = () => {
+    const defaultTenantId = tenantOptions[0]?.id ?? "";
+    const defaultRoleOptions =
+      roleCatalog[defaultTenantId] ?? EMPTY_ASSIGNABLE_ROLES;
+    const defaultOption = defaultRoleOptions[0];
+
     setForm((prev) => ({
       ...prev,
       tenantMemberships: [
         ...prev.tenantMemberships,
-        createTenantAccess(tenantOptions[0]?.id ?? "", "EMPLOYEE", false),
+        {
+          ...createTenantAccess(
+            defaultTenantId,
+            defaultOption
+              ? resolveAssignableRole(defaultOption)
+              : "EMPLOYEE",
+            false,
+          ),
+          customRoleId: defaultOption?.customRoleId ?? null,
+        },
       ],
     }));
   };
@@ -1218,6 +1318,58 @@ function UserForm({
       })),
     }));
   };
+
+  useEffect(() => {
+    setForm((prev) => {
+      let changed = false;
+
+      const nextMemberships = prev.tenantMemberships.map((membership) => {
+        const roleOptions =
+          roleCatalog[membership.tenantId] ?? EMPTY_ASSIGNABLE_ROLES;
+        if (roleOptions.length === 0) {
+          if (membership.customRoleId !== null) {
+            changed = true;
+            return {
+              ...membership,
+              customRoleId: null,
+            };
+          }
+
+          return membership;
+        }
+
+        const currentKey = membership.customRoleId
+          ? `custom:${membership.customRoleId}`
+          : `system:${membership.role}`;
+        const hasCurrentOption = roleOptions.some((option) =>
+          getAssignableRoleValue(option) === currentKey,
+        );
+
+        if (hasCurrentOption) {
+          return membership;
+        }
+
+        const nextOption = roleOptions[0];
+        if (!nextOption) {
+          return membership;
+        }
+
+        changed = true;
+        return {
+          ...membership,
+          role: resolveAssignableRole(nextOption, membership.role),
+          customRoleId: nextOption.customRoleId,
+        };
+      });
+
+      return changed
+        ? {
+            ...prev,
+            tenantMemberships: nextMemberships,
+          }
+        : prev;
+    });
+  }, [roleCatalog, setForm]);
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -1331,31 +1483,55 @@ function UserForm({
                       Role
                     </label>
                     <select
-                      value={membership.role}
-                      onChange={(e) =>
-                        updateTenantAccess(index, {
-                          role: e.target.value as Role,
-                        })
+                      value={
+                        membership.customRoleId
+                          ? `custom:${membership.customRoleId}`
+                          : `system:${membership.role}`
                       }
+                      onChange={(e) => {
+                        const selectedValue = e.target.value;
+                        if (selectedValue === "system:ROOT") {
+                          updateTenantAccess(index, {
+                            role: "ROOT",
+                            customRoleId: null,
+                          });
+                          return;
+                        }
+
+                        const selectedOption = getRoleOptions(
+                          membership.tenantId,
+                        ).find((option) =>
+                          getAssignableRoleValue(option) === selectedValue,
+                        );
+
+                        if (!selectedOption) {
+                          return;
+                        }
+
+                        updateTenantAccess(index, {
+                          role: resolveAssignableRole(
+                            selectedOption,
+                            membership.role,
+                          ),
+                          customRoleId: selectedOption.customRoleId,
+                        });
+                      }}
                       className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     >
-                      {(
-                        [
-                          "ROOT",
-                          "ADMIN",
-                          "FINANCE",
-                          "DIRECTOR",
-                          "MANAGER",
-                          "SALES_CHIEF",
-                          "SUPERVISOR",
-                          "SALES_EMPLOYEE",
-                          "EMPLOYEE",
-                        ] as Role[]
-                      ).map((role) => (
-                        <option key={role} value={role}>
-                          {ROLE_LABELS[role]}
+                      {getRoleOptions(membership.tenantId).length > 0 ? (
+                        getRoleOptions(membership.tenantId).map((option) => (
+                          <option
+                            key={option.roleKey}
+                            value={getAssignableRoleValue(option)}
+                          >
+                            {option.displayName}
+                          </option>
+                        ))
+                      ) : (
+                        <option value={`system:${membership.role}`}>
+                          {ROLE_LABELS[membership.role]}
                         </option>
-                      ))}
+                      )}
                     </select>
                   </div>
 

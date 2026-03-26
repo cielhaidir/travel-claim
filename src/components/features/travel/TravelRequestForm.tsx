@@ -96,7 +96,7 @@ interface TravelRequestFormProps {
   onCancel: () => void;
 }
 
-const TAB_ORDER = ["basic", "bailout", "peserta"] as const;
+const TAB_ORDER = ["basic", "peserta", "bailout"] as const;
 type TravelFormTab = (typeof TAB_ORDER)[number];
 
 type TransportFieldConfig = {
@@ -231,6 +231,133 @@ function normalizeTransportBailout(
     transportUnitAmount: unitAmount,
     amount: unitAmount * travelerCount,
   };
+}
+
+function getBasicTabErrors(
+  formData: TravelRequestFormData,
+  isSales: boolean,
+) {
+  const errs: Record<string, string> = {};
+
+  if (!formData.purpose.trim() || formData.purpose.length < 10) {
+    errs.purpose = "Purpose harus minimal 10 karakter";
+  }
+  if (!formData.destination.trim()) {
+    errs.destination = "Destination wajib diisi";
+  }
+  if (!formData.startDate) {
+    errs.startDate = "Tanggal mulai wajib diisi";
+  }
+  if (!formData.endDate) {
+    errs.endDate = "Tanggal selesai wajib diisi";
+  }
+  if (
+    formData.startDate &&
+    formData.endDate &&
+    formData.startDate >= formData.endDate
+  ) {
+    errs.endDate = "Tanggal selesai harus setelah tanggal mulai";
+  }
+  if (isSales && !formData.projectId) {
+    errs.projectId = "Project wajib dipilih untuk perjalanan Sales";
+  }
+
+  return errs;
+}
+
+function getBailoutTabErrors(formData: TravelRequestFormData) {
+  const errs: Record<string, string> = {};
+
+  formData.bailouts?.forEach((b, i) => {
+    if (b.description.trim().length < 10) {
+      errs[`b${i}_desc`] = "Keterangan minimal 10 karakter";
+    }
+    if (!b.amount || b.amount <= 0) {
+      errs[`b${i}_amt`] = "Jumlah harus > 0";
+    }
+    if (b.category === "TRANSPORT") {
+      if (!b.departureFrom?.trim()) {
+        errs[`b${i}_from`] = "Kota asal wajib diisi";
+      }
+      if (!b.arrivalTo?.trim()) {
+        errs[`b${i}_to`] = "Kota tujuan wajib diisi";
+      }
+      if (!b.departureAt) {
+        errs[`b${i}_depDate`] = "Tanggal berangkat wajib diisi";
+      }
+    }
+    if (b.category === "HOTEL") {
+      if (!b.hotelName?.trim()) {
+        errs[`b${i}_hotel`] = "Nama hotel wajib diisi";
+      }
+      if (!b.checkIn) {
+        errs[`b${i}_ci`] = "Check-in wajib diisi";
+      }
+      if (!b.checkOut) {
+        errs[`b${i}_co`] = "Check-out wajib diisi";
+      }
+    }
+  });
+
+  return errs;
+}
+
+function getValidationErrors(
+  formData: TravelRequestFormData,
+  isSales: boolean,
+): Record<string, string> {
+  return {
+    ...getBasicTabErrors(formData, isSales),
+    ...getBailoutTabErrors(formData),
+  };
+}
+
+function getTabValidationErrors(
+  tab: TravelFormTab,
+  formData: TravelRequestFormData,
+  isSales: boolean,
+) {
+  if (tab === "basic") {
+    return getBasicTabErrors(formData, isSales);
+  }
+
+  if (tab === "bailout") {
+    return getBailoutTabErrors(formData);
+  }
+
+  return {};
+}
+
+function getFirstInvalidTab(errors: Record<string, string>): TravelFormTab {
+  const tabOrderByErrorKey: Array<{
+    tab: TravelFormTab;
+    matches: (key: string) => boolean;
+  }> = [
+    {
+      tab: "basic",
+      matches: (key) =>
+        ["purpose", "destination", "startDate", "endDate", "projectId"].includes(
+          key,
+        ),
+    },
+    {
+      tab: "bailout",
+      matches: (key) => key.startsWith("b"),
+    },
+  ];
+
+  for (const tab of TAB_ORDER) {
+    const matcher = tabOrderByErrorKey.find((entry) => entry.tab === tab);
+    if (!matcher) {
+      continue;
+    }
+
+    if (Object.keys(errors).some(matcher.matches)) {
+      return tab;
+    }
+  }
+
+  return TAB_ORDER[0];
 }
 
 // â”€â”€â”€ Single Bailout Item Form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -668,69 +795,8 @@ export function TravelRequestForm({
 
   // â”€â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  const validate = (): boolean => {
-    const errs: Record<string, string> = {};
-    if (!formData.purpose.trim() || formData.purpose.length < 10)
-      errs.purpose = "Purpose harus minimal 10 karakter";
-    if (!formData.destination.trim()) errs.destination = "Destination wajib diisi";
-    if (!formData.startDate) errs.startDate = "Tanggal mulai wajib diisi";
-    if (!formData.endDate) errs.endDate = "Tanggal selesai wajib diisi";
-    if (formData.startDate && formData.endDate && formData.startDate >= formData.endDate)
-      errs.endDate = "Tanggal selesai harus setelah tanggal mulai";
-    if (isSales && !formData.projectId)
-      errs.projectId = "Project wajib dipilih untuk perjalanan Sales";
-
-    formData.bailouts?.forEach((b, i) => {
-      if (b.description.trim().length < 10) errs[`b${i}_desc`] = "Keterangan minimal 10 karakter";
-      if (!b.amount || b.amount <= 0) errs[`b${i}_amt`] = "Jumlah harus > 0";
-      if (b.category === "TRANSPORT") {
-        if (!b.departureFrom?.trim()) errs[`b${i}_from`] = "Kota asal wajib diisi";
-        if (!b.arrivalTo?.trim()) errs[`b${i}_to`] = "Kota tujuan wajib diisi";
-        if (!b.departureAt) errs[`b${i}_depDate`] = "Tanggal berangkat wajib diisi";
-      }
-      if (b.category === "HOTEL") {
-        if (!b.hotelName?.trim()) errs[`b${i}_hotel`] = "Nama hotel wajib diisi";
-        if (!b.checkIn) errs[`b${i}_ci`] = "Check-in wajib diisi";
-        if (!b.checkOut) errs[`b${i}_co`] = "Check-out wajib diisi";
-      }
-    });
-
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
   const validateTab = (tab: TravelFormTab): boolean => {
-    const errs: Record<string, string> = {};
-
-    if (tab === "basic") {
-      if (!formData.purpose.trim() || formData.purpose.length < 10)
-        errs.purpose = "Purpose harus minimal 10 karakter";
-      if (!formData.destination.trim()) errs.destination = "Destination wajib diisi";
-      if (!formData.startDate) errs.startDate = "Tanggal mulai wajib diisi";
-      if (!formData.endDate) errs.endDate = "Tanggal selesai wajib diisi";
-      if (formData.startDate && formData.endDate && formData.startDate >= formData.endDate)
-        errs.endDate = "Tanggal selesai harus setelah tanggal mulai";
-      if (isSales && !formData.projectId)
-        errs.projectId = "Project wajib dipilih untuk perjalanan Sales";
-    }
-
-    if (tab === "bailout") {
-      formData.bailouts?.forEach((b, i) => {
-        if (b.description.trim().length < 10) errs[`b${i}_desc`] = "Keterangan minimal 10 karakter";
-        if (!b.amount || b.amount <= 0) errs[`b${i}_amt`] = "Jumlah harus > 0";
-        if (b.category === "TRANSPORT") {
-          if (!b.departureFrom?.trim()) errs[`b${i}_from`] = "Kota asal wajib diisi";
-          if (!b.arrivalTo?.trim()) errs[`b${i}_to`] = "Kota tujuan wajib diisi";
-          if (!b.departureAt) errs[`b${i}_depDate`] = "Tanggal berangkat wajib diisi";
-        }
-        if (b.category === "HOTEL") {
-          if (!b.hotelName?.trim()) errs[`b${i}_hotel`] = "Nama hotel wajib diisi";
-          if (!b.checkIn) errs[`b${i}_ci`] = "Check-in wajib diisi";
-          if (!b.checkOut) errs[`b${i}_co`] = "Check-out wajib diisi";
-        }
-      });
-    }
-
+    const errs = getTabValidationErrors(tab, formData, isSales);
     setErrors((prev) => ({ ...prev, ...errs }));
     return Object.keys(errs).length === 0;
   };
@@ -753,10 +819,11 @@ export function TravelRequestForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) {
-      const nextErrors = Object.keys(errors);
-      if (nextErrors.some((k) => k.startsWith("b"))) setActiveTab("bailout");
-      else setActiveTab("basic");
+    const validationErrors = getValidationErrors(formData, isSales);
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setActiveTab(getFirstInvalidTab(validationErrors));
       return;
     }
 
@@ -777,7 +844,9 @@ export function TravelRequestForm({
 
   const bailoutCount = formData.bailouts?.length ?? 0;
   const totalBailout = formData.bailouts?.reduce((s, b) => s + (b.amount || 0), 0) ?? 0;
-  const isLastTab = activeTab === "peserta";
+  const isLastTab = activeTab === TAB_ORDER[TAB_ORDER.length - 1];
+  const isSubmitDisabled =
+    isLoading || Object.keys(getValidationErrors(formData, isSales)).length > 0;
 
   // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -785,7 +854,7 @@ export function TravelRequestForm({
     <form onSubmit={handleSubmit} className="flex flex-col gap-0">
       {/* Tab Nav */}
       <div className="flex border-b border-gray-200 mb-4">
-        {(["basic", "bailout", "peserta"] as const).map((tab) => (
+        {TAB_ORDER.map((tab) => (
           <button
             key={tab}
             type="button"
@@ -797,8 +866,8 @@ export function TravelRequestForm({
             }`}
           >
             {tab === "basic" && "📋 Informasi Dasar"}
-            {tab === "bailout" && `💰 Dana Talangan ${bailoutCount > 0 ? `(${bailoutCount})` : "(opsional)"}`}
             {tab === "peserta" && `👥 Peserta ${participantIds.length > 0 ? `(${participantIds.length})` : "(opsional)"}`}
+            {tab === "bailout" && `💰 Dana Talangan ${bailoutCount > 0 ? `(${bailoutCount})` : "(opsional)"}`}
           </button>
         ))}
       </div>
@@ -1001,6 +1070,7 @@ export function TravelRequestForm({
                   type="submit"
                   variant="secondary"
                   isLoading={isLoading && submitAction === "submit"}
+                  disabled={isSubmitDisabled}
                   onClick={() => setSubmitAction("submit")}
                 >
                   {submitAndSubmitLabel}

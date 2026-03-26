@@ -193,6 +193,214 @@ function assertBailoutAccountingAccounts(input: {
   }
 }
 
+function assertSettlementAccounts(input: {
+  expenseTypes: COAType[];
+  advanceType: COAType;
+  refundAccountType?: COAType;
+  employeeReceivableType?: COAType;
+  employeePayableType?: COAType;
+}) {
+  if (input.expenseTypes.some((type) => type !== COAType.EXPENSE)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Semua akun beban settlement harus bertipe EXPENSE/Beban",
+    });
+  }
+
+  if (input.advanceType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun uang muka settlement harus bertipe ASSET/Aset",
+    });
+  }
+
+  if (input.refundAccountType && input.refundAccountType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun kas/bank untuk refund settlement harus bertipe ASSET/Aset",
+    });
+  }
+
+  if (input.employeeReceivableType && input.employeeReceivableType !== COAType.ASSET) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun piutang karyawan settlement harus bertipe ASSET/Aset",
+    });
+  }
+
+  if (input.employeePayableType && input.employeePayableType !== COAType.LIABILITY) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Akun hutang karyawan settlement harus bertipe LIABILITY/Liabilitas",
+    });
+  }
+}
+
+function assertBalancedJournalLines(
+  lines: Array<{ debitAmount: Prisma.Decimal | number; creditAmount: Prisma.Decimal | number }>,
+) {
+  if (lines.length < 2) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Jurnal settlement harus memiliki minimal 2 baris",
+    });
+  }
+
+  let totalDebit = 0;
+  let totalCredit = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const debit = Number(line.debitAmount ?? 0);
+    const credit = Number(line.creditAmount ?? 0);
+
+    if ((debit <= 0 && credit <= 0) || (debit > 0 && credit > 0)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Baris jurnal settlement ke-${index + 1} harus memiliki salah satu debit atau kredit`,
+      });
+    }
+
+    totalDebit += debit;
+    totalCredit += credit;
+  }
+
+  if (Math.abs(totalDebit - totalCredit) > 0.001) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Jurnal settlement tidak seimbang. Total debit ${totalDebit} harus sama dengan total kredit ${totalCredit}`,
+    });
+  }
+
+  return { totalDebit, totalCredit };
+}
+
+async function createPostedJournalWithLines(
+  tx: DbTx,
+  input: {
+    tenantId: string | null;
+    transactionDate: Date;
+    description: string;
+    sourceType: JournalSourceType;
+    claimId?: string;
+    bailoutId?: string;
+    referenceNumber?: string;
+    notes?: string;
+    createdById: string;
+    lines: Array<{
+      chartOfAccountId: string;
+      balanceAccountId?: string;
+      description?: string;
+      debitAmount: Prisma.Decimal | number;
+      creditAmount: Prisma.Decimal | number;
+    }>;
+  },
+) {
+  assertBalancedJournalLines(input.lines);
+
+  const coaIds = [...new Set(input.lines.map((line) => line.chartOfAccountId))];
+  const balanceIds = [...new Set(input.lines.map((line) => line.balanceAccountId).filter(Boolean))] as string[];
+
+  const [coas, balanceAccounts, claim, bailout] = await Promise.all([
+    tx.chartOfAccount.findMany({
+      where: {
+        id: { in: coaIds },
+        tenantId: input.tenantId,
+        isActive: true,
+      },
+      select: { id: true },
+    }),
+    balanceIds.length > 0
+      ? tx.balanceAccount.findMany({
+          where: {
+            id: { in: balanceIds },
+            tenantId: input.tenantId,
+            isActive: true,
+            deletedAt: null,
+          },
+          select: { id: true },
+        })
+      : Promise.resolve([]),
+    input.claimId
+      ? tx.claim.findUnique({
+          where: { id: input.claimId },
+          select: { id: true, tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    input.bailoutId
+      ? tx.bailout.findUnique({
+          where: { id: input.bailoutId },
+          select: { id: true, tenantId: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (coas.length !== coaIds.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Ada akun COA settlement yang tidak ditemukan, tidak aktif, atau bukan milik tenant aktif",
+    });
+  }
+
+  if (balanceAccounts.length !== balanceIds.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Ada balance account settlement yang tidak ditemukan, tidak aktif, atau bukan milik tenant aktif",
+    });
+  }
+
+  if (claim) {
+    if (claim.deletedAt || claim.tenantId !== input.tenantId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Claim settlement tidak valid" });
+    }
+  }
+
+  if (bailout) {
+    if (bailout.deletedAt || bailout.tenantId !== input.tenantId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Bailout settlement tidak valid" });
+    }
+  }
+
+  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient, input.tenantId);
+
+  return tx.journalEntry.create({
+    data: {
+      tenantId: input.tenantId,
+      journalNumber,
+      transactionDate: input.transactionDate,
+      description: input.description,
+      sourceType: input.sourceType,
+      sourceId: input.claimId ?? input.bailoutId,
+      claimId: input.claimId,
+      bailoutId: input.bailoutId,
+      referenceNumber: input.referenceNumber,
+      notes: input.notes,
+      status: JournalStatus.POSTED,
+      createdById: input.createdById,
+      postedById: input.createdById,
+      postedAt: new Date(),
+      lines: {
+        create: input.lines.map((line, index) => ({
+          chartOfAccountId: line.chartOfAccountId,
+          balanceAccountId: line.balanceAccountId,
+          description: line.description,
+          debitAmount: line.debitAmount,
+          creditAmount: line.creditAmount,
+          lineNumber: index + 1,
+        })),
+      },
+    },
+    include: {
+      lines: {
+        orderBy: { lineNumber: "asc" },
+        include: {
+          chartOfAccount: { select: { id: true, code: true, name: true } },
+          balanceAccount: { select: { id: true, code: true, name: true } },
+        },
+      },
+    },
+  });
+}
+
 async function createPostedDoubleEntryJournal(
   tx: DbTx,
   input: {
@@ -952,8 +1160,20 @@ export const financeRouter = createTRPCRouter({
     .input(
       z.object({
         bailoutId: z.string().min(1),
-        expenseChartOfAccountId: z.string().min(1),
+        expenseChartOfAccountId: z.string().min(1).optional(),
+        expenseLines: z.array(
+          z.object({
+            chartOfAccountId: z.string().min(1),
+            amount: z.number().positive(),
+            description: z.string().optional(),
+          }),
+        ).min(1).optional(),
         advanceChartOfAccountId: z.string().min(1),
+        varianceHandling: z.enum(["REQUIRE_EXACT", "REFUND_TO_BANK", "REFUND_TO_RECEIVABLE", "TOPUP_TO_PAYABLE"]).optional(),
+        refundBankChartOfAccountId: z.string().min(1).optional(),
+        refundBankBalanceAccountId: z.string().min(1).optional(),
+        employeeReceivableChartOfAccountId: z.string().min(1).optional(),
+        employeePayableChartOfAccountId: z.string().min(1).optional(),
         transactionDate: z.coerce.date().optional(),
         notes: z.string().optional(),
         referenceNumber: z.string().optional(),
@@ -998,27 +1218,61 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      const [expenseCoa, advanceCoa] = await Promise.all([
-        ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
-            id: input.expenseChartOfAccountId,
-            isActive: true,
-          } satisfies Prisma.ChartOfAccountWhereInput),
-        }),
-        ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
-            id: input.advanceChartOfAccountId,
-            isActive: true,
-          } satisfies Prisma.ChartOfAccountWhereInput),
-        }),
-      ]);
+      const normalizedExpenseLines = input.expenseLines && input.expenseLines.length > 0
+        ? input.expenseLines
+        : input.expenseChartOfAccountId
+          ? [{
+              chartOfAccountId: input.expenseChartOfAccountId,
+              amount: Number(bailout.amount),
+              description: `Settlement bailout ${bailout.bailoutNumber}`,
+            }]
+          : [];
 
-      if (!expenseCoa) {
+      if (normalizedExpenseLines.length === 0) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Bagan Akun beban settlement tidak ditemukan atau tidak aktif",
+          code: "BAD_REQUEST",
+          message: "Settlement membutuhkan minimal satu akun beban atau expenseLines",
         });
       }
+
+      const varianceHandling = input.varianceHandling ?? "REQUIRE_EXACT";
+      const expenseCoaIds = [...new Set(normalizedExpenseLines.map((line) => line.chartOfAccountId))];
+      const coaIdsToFetch = [
+        ...expenseCoaIds,
+        input.advanceChartOfAccountId,
+        input.refundBankChartOfAccountId,
+        input.employeeReceivableChartOfAccountId,
+        input.employeePayableChartOfAccountId,
+      ].filter(Boolean) as string[];
+
+      const [coas, refundBalanceAccount] = await Promise.all([
+        ctx.db.chartOfAccount.findMany({
+          where: withTenantWhere(ctx, {
+            id: { in: coaIdsToFetch },
+            isActive: true,
+          } satisfies Prisma.ChartOfAccountWhereInput),
+        }),
+        input.refundBankBalanceAccountId
+          ? ctx.db.balanceAccount.findFirst({
+              where: withTenantWhere(ctx, {
+                id: input.refundBankBalanceAccountId,
+                isActive: true,
+                deletedAt: null,
+              } satisfies Prisma.BalanceAccountWhereInput),
+            })
+          : Promise.resolve(null),
+      ]);
+
+      const coaMap = new Map(coas.map((coa) => [coa.id, coa]));
+      const missingCoaId = coaIdsToFetch.find((id) => !coaMap.has(id));
+      if (missingCoaId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Bagan akun settlement tidak ditemukan atau tidak aktif: ${missingCoaId}`,
+        });
+      }
+
+      const advanceCoa = coaMap.get(input.advanceChartOfAccountId);
       if (!advanceCoa) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -1026,26 +1280,166 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      assertClaimAccountingAccounts({
-        expenseType: expenseCoa.accountType,
-        offsetType: advanceCoa.accountType,
+      if (input.refundBankBalanceAccountId && !refundBalanceAccount) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Balance account refund settlement tidak ditemukan atau tidak aktif",
+        });
+      }
+
+      const totalRealization = normalizedExpenseLines.reduce((sum, line) => sum + Number(line.amount), 0);
+      if (totalRealization <= 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Total realisasi settlement harus lebih besar dari 0",
+        });
+      }
+
+      const advanceAmount = Number(bailout.amount);
+      const variance = Number((advanceAmount - totalRealization).toFixed(2));
+      const journalDescription = `Settlement bailout ${bailout.bailoutNumber}`;
+
+      assertSettlementAccounts({
+        expenseTypes: normalizedExpenseLines.map((line) => coaMap.get(line.chartOfAccountId)?.accountType).filter(Boolean) as COAType[],
+        advanceType: advanceCoa.accountType,
+        refundAccountType: input.refundBankChartOfAccountId
+          ? coaMap.get(input.refundBankChartOfAccountId)?.accountType
+          : undefined,
+        employeeReceivableType: input.employeeReceivableChartOfAccountId
+          ? coaMap.get(input.employeeReceivableChartOfAccountId)?.accountType
+          : undefined,
+        employeePayableType: input.employeePayableChartOfAccountId
+          ? coaMap.get(input.employeePayableChartOfAccountId)?.accountType
+          : undefined,
       });
+
+      if (Math.abs(variance) <= 0.001 && varianceHandling !== "REQUIRE_EXACT") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Variance handling hanya boleh dipakai jika ada selisih settlement",
+        });
+      }
+
+      if (variance > 0) {
+        if (varianceHandling === "REQUIRE_EXACT") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Realisasi settlement (${totalRealization}) lebih kecil dari uang muka (${advanceAmount}). Pilih REFUND_TO_BANK atau REFUND_TO_RECEIVABLE.`,
+          });
+        }
+        if (varianceHandling === "TOPUP_TO_PAYABLE") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "TOPUP_TO_PAYABLE hanya valid bila realisasi lebih besar dari uang muka",
+          });
+        }
+        if (varianceHandling === "REFUND_TO_BANK") {
+          if (!input.refundBankChartOfAccountId || !input.refundBankBalanceAccountId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "REFUND_TO_BANK membutuhkan akun kas/bank dan balance account refund",
+            });
+          }
+        }
+        if (varianceHandling === "REFUND_TO_RECEIVABLE" && !input.employeeReceivableChartOfAccountId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "REFUND_TO_RECEIVABLE membutuhkan akun piutang karyawan",
+          });
+        }
+      }
+
+      if (variance < 0) {
+        if (varianceHandling !== "TOPUP_TO_PAYABLE") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Realisasi settlement (${totalRealization}) lebih besar dari uang muka (${advanceAmount}). Gunakan TOPUP_TO_PAYABLE.`,
+          });
+        }
+        if (!input.employeePayableChartOfAccountId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "TOPUP_TO_PAYABLE membutuhkan akun hutang karyawan",
+          });
+        }
+      }
+
+      const journalLines: Array<{
+        chartOfAccountId: string;
+        balanceAccountId?: string;
+        description?: string;
+        debitAmount: number;
+        creditAmount: number;
+      }> = normalizedExpenseLines.map((line) => ({
+        chartOfAccountId: line.chartOfAccountId,
+        description: line.description || journalDescription,
+        debitAmount: Number(line.amount),
+        creditAmount: 0,
+      }));
+
+      if (variance > 0 && varianceHandling === "REFUND_TO_BANK") {
+        journalLines.push({
+          chartOfAccountId: input.refundBankChartOfAccountId!,
+          balanceAccountId: input.refundBankBalanceAccountId,
+          description: `Pengembalian selisih settlement bailout ${bailout.bailoutNumber}`,
+          debitAmount: variance,
+          creditAmount: 0,
+        });
+      }
+
+      if (variance > 0 && varianceHandling === "REFUND_TO_RECEIVABLE") {
+        journalLines.push({
+          chartOfAccountId: input.employeeReceivableChartOfAccountId!,
+          description: `Piutang karyawan atas selisih settlement bailout ${bailout.bailoutNumber}`,
+          debitAmount: variance,
+          creditAmount: 0,
+        });
+      }
+
+      journalLines.push({
+        chartOfAccountId: advanceCoa.id,
+        description: `Penutupan uang muka bailout ${bailout.bailoutNumber}`,
+        debitAmount: 0,
+        creditAmount: advanceAmount,
+      });
+
+      if (variance < 0 && varianceHandling === "TOPUP_TO_PAYABLE") {
+        journalLines.push({
+          chartOfAccountId: input.employeePayableChartOfAccountId!,
+          description: `Hutang karyawan atas selisih settlement bailout ${bailout.bailoutNumber}`,
+          debitAmount: 0,
+          creditAmount: Math.abs(variance),
+        });
+      }
+
+      assertBalancedJournalLines(journalLines);
 
       const txDate = input.transactionDate ?? new Date();
       const journalEntry = await ctx.db.$transaction(async (tx) => {
-        return createPostedDoubleEntryJournal(tx, {
+        const created = await createPostedJournalWithLines(tx, {
           tenantId: bailout.tenantId,
           transactionDate: txDate,
-          description: `Settlement bailout ${bailout.bailoutNumber}`,
+          description: journalDescription,
           sourceType: JournalSourceType.SETTLEMENT,
           bailoutId: bailout.id,
-          chartOfAccountId: expenseCoa.id,
-          offsetChartOfAccountId: advanceCoa.id,
-          amount: bailout.amount,
           referenceNumber: input.referenceNumber,
           notes: input.notes,
           createdById: ctx.session.user.id,
+          lines: journalLines,
         });
+
+        if (variance > 0 && varianceHandling === "REFUND_TO_BANK" && input.refundBankBalanceAccountId) {
+          await tx.balanceAccount.update({
+            where: { id: input.refundBankBalanceAccountId },
+            data: {
+              balance: {
+                increment: variance,
+              },
+            },
+          });
+        }
+
+        return created;
       });
 
       await ctx.db.auditLog.create({
@@ -1059,13 +1453,30 @@ export const financeRouter = createTRPCRouter({
             action: "settlement_transaction",
             journalEntryId: journalEntry.id,
             journalNumber: journalEntry.journalNumber,
-            expenseChartOfAccountId: expenseCoa.id,
             advanceChartOfAccountId: advanceCoa.id,
+            expenseLines: normalizedExpenseLines,
+            totalRealization,
+            advanceAmount,
+            variance,
+            varianceHandling,
+            refundBankChartOfAccountId: input.refundBankChartOfAccountId,
+            refundBankBalanceAccountId: input.refundBankBalanceAccountId,
+            employeeReceivableChartOfAccountId: input.employeeReceivableChartOfAccountId,
+            employeePayableChartOfAccountId: input.employeePayableChartOfAccountId,
           },
         },
       });
 
-      return { journalEntry, bailout };
+      return {
+        journalEntry,
+        bailout,
+        settlement: {
+          totalRealization,
+          advanceAmount,
+          variance,
+          varianceHandling,
+        },
+      };
     }),
 
   // ─── BALANCE ACCOUNTS ─────────────────────────────────────────────────────

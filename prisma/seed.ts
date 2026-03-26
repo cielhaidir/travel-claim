@@ -1,7 +1,5 @@
 import {
   PrismaClient,
-  ApprovalLevel,
-  ApprovalStatus,
   BailoutCategory,
   BailoutStatus,
   ClaimStatus,
@@ -13,15 +11,11 @@ import {
   type Role,
 } from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
-import {
-  generateApprovalNumber,
-  generateBailoutNumber,
-  generateClaimNumber,
-  generateJournalEntryNumber,
-  generateJournalTransactionNumber,
-  generateRequestNumber,
-} from "../src/lib/utils/numberGenerators";
 import { bootstrapTenantAccounting } from "../src/lib/accounting/bootstrap";
+import {
+  ensureTenantRoleCatalog,
+  getTenantSystemRoleId,
+} from "../src/server/auth/permission-store";
 
 const prisma = new PrismaClient();
 
@@ -33,13 +27,23 @@ async function hash(plain: string) {
   return bcrypt.hash(plain, 10);
 }
 
-async function syncUserRoles(users: Array<{ id: string; role: Role }>) {
+async function syncUserRoles(
+  users: Array<{ id: string; role: Role; tenantId: string }>,
+) {
   for (const user of users) {
-    await prisma.$executeRaw`
-      INSERT INTO "UserRole" ("userId", "role", "createdAt")
-      VALUES (${user.id}, ${user.role}::"Role", NOW())
-      ON CONFLICT ("userId", "role") DO NOTHING
-    `;
+    await prisma.userRole.deleteMany({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    await prisma.userRole.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        tenantId: user.tenantId,
+      },
+    });
   }
 }
 
@@ -87,28 +91,39 @@ async function backfillTenantOwnership(defaultTenantId: string) {
 
 async function upsertDefaultMembership(
   userId: string,
-  role: string,
+  role: Role,
   tenantId: string,
   isDefault = true,
 ) {
-  await prisma.$executeRaw`
-    INSERT INTO "TenantMembership" (
-      "id", "userId", "tenantId", "role", "status", "isDefault", "createdAt", "updatedAt", "activatedAt"
-    )
-    VALUES (
-      md5(random()::text || clock_timestamp()::text),
-      ${userId},
-      ${tenantId},
-      ${role}::"Role",
-      'ACTIVE'::"MembershipStatus",
-      ${isDefault},
-      NOW(),
-      NOW(),
-      NOW()
-    )
-    ON CONFLICT ("userId", "tenantId") DO UPDATE
-    SET "role" = ${role}::"Role", "status" = 'ACTIVE', "isDefault" = ${isDefault}, "updatedAt" = NOW()
-  `;
+  const customRoleId = await getTenantSystemRoleId(prisma, tenantId, role);
+
+  await prisma.tenantMembership.upsert({
+    where: {
+      userId_tenantId: {
+        userId,
+        tenantId,
+      },
+    },
+    update: {
+      role,
+      customRoleId,
+      status: "ACTIVE",
+      isDefault,
+      activatedAt: new Date(),
+      invitedAt: null,
+      suspendedAt: null,
+      suspendedReason: null,
+    },
+    create: {
+      userId,
+      tenantId,
+      role,
+      customRoleId,
+      status: "ACTIVE",
+      isDefault,
+      activatedAt: new Date(),
+    },
+  });
 }
 
 async function pruneMemberships(userId: string, allowedTenantIds: string[]) {
@@ -129,6 +144,8 @@ async function main() {
 
   const pw = await hash(PASSWORD);
   const { rootTenantId, defaultTenantId } = await ensureTenantBootstrap();
+  await ensureTenantRoleCatalog(prisma, rootTenantId);
+  await ensureTenantRoleCatalog(prisma, defaultTenantId);
   await backfillTenantOwnership(defaultTenantId);
 
   // ── 1. Departments (no chiefId yet — set after users are created) ───────────
@@ -511,25 +528,25 @@ async function main() {
   console.log("\n✅ All users created\n");
 
   await syncUserRoles([
-    { id: rootUser.id, role: rootUser.role },
-    { id: executive.id, role: executive.role },
-    { id: director.id, role: director.role },
-    { id: financeChief.id, role: financeChief.role },
-    { id: financeStaff1.id, role: financeStaff1.role },
-    { id: financeStaff2.id, role: financeStaff2.role },
-    { id: salesChief.id, role: salesChief.role },
-    { id: salesStaff1.id, role: salesStaff1.role },
-    { id: salesStaff2.id, role: salesStaff2.role },
-    { id: engChief.id, role: engChief.role },
-    { id: engStaff1.id, role: engStaff1.role },
-    { id: engStaff2.id, role: engStaff2.role },
-    { id: adminChief.id, role: adminChief.role },
-    { id: adminStaff1.id, role: adminStaff1.role },
+    { id: rootUser.id, role: "ADMIN", tenantId: defaultTenantId },
+    { id: executive.id, role: executive.role, tenantId: defaultTenantId },
+    { id: director.id, role: director.role, tenantId: defaultTenantId },
+    { id: financeChief.id, role: financeChief.role, tenantId: defaultTenantId },
+    { id: financeStaff1.id, role: financeStaff1.role, tenantId: defaultTenantId },
+    { id: financeStaff2.id, role: financeStaff2.role, tenantId: defaultTenantId },
+    { id: salesChief.id, role: salesChief.role, tenantId: defaultTenantId },
+    { id: salesStaff1.id, role: salesStaff1.role, tenantId: defaultTenantId },
+    { id: salesStaff2.id, role: salesStaff2.role, tenantId: defaultTenantId },
+    { id: engChief.id, role: engChief.role, tenantId: defaultTenantId },
+    { id: engStaff1.id, role: engStaff1.role, tenantId: defaultTenantId },
+    { id: engStaff2.id, role: engStaff2.role, tenantId: defaultTenantId },
+    { id: adminChief.id, role: adminChief.role, tenantId: defaultTenantId },
+    { id: adminStaff1.id, role: adminStaff1.role, tenantId: defaultTenantId },
   ]);
   console.log("  ✅ UserRole rows synchronized from legacy role\n");
 
   await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, false);
-  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, true);
+  await upsertDefaultMembership(rootUser.id, "ADMIN", defaultTenantId, true);
   await upsertDefaultMembership(executive.id, executive.role, defaultTenantId);
   await upsertDefaultMembership(director.id, director.role, defaultTenantId);
   await upsertDefaultMembership(
@@ -716,7 +733,7 @@ async function createSampleBusinessData(input: {
     await Promise.all([
       findCoaByCode(tenantId, "1110"),
       findCoaByCode(tenantId, "1120"),
-      findCoaByCode(tenantId, "1130"),
+      findCoaByCode(tenantId, "1131"),
       findCoaByCode(tenantId, "3100"),
       findCoaByCode(tenantId, "6110"),
       findCoaByCode(tenantId, "6130"),

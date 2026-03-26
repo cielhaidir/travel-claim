@@ -46,6 +46,15 @@ export const MANAGEMENT_ROLES: Role[] = [
   ROLES.ADMIN,
 ];
 
+export const CRM_ROLES: Role[] = [
+  ROLES.ROOT,
+  ROLES.ADMIN,
+  ROLES.DIRECTOR,
+  ROLES.MANAGER,
+  ROLES.SALES_CHIEF,
+  ROLES.SALES_EMPLOYEE,
+];
+
 export const ROLE_PRECEDENCE: Role[] = [
   ROLES.ROOT,
   ROLES.ADMIN,
