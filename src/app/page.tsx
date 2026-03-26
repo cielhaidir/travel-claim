@@ -1,11 +1,21 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
+import {
+  BellRing,
+  CheckCircle2,
+  LockKeyhole,
+  PlaneTakeoff,
+  Smartphone,
+  WalletCards,
+} from "lucide-react";
 import { auth } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: "Travel & Claim System - Streamline Your Travel and Expense Management",
-  description: "Efficient Trip request and claim management system with automated approvals, integrated with Microsoft authentication.",
+  description:
+    "Efficient Trip request and claim management system with automated approvals, integrated with Microsoft authentication.",
   openGraph: {
     title: "Travel & Claim System",
     description: "Streamline your travel and expense management",
@@ -15,15 +25,13 @@ export const metadata: Metadata = {
 
 export default async function LandingPage() {
   const session = await auth();
-  
-  // Redirect authenticated users to dashboard
+
   if (session?.user) {
     redirect("/dashboard");
   }
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Header */}
       <header className="border-b bg-white">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center space-x-2">
@@ -39,7 +47,6 @@ export default async function LandingPage() {
         </div>
       </header>
 
-      {/* Hero Section */}
       <main className="flex-1">
         <section className="container mx-auto px-4 py-16 md:py-24">
           <div className="mx-auto max-w-3xl text-center">
@@ -47,8 +54,9 @@ export default async function LandingPage() {
               Streamline Your Business Trip and Expense Management
             </h1>
             <p className="mb-8 text-lg text-gray-600 md:text-xl">
-              Manage trip requests, submit claims, and track approvals all in one place. 
-              Secure, efficient, and integrated with your Microsoft account.
+              Manage trip requests, submit claims, and track approvals all in one
+              place. Secure, efficient, and integrated with your Microsoft
+              account.
             </p>
             <Link
               href="/login"
@@ -59,7 +67,6 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* Features Section */}
         <section className="border-t bg-gray-50 py-16">
           <div className="container mx-auto px-4">
             <h2 className="mb-12 text-center text-3xl font-bold text-gray-900">
@@ -69,38 +76,37 @@ export default async function LandingPage() {
               <FeatureCard
                 title="Bistrip Requests"
                 description="Create and manage trip requests with multi-level approvals and real-time status tracking."
-                icon="✈️"
+                icon={PlaneTakeoff}
               />
               <FeatureCard
                 title="Expense Claims"
                 description="Submit entertainment and non-entertainment claims with AI-powered receipt processing."
-                icon="💰"
+                icon={WalletCards}
               />
               <FeatureCard
                 title="Smart Approvals"
                 description="Automated approval routing based on amount thresholds and organizational hierarchy."
-                icon="✅"
+                icon={CheckCircle2}
               />
               <FeatureCard
                 title="Real-time Notifications"
                 description="Stay updated with instant notifications for approvals, status changes, and actions required."
-                icon="🔔"
+                icon={BellRing}
               />
               <FeatureCard
                 title="Secure Authentication"
                 description="Enterprise-grade security with Microsoft Entra ID integration and role-based access control."
-                icon="🔒"
+                icon={LockKeyhole}
               />
               <FeatureCard
                 title="Mobile Ready"
                 description="Progressive web app with offline support for submitting claims on the go."
-                icon="📱"
+                icon={Smartphone}
               />
             </div>
           </div>
         </section>
 
-        {/* Security Section */}
         <section className="border-t py-16">
           <div className="container mx-auto px-4">
             <div className="mx-auto max-w-3xl text-center">
@@ -108,9 +114,10 @@ export default async function LandingPage() {
                 Enterprise Security & Compliance
               </h2>
               <p className="mb-8 text-lg text-gray-600">
-                Built with security and compliance at its core. All data is encrypted, 
-                audit trails are comprehensive, and access is strictly controlled through 
-                role-based permissions integrated with your Microsoft tenant.
+                Built with security and compliance at its core. All data is
+                encrypted, audit trails are comprehensive, and access is strictly
+                controlled through role-based permissions integrated with your
+                Microsoft tenant.
               </p>
               <div className="flex flex-wrap justify-center gap-4 text-sm text-gray-600">
                 <span className="rounded-full border border-gray-300 px-4 py-2">
@@ -131,11 +138,10 @@ export default async function LandingPage() {
         </section>
       </main>
 
-      {/* Footer */}
       <footer className="border-t bg-gray-50 py-8">
         <div className="container mx-auto px-4">
           <div className="flex flex-col items-center justify-between gap-4 text-sm text-gray-600 md:flex-row">
-            <div>© 2026 Travel & Claim System. All rights reserved.</div>
+            <div>&copy; 2026 Travel & Claim System. All rights reserved.</div>
             <div className="flex gap-6">
               <Link href="#" className="hover:text-gray-900">
                 Privacy Policy
@@ -161,11 +167,15 @@ function FeatureCard({
 }: {
   title: string;
   description: string;
-  icon: string;
+  icon: LucideIcon;
 }) {
+  const Icon = icon;
+
   return (
     <div className="rounded-lg border bg-white p-6">
-      <div className="mb-4 text-4xl">{icon}</div>
+      <div className="mb-4 text-blue-600">
+        <Icon className="h-10 w-10" strokeWidth={2} />
+      </div>
       <h3 className="mb-2 text-xl font-semibold text-gray-900">{title}</h3>
       <p className="text-gray-600">{description}</p>
     </div>

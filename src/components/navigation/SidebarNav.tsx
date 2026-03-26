@@ -2,6 +2,20 @@
 
 import Link from "next/link";
 import type { Session } from "next-auth";
+import type { LucideIcon } from "lucide-react";
+import {
+  BadgeCheck,
+  Building2,
+  FolderKanban,
+  HandCoins,
+  LayoutDashboard,
+  PlaneTakeoff,
+  ReceiptText,
+  ShieldCheck,
+  UserCircle2,
+  Users,
+  Wallet,
+} from "lucide-react";
 import {
   hasPermissionMap,
   type PermissionAction,
@@ -10,7 +24,7 @@ import {
 interface NavItem {
   label: string;
   href: string;
-  icon: string;
+  icon: LucideIcon;
   moduleKey: string;
   action?: PermissionAction;
 }
@@ -19,67 +33,67 @@ const navigationItems: NavItem[] = [
   {
     label: "Dasbor",
     href: "/dashboard",
-    icon: "DS",
+    icon: LayoutDashboard,
     moduleKey: "dashboard",
   },
   {
     label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
-    icon: "PD",
+    icon: PlaneTakeoff,
     moduleKey: "travel",
   },
   {
     label: "Proyek",
     href: "/projects",
-    icon: "PR",
+    icon: FolderKanban,
     moduleKey: "projects",
   },
   {
     label: "Persetujuan Bailout",
     href: "/bailout",
-    icon: "BO",
+    icon: HandCoins,
     moduleKey: "bailout",
   },
   {
     label: "Klaim",
     href: "/claims",
-    icon: "KL",
+    icon: ReceiptText,
     moduleKey: "claims",
   },
   {
     label: "Persetujuan",
     href: "/approvals",
-    icon: "AP",
+    icon: BadgeCheck,
     moduleKey: "approvals",
   },
   {
     label: "Akuntansi & Keuangan",
     href: "/accounting",
-    icon: "AK",
+    icon: Wallet,
     moduleKey: "accounting",
   },
   {
     label: "Manajemen Pengguna",
     href: "/admin/users",
-    icon: "US",
+    icon: Users,
     moduleKey: "users",
   },
   {
     label: "Master Tenant",
     href: "/admin/tenants",
-    icon: "TN",
+    icon: Building2,
     moduleKey: "tenants",
   },
   {
     label: "Manajemen Peran",
     href: "/admin/roles",
-    icon: "RB",
+    icon: ShieldCheck,
     moduleKey: "roles",
   },
   {
     label: "Profil",
     href: "/profile",
-    icon: "PF",
+    icon: UserCircle2,
     moduleKey: "profile",
   },
 ];
@@ -110,8 +124,9 @@ export function SidebarNav({
   });
 
   return (
-    <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+    <nav className="flex-1 overflow-y-auto px-3 py-4 bg-white">
       {allowedItems.map((item) => {
+        const Icon = item.icon;
         const isActive =
           currentPath === item.href ||
           (item.href !== "/" && currentPath.startsWith(item.href));
@@ -121,16 +136,20 @@ export function SidebarNav({
             key={item.href}
             href={item.href}
             onClick={onNavigate}
-            className={`flex items-center space-x-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            className={`mb-1 flex items-center gap-3 rounded-md px-3 py-2.5 transition-colors ${
               isActive
-                ? "bg-blue-50 text-blue-700"
-                : "text-gray-700 hover:bg-gray-100"
+                ? "bg-[#2f5ec7] text-white shadow-sm"
+                : "text-[#3e3e42] hover:bg-gray-100"
             }`}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-[10px] font-semibold tracking-[0.14em] text-gray-600">
-              {item.icon}
+            <span
+              className={`inline-flex h-8 w-8 items-center justify-center ${
+                isActive ? "text-white" : "text-[#4a4a4e]"
+              }`}
+            >
+              <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
             </span>
-            <span>{item.label}</span>
+            <span className="text-sm font-medium">{item.label}</span>
           </Link>
         );
       })}
