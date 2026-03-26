@@ -10,6 +10,13 @@ export type HcAttendanceStatus =
   | "remote";
 export type HcAttendanceSource = "mobile" | "web" | "machine" | "import";
 export type HcWorkType = "regular" | "weekend" | "holiday" | "collective_leave";
+export type HcPayrollComponentCategory = "earning" | "deduction" | "employer_cost" | "benefit";
+export type HcPayrollCalculationMethod = "fixed" | "percentage" | "manual" | "formula";
+export type HcPayrollPaidBy = "employee" | "company" | "shared";
+export type HcPayrollTaxTreatment = "taxable" | "non_taxable" | "tax_deduction" | "informational";
+export type HcPayrollPeriodStatus = "open" | "processing" | "finalized" | "cancelled";
+export type HcPayrollRunStatus = "draft" | "calculated" | "posted" | "cancelled";
+export type HcPayrollProrationMethod = "calendar_day" | "workday" | "none";
 
 export type PaginationInput = {
   page: number;

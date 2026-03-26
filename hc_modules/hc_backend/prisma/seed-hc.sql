@@ -7,7 +7,7 @@
 BEGIN;
 
 -- 1) Workday baseline
-INSERT INTO hc_workdays (work_date, is_workday, work_type, description)
+INSERT INTO workdays (work_date, is_workday, work_type, description)
 VALUES
   ('2026-03-16', true, 'regular', 'Regular Monday'),
   ('2026-03-17', true, 'regular', 'Regular Tuesday'),
@@ -34,7 +34,7 @@ secondary_user AS (
 )
 
 -- 3) Attendance sample untuk user pertama
-INSERT INTO hc_attendance (
+INSERT INTO attendance (
   id,
   user_id,
   attendance_date,
@@ -64,7 +64,7 @@ WITH primary_user AS (
   ORDER BY "createdAt" ASC
   LIMIT 1
 )
-INSERT INTO hc_overtime_requests (
+INSERT INTO overtime_requests (
   id,
   request_no,
   user_id,
@@ -102,7 +102,7 @@ WITH secondary_user AS (
   ORDER BY "createdAt" ASC
   OFFSET 1 LIMIT 1
 )
-INSERT INTO hc_leave_requests (
+INSERT INTO leave_requests (
   id,
   request_no,
   user_id,
@@ -141,11 +141,11 @@ WITH primary_user AS (
   LIMIT 1
 ), overtime_request AS (
   SELECT id
-  FROM hc_overtime_requests
+  FROM overtime_requests
   WHERE request_no = 'OT-SEED-20260317-01'
   LIMIT 1
 )
-INSERT INTO hc_approval_logs (
+INSERT INTO approval_logs (
   id,
   module_name,
   reference_id,
@@ -163,7 +163,7 @@ SELECT
 FROM primary_user, overtime_request
 WHERE NOT EXISTS (
   SELECT 1
-  FROM hc_approval_logs l
+  FROM approval_logs l
   WHERE l.module_name = 'overtime'
     AND l.reference_id = overtime_request.id
     AND l.action = 'submit'
@@ -173,8 +173,8 @@ WHERE NOT EXISTS (
 COMMIT;
 
 -- Query bantu verifikasi:
--- SELECT * FROM hc_workdays ORDER BY work_date;
--- SELECT * FROM hc_attendance ORDER BY attendance_date, user_id;
--- SELECT * FROM hc_overtime_requests ORDER BY created_at DESC;
--- SELECT * FROM hc_leave_requests ORDER BY created_at DESC;
--- SELECT * FROM hc_approval_logs ORDER BY created_at DESC;
+-- SELECT * FROM workdays ORDER BY work_date;
+-- SELECT * FROM attendance ORDER BY attendance_date, user_id;
+-- SELECT * FROM overtime_requests ORDER BY created_at DESC;
+-- SELECT * FROM leave_requests ORDER BY created_at DESC;
+-- SELECT * FROM approval_logs ORDER BY created_at DESC;

@@ -1,0 +1,606 @@
+{
+  "info": {
+    "_postman_id": "8cd7ee07-1fd1-4ed6-a50e-57bf1081a60b",
+    "name": "HC Service API",
+    "description": "Collection untuk testing service HC modular via endpoint tRPC. Catatan: modul HC saat ini belum terdaftar di appRouter utama, jadi endpoint dengan prefix {{hcNamespace}} baru akan aktif setelah router HC di-wire ke aplikasi.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "hcNamespace",
+      "value": "hc"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": "REPLACE_USER_ID"
+    },
+    {
+      "key": "approverId",
+      "value": "REPLACE_APPROVER_ID"
+    },
+    {
+      "key": "attendanceId",
+      "value": "REPLACE_ATTENDANCE_ID"
+    },
+    {
+      "key": "overtimeRequestId",
+      "value": "REPLACE_OVERTIME_REQUEST_ID"
+    },
+    {
+      "key": "leaveRequestId",
+      "value": "REPLACE_LEAVE_REQUEST_ID"
+    }
+  ],
+  "item": [
+    {
+      "name": "Attendance",
+      "item": [
+        {
+          "name": "Create Check In",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"attendanceDate\": \"2026-03-25T00:00:00.000Z\",\n    \"checkInAt\": \"2026-03-25T09:00:00.000Z\",\n    \"source\": \"web\",\n    \"notes\": \"Check in from Postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.attendance.createCheckIn",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.attendance.createCheckIn"
+              ]
+            },
+            "description": "Membuat check-in attendance."
+          }
+        },
+        {
+          "name": "Create Check Out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"attendanceDate\": \"2026-03-25T00:00:00.000Z\",\n    \"checkOutAt\": \"2026-03-25T18:00:00.000Z\",\n    \"notes\": \"Check out from Postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.attendance.createCheckOut",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.attendance.createCheckOut"
+              ]
+            },
+            "description": "Mengisi check-out attendance."
+          }
+        },
+        {
+          "name": "List By Period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"startDate\": \"2026-03-01T00:00:00.000Z\",\n    \"endDate\": \"2026-03-31T00:00:00.000Z\",\n    \"page\": 1,\n    \"pageSize\": 20\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.attendance.listByPeriod",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.attendance.listByPeriod"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Nightly Finalize Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"targetDate\": \"2026-03-25T00:00:00.000Z\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.attendance.nightlyFinalizeStatus",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.attendance.nightlyFinalizeStatus"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Overtime",
+      "item": [
+        {
+          "name": "Submit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"overtimeDate\": \"2026-03-25T00:00:00.000Z\",\n    \"startTime\": \"2026-03-25T18:00:00.000Z\",\n    \"endTime\": \"2026-03-25T20:00:00.000Z\",\n    \"reason\": \"Support deployment after office hours\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.overtime.submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.overtime.submit"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"requestId\": \"{{overtimeRequestId}}\",\n    \"approverId\": \"{{approverId}}\",\n    \"notes\": \"Approved from Postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.overtime.approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.overtime.approve"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"requestId\": \"{{overtimeRequestId}}\",\n    \"approverId\": \"{{approverId}}\",\n    \"rejectionReason\": \"Timesheet data is incomplete\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.overtime.reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.overtime.reject"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"status\": \"submitted\",\n    \"startDate\": \"2026-03-01T00:00:00.000Z\",\n    \"endDate\": \"2026-03-31T00:00:00.000Z\",\n    \"page\": 1,\n    \"pageSize\": 20\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.overtime.list",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.overtime.list"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Leave",
+      "item": [
+        {
+          "name": "Submit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"leaveType\": \"annual\",\n    \"startDate\": \"2026-03-26T00:00:00.000Z\",\n    \"endDate\": \"2026-03-27T00:00:00.000Z\",\n    \"reason\": \"Family event\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.leave.submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.leave.submit"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"requestId\": \"{{leaveRequestId}}\",\n    \"approverId\": \"{{approverId}}\",\n    \"notes\": \"Approved from Postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.leave.approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.leave.approve"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"requestId\": \"{{leaveRequestId}}\",\n    \"approverId\": \"{{approverId}}\",\n    \"rejectionReason\": \"Leave balance is insufficient\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.leave.reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.leave.reject"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"userId\": \"{{userId}}\",\n    \"leaveType\": \"annual\",\n    \"status\": \"submitted\",\n    \"startDate\": \"2026-03-01T00:00:00.000Z\",\n    \"endDate\": \"2026-03-31T00:00:00.000Z\",\n    \"page\": 1,\n    \"pageSize\": 20\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.leave.list",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.leave.list"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workday",
+      "item": [
+        {
+          "name": "Bulk Upsert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"items\": [\n      {\n        \"workDate\": \"2026-04-01T00:00:00.000Z\",\n        \"isWorkday\": true,\n        \"workType\": \"regular\",\n        \"description\": \"Regular working day\"\n      },\n      {\n        \"workDate\": \"2026-04-02T00:00:00.000Z\",\n        \"isWorkday\": false,\n        \"workType\": \"holiday\",\n        \"description\": \"National holiday\"\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.workday.bulkUpsert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.workday.bulkUpsert"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List By Period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"startDate\": \"2026-04-01T00:00:00.000Z\",\n    \"endDate\": \"2026-04-30T00:00:00.000Z\",\n    \"isWorkday\": true,\n    \"page\": 1,\n    \"pageSize\": 20\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.workday.listByPeriod",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.workday.listByPeriod"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Sync Impacted Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "disabled": true
+              },
+              {
+                "key": "x-trpc-source",
+                "value": "postman"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"json\": {\n    \"startDate\": \"2026-04-01T00:00:00.000Z\",\n    \"endDate\": \"2026-04-30T00:00:00.000Z\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/trpc/{{hcNamespace}}.workday.syncImpactedAttendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trpc",
+                "{{hcNamespace}}.workday.syncImpactedAttendance"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

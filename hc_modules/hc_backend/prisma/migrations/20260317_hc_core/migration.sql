@@ -11,7 +11,7 @@ CREATE TYPE hc_leave_type AS ENUM ('annual', 'sick', 'unpaid', 'maternity', 'pat
 CREATE TYPE hc_approval_module AS ENUM ('overtime', 'leave');
 CREATE TYPE hc_approval_action AS ENUM ('submit', 'approve', 'reject', 'cancel', 'revise');
 
-CREATE TABLE hc_workdays (
+CREATE TABLE workdays (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   work_date DATE NOT NULL UNIQUE,
   is_workday BOOLEAN NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE hc_workdays (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE hc_attendance (
+CREATE TABLE attendance (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT NOT NULL REFERENCES "User"(id),
   attendance_date DATE NOT NULL,
@@ -32,10 +32,10 @@ CREATE TABLE hc_attendance (
   notes TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_hc_attendance_user_date UNIQUE(user_id, attendance_date)
+  CONSTRAINT uq_attendance_user_date UNIQUE(user_id, attendance_date)
 );
 
-CREATE TABLE hc_overtime_requests (
+CREATE TABLE overtime_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_no VARCHAR(50) NOT NULL UNIQUE,
   user_id TEXT NOT NULL REFERENCES "User"(id),
@@ -50,10 +50,10 @@ CREATE TABLE hc_overtime_requests (
   rejection_reason TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT ck_hc_overtime_end_after_start CHECK (end_time > start_time)
+  CONSTRAINT ck_overtime_end_after_start CHECK (end_time > start_time)
 );
 
-CREATE TABLE hc_leave_requests (
+CREATE TABLE leave_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_no VARCHAR(50) NOT NULL UNIQUE,
   user_id TEXT NOT NULL REFERENCES "User"(id),
@@ -68,10 +68,10 @@ CREATE TABLE hc_leave_requests (
   rejection_reason TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT ck_hc_leave_start_end CHECK (end_date >= start_date)
+  CONSTRAINT ck_leave_start_end CHECK (end_date >= start_date)
 );
 
-CREATE TABLE hc_approval_logs (
+CREATE TABLE approval_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   module_name hc_approval_module NOT NULL,
   reference_id UUID NOT NULL,
@@ -81,10 +81,10 @@ CREATE TABLE hc_approval_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_hc_attendance_user_date ON hc_attendance(user_id, attendance_date);
-CREATE INDEX idx_hc_attendance_date_status ON hc_attendance(attendance_date, attendance_status);
-CREATE INDEX idx_hc_overtime_user_date ON hc_overtime_requests(user_id, overtime_date);
-CREATE INDEX idx_hc_overtime_status_date ON hc_overtime_requests(status, overtime_date);
-CREATE INDEX idx_hc_leave_user_date ON hc_leave_requests(user_id, start_date, end_date);
-CREATE INDEX idx_hc_leave_status_start ON hc_leave_requests(status, start_date);
-CREATE INDEX idx_hc_approval_module_ref ON hc_approval_logs(module_name, reference_id, created_at);
+CREATE INDEX idx_attendance_user_date ON attendance(user_id, attendance_date);
+CREATE INDEX idx_attendance_date_status ON attendance(attendance_date, attendance_status);
+CREATE INDEX idx_overtime_user_date ON overtime_requests(user_id, overtime_date);
+CREATE INDEX idx_overtime_status_date ON overtime_requests(status, overtime_date);
+CREATE INDEX idx_leave_user_date ON leave_requests(user_id, start_date, end_date);
+CREATE INDEX idx_leave_status_start ON leave_requests(status, start_date);
+CREATE INDEX idx_approval_module_ref ON approval_logs(module_name, reference_id, created_at);
