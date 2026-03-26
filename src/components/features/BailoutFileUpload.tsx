@@ -3,7 +3,12 @@
 import { useRef, useState } from "react";
 import { api } from "@/trpc/react";
 
-const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const ALLOWED_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+];
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 
 type BailoutCategory = "TRANSPORT" | "HOTEL" | "MEAL" | "OTHER";
@@ -28,9 +33,16 @@ interface Props {
   // storageUrl field now stores either the object key (Option B) or a public URL (Option A)
   currentUrl: string | null | undefined;
   onUploaded: (key: string) => void;
+  canManage?: boolean;
 }
 
-export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded }: Props) {
+export function BailoutFileUpload({
+  bailoutId,
+  category,
+  currentUrl,
+  onUploaded,
+  canManage = true,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -48,6 +60,8 @@ export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded 
     (fileUrlQuery.data as { url: string | null } | undefined)?.url ?? null;
 
   const handleFile = async (file: File) => {
+    if (!canManage) return;
+
     setError("");
 
     if (!ALLOWED_MIME.includes(file.type)) {
@@ -65,11 +79,11 @@ export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded 
     try {
       setUploading(true);
 
-      const result = await getUploadUrl.mutateAsync({
+      const result = (await getUploadUrl.mutateAsync({
         bailoutId,
         filename: file.name,
         contentType: file.type,
-      }) as { uploadUrl: string; key: string; publicUrl: string | null };
+      })) as { uploadUrl: string; key: string; publicUrl: string | null };
 
       const { uploadUrl, key, publicUrl } = result;
       if (!uploadUrl) throw new Error("Gagal mendapatkan upload URL.");
@@ -109,23 +123,41 @@ export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded 
       </label>
 
       <div
-        onClick={() => !uploading && inputRef.current?.click()}
+        onClick={() => canManage && !uploading && inputRef.current?.click()}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
+          if (!canManage) return;
           const file = e.dataTransfer.files[0];
           if (file) void handleFile(file);
         }}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
+        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
           uploading
             ? "border-blue-300 bg-blue-50"
-            : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"
+            : canManage
+              ? "cursor-pointer border-gray-300 hover:border-blue-400 hover:bg-gray-50"
+              : "border-gray-200 bg-gray-50"
         }`}
       >
         {uploading ? (
-          <p className="text-sm text-blue-600">Mengupload…</p>
+          <p className="text-sm text-blue-600">Mengupload...</p>
+        ) : !canManage ? (
+          currentUrl && !previewUrl ? (
+            <p className="text-xs text-green-600">
+              File sudah terupload - akses ubah tidak tersedia
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-gray-500">
+                Tidak ada izin untuk mengubah file
+              </p>
+              <p className="mt-1 text-xs text-gray-400">{FILE_HINT[category]}</p>
+            </>
+          )
         ) : currentUrl && !previewUrl ? (
-          <p className="text-xs text-green-600">✓ File sudah terupload — klik untuk ganti</p>
+          <p className="text-xs text-green-600">
+            File sudah terupload - klik untuk ganti
+          </p>
         ) : (
           <>
             <p className="text-sm text-gray-500">Klik atau seret file ke sini</p>
@@ -134,20 +166,24 @@ export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded 
         )}
       </div>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ALLOWED_MIME.join(",")}
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void handleFile(file);
-          e.target.value = "";
-        }}
-      />
+      {canManage ? (
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ALLOWED_MIME.join(",")}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleFile(file);
+            e.target.value = "";
+          }}
+        />
+      ) : null}
 
       {error && (
-        <p className="rounded bg-red-50 px-3 py-1.5 text-xs text-red-600">{error}</p>
+        <p className="rounded bg-red-50 px-3 py-1.5 text-xs text-red-600">
+          {error}
+        </p>
       )}
 
       {previewUrl && (
@@ -166,10 +202,12 @@ export function BailoutFileUpload({ bailoutId, category, currentUrl, onUploaded 
             rel="noopener noreferrer"
             className="block truncate text-xs text-blue-600 hover:underline"
           >
-            📎 {currentUrl.split("/").pop()}
+            Lampiran: {currentUrl.split("/").pop()}
           </a>
         ) : (
-          <p className="text-xs text-gray-400">📎 {currentUrl.split("/").pop()} — memuat link…</p>
+          <p className="text-xs text-gray-400">
+            Lampiran: {currentUrl.split("/").pop()} - memuat link...
+          </p>
         )
       )}
     </div>

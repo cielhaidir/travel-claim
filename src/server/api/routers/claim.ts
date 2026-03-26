@@ -17,11 +17,9 @@ import {
 
 import {
   createTRPCRouter,
-  protectedProcedure,
-  financeProcedure,
+  permissionProcedure,
 } from "@/server/api/trpc";
 import { sendWhatsappPoll, buildClaimApprovalPoll } from "@/lib/utils/whatsapp";
-import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -47,7 +45,7 @@ function withTenantWhere<T extends Record<string, unknown>>(
 
 export const claimRouter = createTRPCRouter({
   // Get all claims with filters
-  getAll: protectedProcedure
+  getAll: permissionProcedure("claims", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -76,18 +74,6 @@ export const claimRouter = createTRPCRouter({
       const where: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
         deletedAt: null,
       });
-
-      // Non-finance users can only see their own claims
-      if (
-        !userHasAnyRole(ctx.session.user, [
-          "FINANCE",
-          "ADMIN",
-          "MANAGER",
-          "DIRECTOR",
-        ])
-      ) {
-        where.submitterId = ctx.session.user.id;
-      }
 
       if (input?.status) {
         where.status = input.status;
@@ -183,7 +169,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Get claim by ID
-  getById: protectedProcedure
+  getById: permissionProcedure("claims", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -251,29 +237,11 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      // Check access rights
-      const isSubmitter = claim.submitterId === ctx.session.user.id;
-      const isRequester =
-        claim.travelRequest.requesterId === ctx.session.user.id;
-      const canView = userHasAnyRole(ctx.session.user, [
-        "FINANCE",
-        "ADMIN",
-        "MANAGER",
-        "DIRECTOR",
-      ]);
-
-      if (!isSubmitter && !isRequester && !canView) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to view this claim",
-        });
-      }
-
       return claim;
     }),
 
   // Get claims by travel request
-  getByTravelRequest: protectedProcedure
+  getByTravelRequest: permissionProcedure("claims", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -286,7 +254,6 @@ export const claimRouter = createTRPCRouter({
     .input(z.object({ travelRequestId: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      // Verify access to travel request
       const travelRequest = await ctx.db.travelRequest.findFirst({
         where: withTenantWhere(ctx, { id: input.travelRequestId }),
         include: {
@@ -298,24 +265,6 @@ export const claimRouter = createTRPCRouter({
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Travel request not found",
-        });
-      }
-
-      const isRequester = travelRequest.requesterId === ctx.session.user.id;
-      const isParticipant = travelRequest.participants.some(
-        (p) => p.userId === ctx.session.user.id,
-      );
-      const canView = userHasAnyRole(ctx.session.user, [
-        "FINANCE",
-        "ADMIN",
-        "MANAGER",
-        "DIRECTOR",
-      ]);
-
-      if (!isRequester && !isParticipant && !canView) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Not authorized to view claims for this travel request",
         });
       }
 
@@ -362,7 +311,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Create entertainment claim
-  createEntertainment: protectedProcedure
+  createEntertainment: permissionProcedure("claims", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -490,7 +439,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Create non-entertainment claim
-  createNonEntertainment: protectedProcedure
+  createNonEntertainment: permissionProcedure("claims", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -615,7 +564,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Update claim (only in DRAFT or REVISION status)
-  update: protectedProcedure
+  update: permissionProcedure("claims", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -731,7 +680,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Submit claim for approval
-  submit: protectedProcedure
+  submit: permissionProcedure("claims", "submit")
     .meta({
       openapi: {
         method: "POST",
@@ -1060,7 +1009,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Mark claim as paid (Finance only)
-  markAsPaid: financeProcedure
+  markAsPaid: permissionProcedure("claims", "pay")
     .input(
       z.object({
         id: z.string(),
@@ -1137,7 +1086,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Delete claim (soft delete)
-  delete: protectedProcedure
+  delete: permissionProcedure("claims", "delete")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -1152,12 +1101,7 @@ export const claimRouter = createTRPCRouter({
         });
       }
 
-      // Only submitter or admin can delete
-      const canDelete =
-        claim.submitterId === ctx.session.user.id ||
-        userHasRole(ctx.session.user, "ADMIN");
-
-      if (!canDelete) {
+      if (claim.submitterId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Not authorized to delete this claim",
@@ -1194,7 +1138,7 @@ export const claimRouter = createTRPCRouter({
     }),
 
   // Get claim statistics
-  getStatistics: financeProcedure
+  getStatistics: permissionProcedure("claims", "pay")
     .input(
       z.object({
         startDate: z.coerce.date().optional(),

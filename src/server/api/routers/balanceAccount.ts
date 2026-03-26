@@ -1,11 +1,8 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { AuditAction, Role } from "../../../../generated/prisma";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
-import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+import { AuditAction } from "../../../../generated/prisma";
+import { createTRPCRouter, permissionProcedure } from "@/server/api/trpc";
 import { generateJournalTransactionNumber } from "@/lib/utils/numberGenerators";
-
-const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -31,7 +28,7 @@ function withTenantWhere<T extends Record<string, unknown>>(
 
 export const balanceAccountRouter = createTRPCRouter({
   // ─── LIST ─────────────────────────────────────────────────────────────────
-  list: protectedProcedure
+  list: permissionProcedure("balance-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -95,7 +92,7 @@ export const balanceAccountRouter = createTRPCRouter({
     }),
 
   // ─── GET BY ID ────────────────────────────────────────────────────────────
-  getById: protectedProcedure
+  getById: permissionProcedure("balance-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -157,7 +154,7 @@ export const balanceAccountRouter = createTRPCRouter({
     }),
 
   // ─── GET BY CODE ──────────────────────────────────────────────────────────
-  getByCode: protectedProcedure
+  getByCode: permissionProcedure("balance-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -190,7 +187,7 @@ export const balanceAccountRouter = createTRPCRouter({
     }),
 
   // ─── CREATE ───────────────────────────────────────────────────────────────
-  create: protectedProcedure
+  create: permissionProcedure("balance-accounts", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -218,13 +215,6 @@ export const balanceAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can create balance accounts",
-        });
-      }
-
       // Ensure code is unique (including soft-deleted, to avoid confusion)
       const existing = await ctx.db.balanceAccount.findFirst({
         where: withTenantWhere(ctx, { code: input.code }),
@@ -275,7 +265,7 @@ export const balanceAccountRouter = createTRPCRouter({
     }),
 
   // ─── UPDATE ───────────────────────────────────────────────────────────────
-  update: protectedProcedure
+  update: permissionProcedure("balance-accounts", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -302,13 +292,6 @@ export const balanceAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can update balance accounts",
-        });
-      }
-
       const existing = await ctx.db.balanceAccount.findFirst({
         where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
       });
@@ -362,7 +345,7 @@ export const balanceAccountRouter = createTRPCRouter({
    * Manual balance adjustment (e.g. initial funding, corrections).
    * Creates a journal entry with the given entry type so history is preserved.
    */
-  adjustBalance: protectedProcedure
+  adjustBalance: permissionProcedure("balance-accounts", "update")
     .meta({
       openapi: {
         method: "POST",
@@ -392,13 +375,6 @@ export const balanceAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Finance or Admin can adjust balance accounts",
-        });
-      }
-
       const [ba, coa] = await Promise.all([
         ctx.db.balanceAccount.findUnique({
           where: { id: input.id, isActive: true, deletedAt: null },
@@ -488,7 +464,7 @@ export const balanceAccountRouter = createTRPCRouter({
     }),
 
   // ─── DELETE (soft) ────────────────────────────────────────────────────────
-  delete: protectedProcedure
+  delete: permissionProcedure("balance-accounts", "delete")
     .meta({
       openapi: {
         method: "DELETE",
@@ -506,13 +482,6 @@ export const balanceAccountRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasRole(ctx.session.user, Role.ADMIN)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admin can delete balance accounts",
-        });
-      }
-
       const existing = await ctx.db.balanceAccount.findFirst({
         where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
       });

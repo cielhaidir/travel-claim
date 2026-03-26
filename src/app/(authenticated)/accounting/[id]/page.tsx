@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 
 type BalanceAccountDetail = {
@@ -49,11 +50,25 @@ type BalanceAccountDetail = {
 
 export default function BalanceAccountDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { data: session } = useSession();
   const accountId = Array.isArray(params?.id) ? params.id[0] : params?.id;
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN" || session?.user?.isRoot === true;
+  const isAllowed =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "balance-accounts", "read");
+  const canReadAccounting =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "accounting", "read");
+  const canReadDashboard =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "dashboard", "read");
+
+  useEffect(() => {
+    if (session && !isAllowed) {
+      void router.replace("/dashboard");
+    }
+  }, [isAllowed, router, session]);
 
   const { data, isLoading, refetch } = api.balanceAccount.getById.useQuery(
     { id: accountId ?? "" },
@@ -92,10 +107,19 @@ export default function BalanceAccountDetailPage() {
           label: "Muat Ulang",
           onClick: () => void refetch(),
         }}
-        secondaryAction={{
-          label: "Kembali ke Accounting",
-          href: "/accounting",
-        }}
+        secondaryAction={
+          canReadAccounting
+            ? {
+                label: "Kembali ke Accounting",
+                href: "/accounting",
+              }
+            : canReadDashboard
+              ? {
+                  label: "Kembali ke Dashboard",
+                  href: "/dashboard",
+                }
+              : undefined
+        }
       />
 
       {isLoading ? (
@@ -108,7 +132,13 @@ export default function BalanceAccountDetailPage() {
             icon="🏦"
             title="Akun saldo tidak ditemukan"
             description="Akun saldo ini tidak tersedia pada tenant aktif atau sudah dihapus."
-            action={{ label: "Kembali ke Accounting", href: "/accounting" }}
+            action={
+              canReadAccounting
+                ? { label: "Kembali ke Accounting", href: "/accounting" }
+                : canReadDashboard
+                  ? { label: "Kembali ke Dashboard", href: "/dashboard" }
+                  : undefined
+            }
           />
         </div>
       ) : (

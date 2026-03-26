@@ -6,20 +6,15 @@ import {
   TransportMode,
   AuditAction,
   Role,
-  ApprovalStatus,
+  type Prisma,
 } from "../../../../generated/prisma";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import {
+  createTRPCRouter,
+  permissionProcedure,
+} from "@/server/api/trpc";
 import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
-import { userHasAnyRole, userHasRole } from "@/lib/auth/role-check";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { generateBailoutNumber } from "@/lib/utils/numberGenerators";
-
-const SALES_CHIEF_ROLES: string[] = [
-  Role.SALES_CHIEF,
-  Role.MANAGER,
-  Role.DIRECTOR,
-  Role.ADMIN,
-];
-const DIRECTOR_ROLES: string[] = [Role.DIRECTOR, Role.ADMIN];
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -56,7 +51,7 @@ function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
 
 export const bailoutRouter = createTRPCRouter({
   // ─── GET ALL (by travelRequestId or global) ───────────────────────────────
-  getAll: protectedProcedure
+  getAll: permissionProcedure("bailout", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -79,12 +74,6 @@ export const bailoutRouter = createTRPCRouter({
       const where: Record<string, unknown> = withTenantWhere(ctx, {
         deletedAt: null,
       });
-
-      // Non-privileged users only see their own bailouts
-      const privilegedRoles: string[] = [...SALES_CHIEF_ROLES, Role.FINANCE];
-      if (!userHasAnyRole(ctx.session.user, privilegedRoles)) {
-        where.requesterId = ctx.session.user.id;
-      }
 
       if (input?.travelRequestId) {
         where.travelRequestId = input.travelRequestId;
@@ -126,31 +115,27 @@ export const bailoutRouter = createTRPCRouter({
       return { bailouts, nextCursor };
     }),
 
-  repairLegacyTravelStatuses: protectedProcedure
+  repairLegacyTravelStatuses: permissionProcedure("bailout", "disburse")
     .input(z.object({}))
     .output(z.object({ updatedCount: z.number() }))
     .mutation(async ({ ctx }) => {
-      if (!userHasAnyRole(ctx.session.user, [Role.FINANCE, Role.ADMIN])) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Finance atau Admin yang bisa memperbaiki status bailout legacy",
-        });
-      }
-
       const legacyCandidates = await ctx.db.bailout.findMany({
-        where: {
-          deletedAt: null,
-          status: BailoutStatus.DRAFT,
-          submittedAt: null,
-          travelRequest: {
-            status: {
-              in: ["APPROVED", "LOCKED", "CLOSED"],
+        where: withTenantWhere(
+          ctx,
+          {
+            deletedAt: null,
+            status: BailoutStatus.DRAFT,
+            submittedAt: null,
+            travelRequest: {
+              status: {
+                in: ["APPROVED", "LOCKED", "CLOSED"],
+              },
             },
-          },
-          approvals: {
-            none: {},
-          },
-        },
+            approvals: {
+              none: {},
+            },
+          } satisfies Prisma.BailoutWhereInput,
+        ),
         select: {
           id: true,
           createdAt: true,
@@ -186,7 +171,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── GET BY ID ────────────────────────────────────────────────────────────
-  getById: protectedProcedure
+  getById: permissionProcedure("bailout", "read")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -216,23 +201,11 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      const canView =
-        bailout.requesterId === ctx.session.user.id ||
-        userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES) ||
-        userHasRole(ctx.session.user, Role.FINANCE);
-
-      if (!canView) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Anda tidak berhak melihat bailout ini",
-        });
-      }
-
       return bailout;
     }),
 
   // ─── CREATE ───────────────────────────────────────────────────────────────
-  create: protectedProcedure
+  create: permissionProcedure("bailout", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -282,20 +255,6 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Travel Request tidak ditemukan",
-        });
-      }
-
-      // Only requester or privileged roles can create bailout
-      const allowedRoles: Role[] = [
-        Role.SALES_EMPLOYEE,
-        Role.SALES_CHIEF,
-        Role.EMPLOYEE,
-      ];
-      const isRequester = travelRequest.requesterId === ctx.session.user.id;
-      if (!isRequester && !userHasAnyRole(ctx.session.user, allowedRoles)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya pembuat trip yang bisa mengajukan bailout",
         });
       }
 
@@ -350,7 +309,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── SUBMIT ───────────────────────────────────────────────────────────────
-  submit: protectedProcedure
+  submit: permissionProcedure("bailout", "submit")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -439,7 +398,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── APPROVE BY CHIEF ─────────────────────────────────────────────────────
-  approveByChief: protectedProcedure
+  approveByChief: permissionProcedure("bailout", "approve")
     .input(
       z.object({
         id: z.string(),
@@ -448,13 +407,6 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Sales Chief / Manager yang bisa approve di level ini",
-        });
-      }
-
       const bailout = await ctx.db.bailout.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
       });
@@ -534,7 +486,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── APPROVE BY DIRECTOR ──────────────────────────────────────────────────
-  approveByDirector: protectedProcedure
+  approveByDirector: permissionProcedure("bailout", "approve")
     .input(
       z.object({
         id: z.string(),
@@ -543,13 +495,6 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, DIRECTOR_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Director yang bisa approve di level ini",
-        });
-      }
-
       const bailout = await ctx.db.bailout.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
         include: {
@@ -731,7 +676,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── REJECT ───────────────────────────────────────────────────────────────
-  reject: protectedProcedure
+  reject: permissionProcedure("bailout", "reject")
     .input(
       z.object({
         id: z.string(),
@@ -740,13 +685,6 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, SALES_CHIEF_ROLES)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Sales Chief / Director yang bisa reject bailout",
-        });
-      }
-
       const bailout = await ctx.db.bailout.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
         include: {
@@ -830,7 +768,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── MARK DISBURSED (Finance) ─────────────────────────────────────────────
-  disburse: protectedProcedure
+  disburse: permissionProcedure("bailout", "disburse")
     .input(
       z.object({
         id: z.string(),
@@ -840,13 +778,6 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, [Role.FINANCE, Role.ADMIN])) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Hanya Finance yang bisa mencairkan bailout",
-        });
-      }
-
       const bailout = await ctx.db.bailout.findFirst({
         where: withTenantWhere(ctx, { id: input.id }),
         include: {
@@ -915,22 +846,33 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── GET PENDING FOR APPROVAL ─────────────────────────────────────────────
-  getPendingApprovals: protectedProcedure
+  getPendingApprovals: permissionProcedure("bailout", "read")
     .input(z.object({}))
     .output(z.any())
     .query(async ({ ctx }) => {
-      const role = ctx.session.user.role;
-      let statusFilter: BailoutStatus;
-      if (DIRECTOR_ROLES.includes(role)) {
-        statusFilter = BailoutStatus.APPROVED_CHIEF;
-      } else if (SALES_CHIEF_ROLES.includes(role)) {
-        statusFilter = BailoutStatus.SUBMITTED;
-      } else {
+      const canApprove =
+        (ctx.session.user.isRoot ?? false) ||
+        hasPermissionMap(ctx.session.user.permissions, "bailout", "approve");
+      const canDisburse =
+        (ctx.session.user.isRoot ?? false) ||
+        hasPermissionMap(ctx.session.user.permissions, "bailout", "disburse");
+
+      const statusFilters: BailoutStatus[] = [
+        ...(canApprove
+          ? [BailoutStatus.SUBMITTED, BailoutStatus.APPROVED_CHIEF]
+          : []),
+        ...(canDisburse ? [BailoutStatus.APPROVED_DIRECTOR] : []),
+      ];
+
+      if (statusFilters.length === 0) {
         return { bailouts: [] };
       }
 
       const bailouts = await ctx.db.bailout.findMany({
-        where: withTenantWhere(ctx, { status: statusFilter, deletedAt: null }),
+        where: withTenantWhere(ctx, {
+          status: { in: statusFilters },
+          deletedAt: null,
+        }),
         include: {
           requester: {
             select: { id: true, name: true, email: true, employeeId: true },
@@ -951,7 +893,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── GET PRESIGNED UPLOAD URL ─────────────────────────────────────────────
-  getUploadUrl: protectedProcedure
+  getUploadUrl: permissionProcedure("bailout", "disburse")
     .input(
       z.object({
         bailoutId: z.string().min(1),
@@ -973,20 +915,6 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      const isOwner = bailout.requesterId === ctx.session.user.id;
-      const isPrivileged = userHasAnyRole(ctx.session.user, [
-        ...SALES_CHIEF_ROLES,
-        Role.FINANCE,
-        Role.ADMIN,
-      ]);
-
-      if (!isOwner && !isPrivileged) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Tidak berhak upload file ini",
-        });
-      }
-
       const { getPresignedUploadUrl, buildStorageKey, getPublicUrl } =
         await import("@/lib/storage/r2");
 
@@ -1001,7 +929,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── ATTACH FILE (simpan URL setelah upload berhasil) ────────────────────
-  attachFile: protectedProcedure
+  attachFile: permissionProcedure("bailout", "disburse")
     .input(
       z.object({
         id: z.string(),
@@ -1023,20 +951,6 @@ export const bailoutRouter = createTRPCRouter({
         });
       }
 
-      const isOwner = bailout.requesterId === ctx.session.user.id;
-      const isPrivileged = userHasAnyRole(ctx.session.user, [
-        ...SALES_CHIEF_ROLES,
-        Role.FINANCE,
-        Role.ADMIN,
-      ]);
-
-      if (!isOwner && !isPrivileged) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Tidak berhak mengubah file ini",
-        });
-      }
-
       return ctx.db.bailout.update({
         where: { id: input.id },
         data: { storageUrl: input.storageUrl },
@@ -1044,7 +958,7 @@ export const bailoutRouter = createTRPCRouter({
     }),
 
   // ─── GET PRESIGNED DOWNLOAD URL ──────────────────────────────────────────
-  getFileUrl: protectedProcedure
+  getFileUrl: permissionProcedure("bailout", "read")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -1057,20 +971,6 @@ export const bailoutRouter = createTRPCRouter({
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Bailout tidak ditemukan",
-        });
-      }
-
-      const isOwner = bailout.requesterId === ctx.session.user.id;
-      const isPrivileged = userHasAnyRole(ctx.session.user, [
-        ...SALES_CHIEF_ROLES,
-        Role.FINANCE,
-        Role.ADMIN,
-      ]);
-
-      if (!isOwner && !isPrivileged) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Tidak berhak mengakses file ini",
         });
       }
 

@@ -111,6 +111,17 @@ async function upsertDefaultMembership(
   `;
 }
 
+async function pruneMemberships(userId: string, allowedTenantIds: string[]) {
+  await prisma.tenantMembership.deleteMany({
+    where: {
+      userId,
+      tenantId: {
+        notIn: allowedTenantIds,
+      },
+    },
+  });
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -517,8 +528,8 @@ async function main() {
   ]);
   console.log("  ✅ UserRole rows synchronized from legacy role\n");
 
-  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, true);
-  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, false);
+  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, false);
+  await upsertDefaultMembership(rootUser.id, "ROOT", defaultTenantId, true);
   await upsertDefaultMembership(executive.id, executive.role, defaultTenantId);
   await upsertDefaultMembership(director.id, director.role, defaultTenantId);
   await upsertDefaultMembership(
@@ -564,6 +575,20 @@ async function main() {
     adminStaff1.role,
     defaultTenantId,
   );
+  await pruneMemberships(rootUser.id, [rootTenantId, defaultTenantId]);
+  await pruneMemberships(executive.id, [defaultTenantId]);
+  await pruneMemberships(director.id, [defaultTenantId]);
+  await pruneMemberships(financeChief.id, [defaultTenantId]);
+  await pruneMemberships(financeStaff1.id, [defaultTenantId]);
+  await pruneMemberships(financeStaff2.id, [defaultTenantId]);
+  await pruneMemberships(salesChief.id, [defaultTenantId]);
+  await pruneMemberships(salesStaff1.id, [defaultTenantId]);
+  await pruneMemberships(salesStaff2.id, [defaultTenantId]);
+  await pruneMemberships(engChief.id, [defaultTenantId]);
+  await pruneMemberships(engStaff1.id, [defaultTenantId]);
+  await pruneMemberships(engStaff2.id, [defaultTenantId]);
+  await pruneMemberships(adminChief.id, [defaultTenantId]);
+  await pruneMemberships(adminStaff1.id, [defaultTenantId]);
   console.log("  ✅ TenantMembership rows synchronized\n");
 
   // ── 4. Wire Department.chiefId ────────────────────────────────────────────────

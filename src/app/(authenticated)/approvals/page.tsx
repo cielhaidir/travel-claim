@@ -8,13 +8,9 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
 import type { ApprovalStatus } from "../../../../generated/prisma";
-import {
-  APPROVER_ROLES,
-  hasAnyRole,
-  normalizeRoles,
-} from "@/lib/constants/roles";
 
 interface TravelRequestRef {
   id: string;
@@ -137,25 +133,47 @@ function getBailoutCategoryLabel(category: string) {
 export default function ApprovalsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const userRoles = normalizeRoles({
-    roles: session?.user?.roles,
-    role: session?.user?.role,
-  });
+  const canReadApprovals =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "read");
+  const canApprove =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "approve");
+  const canReject =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "reject");
+  const canRevision =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "approvals", "revision");
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!hasAnyRole(userRoles, APPROVER_ROLES)) {
+    if (!canReadApprovals) {
       router.replace("/");
     }
-  }, [userRoles, status, router]);
+  }, [canReadApprovals, status, router]);
 
   if (status === "loading") return null;
-  if (!hasAnyRole(userRoles, APPROVER_ROLES)) return null;
+  if (!canReadApprovals) return null;
 
-  return <ApprovalsContent />;
+  return (
+    <ApprovalsContent
+      canApprove={canApprove}
+      canReject={canReject}
+      canRevision={canRevision}
+    />
+  );
 }
 
-function ApprovalsContent() {
+function ApprovalsContent({
+  canApprove,
+  canReject,
+  canRevision,
+}: {
+  canApprove: boolean;
+  canReject: boolean;
+  canRevision: boolean;
+}) {
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "ALL">(
     "ALL",
   );
@@ -275,50 +293,54 @@ function ApprovalsContent() {
       />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(e.target.value as ApprovalStatus | "ALL")
-          }
-        >
-          <option value="ALL">All Status</option>
-          <option value="PENDING">Pending</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="REVISION_REQUESTED">Revision Requested</option>
-        </select>
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          value={entityFilter}
-          onChange={(e) =>
-            setEntityFilter(e.target.value as "ALL" | "TravelRequest" | "Claim")
-          }
-        >
-          <option value="ALL">All Types</option>
-          <option value="TravelRequest">Travel Requests</option>
-          <option value="Claim">Claims</option>
-        </select>
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-3">
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as ApprovalStatus | "ALL")
+            }
+          >
+            <option value="ALL">All Status</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="REVISION_REQUESTED">Revision Requested</option>
+          </select>
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={entityFilter}
+            onChange={(e) =>
+              setEntityFilter(e.target.value as "ALL" | "TravelRequest" | "Claim")
+            }
+          >
+            <option value="ALL">All Types</option>
+            <option value="TravelRequest">Travel Requests</option>
+            <option value="Claim">Claims</option>
+          </select>
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">
+        <div className="content-section p-12 text-center text-gray-500">
           Loading...
         </div>
       ) : approvals.length === 0 ? (
-        <EmptyState
-          icon="✅"
-          title="No approvals found"
-          description={
-            statusFilter === "PENDING"
-              ? "You're all caught up! No pending approvals."
-              : "No approvals match the selected filters."
-          }
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="✅"
+            title="No approvals found"
+            description={
+              statusFilter === "PENDING"
+                ? "You're all caught up! No pending approvals."
+                : "No approvals match the selected filters."
+            }
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
               <tr>
@@ -394,24 +416,30 @@ function ApprovalsContent() {
                         </button>
                         {a.status === "PENDING" && (
                           <>
-                            <button
-                              onClick={() => openAction(a, "approve")}
-                              className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => openAction(a, "revision")}
-                              className="rounded px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-50"
-                            >
-                              Revise
-                            </button>
-                            <button
-                              onClick={() => openAction(a, "reject")}
-                              className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              Reject
-                            </button>
+                            {canApprove && (
+                              <button
+                                onClick={() => openAction(a, "approve")}
+                                className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {canRevision && (
+                              <button
+                                onClick={() => openAction(a, "revision")}
+                                className="rounded px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-50"
+                              >
+                                Revise
+                              </button>
+                            )}
+                            {canReject && (
+                              <button
+                                onClick={() => openAction(a, "reject")}
+                                className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              >
+                                Reject
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -434,6 +462,9 @@ function ApprovalsContent() {
         {viewingApproval && (
           <RichApprovalDetail
             approval={viewingApproval}
+            canApprove={canApprove}
+            canReject={canReject}
+            canRevision={canRevision}
             onApprove={() => {
               openAction(viewingApproval, "approve");
               setViewingApproval(null);
@@ -515,11 +546,17 @@ function ApprovalsContent() {
 
 function RichApprovalDetail({
   approval,
+  canApprove,
+  canReject,
+  canRevision,
   onApprove,
   onReject,
   onRevision,
 }: {
   approval: Approval;
+  canApprove: boolean;
+  canReject: boolean;
+  canRevision: boolean;
   onApprove: () => void;
   onReject: () => void;
   onRevision: () => void;
@@ -557,7 +594,7 @@ function RichApprovalDetail({
 
       {isTravel && tr && (
         <div className="space-y-4">
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Trip Request Details
             </p>
@@ -605,7 +642,7 @@ function RichApprovalDetail({
             </div>
           )}
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">Peserta</p>
             {tr.participants.length === 0 ? (
               <p className="text-sm text-gray-500">Tidak ada peserta tambahan.</p>
@@ -614,7 +651,7 @@ function RichApprovalDetail({
                 {tr.participants.map((participant) => (
                   <div
                     key={participant.userId}
-                    className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm"
+                    className="content-subcard px-3 py-2 text-sm"
                   >
                     <p className="font-medium text-gray-900">
                       {participant.user.name ?? "—"}
@@ -631,7 +668,7 @@ function RichApprovalDetail({
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Bailout / Biaya
             </p>
@@ -642,7 +679,7 @@ function RichApprovalDetail({
                 {tr.bailouts.map((bailout) => (
                   <div
                     key={bailout.id}
-                    className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                    className="content-subcard p-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -744,7 +781,7 @@ function RichApprovalDetail({
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+          <div className="content-subcard p-4 space-y-3">
             <p className="text-sm font-semibold text-gray-700">
               Riwayat Approval
             </p>
@@ -752,7 +789,7 @@ function RichApprovalDetail({
               {tr.approvals.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                  className="content-subcard p-3"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium text-gray-900">
@@ -778,7 +815,7 @@ function RichApprovalDetail({
       )}
 
       {!isTravel && claim && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">Claim Details</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Field label="Claim #" value={claim.claimNumber} />
@@ -813,15 +850,21 @@ function RichApprovalDetail({
 
       {approval.status === "PENDING" && (
         <div className="flex justify-end gap-3 border-t pt-4">
-          <Button variant="destructive" size="sm" onClick={onReject}>
-            Reject
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onRevision}>
-            Request Revision
-          </Button>
-          <Button size="sm" onClick={onApprove}>
-            Approve
-          </Button>
+          {canReject && (
+            <Button variant="destructive" size="sm" onClick={onReject}>
+              Reject
+            </Button>
+          )}
+          {canRevision && (
+            <Button variant="secondary" size="sm" onClick={onRevision}>
+              Request Revision
+            </Button>
+          )}
+          {canApprove && (
+            <Button size="sm" onClick={onApprove}>
+              Approve
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -876,7 +919,7 @@ function ApprovalDetail({
 
       {/* Travel request details */}
       {isTravel && tr && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">
             Trip Request Details
           </p>
@@ -910,7 +953,7 @@ function ApprovalDetail({
 
       {/* Claim details */}
       {!isTravel && claim && (
-        <div className="space-y-3 rounded-lg border border-gray-100 p-4">
+        <div className="content-subcard p-4 space-y-3">
           <p className="text-sm font-semibold text-gray-700">Claim Details</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Field label="Claim #" value={claim.claimNumber} />

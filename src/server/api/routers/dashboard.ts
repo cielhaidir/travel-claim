@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   TravelStatus,
   ClaimStatus,
@@ -9,9 +10,11 @@ import {
 import {
   createTRPCRouter,
   protectedProcedure,
+  permissionProcedure,
   managerProcedure,
   financeProcedure,
 } from "@/server/api/trpc";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -37,7 +40,7 @@ function withTenantWhere<T extends Record<string, unknown>>(
 
 export const dashboardRouter = createTRPCRouter({
   // Get user dashboard statistics
-  getMyDashboard: protectedProcedure
+  getMyDashboard: permissionProcedure("dashboard", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -395,7 +398,7 @@ export const dashboardRouter = createTRPCRouter({
     }),
 
   // Get finance dashboard
-  getFinanceDashboard: financeProcedure
+  getFinanceDashboard: protectedProcedure
     .meta({
       openapi: {
         method: "GET",
@@ -413,6 +416,50 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
+      const isRoot = ctx.session.user.isRoot ?? false;
+      const permissions = ctx.session.user.permissions;
+      const canReadBailout =
+        isRoot || hasPermissionMap(permissions, "bailout", "read");
+      const canDisburseBailout =
+        isRoot || hasPermissionMap(permissions, "bailout", "disburse");
+      const canReadClaims =
+        isRoot || hasPermissionMap(permissions, "claims", "read");
+      const canPayClaims =
+        isRoot || hasPermissionMap(permissions, "claims", "pay");
+      const canReadTravel =
+        isRoot || hasPermissionMap(permissions, "travel", "read");
+      const canLockTravel =
+        isRoot || hasPermissionMap(permissions, "travel", "lock");
+      const canCloseTravel =
+        isRoot || hasPermissionMap(permissions, "travel", "close");
+      const canReadJournals =
+        isRoot || hasPermissionMap(permissions, "journals", "read");
+      const canCreateJournals =
+        isRoot || hasPermissionMap(permissions, "journals", "create");
+      const canReadCoa =
+        isRoot || hasPermissionMap(permissions, "chart-of-accounts", "read");
+      const canReadBalanceAccounts =
+        isRoot ||
+        hasPermissionMap(permissions, "balance-accounts", "read");
+      const canUseFinanceDashboard =
+        (canReadBailout &&
+          canDisburseBailout &&
+          canReadCoa &&
+          canReadBalanceAccounts) ||
+        (canReadClaims &&
+          canPayClaims &&
+          canReadCoa &&
+          canReadBalanceAccounts) ||
+        (canReadBailout && canReadJournals && canCreateJournals && canReadCoa) ||
+        (canReadTravel && (canLockTravel || canCloseTravel));
+
+      if (!canUseFinanceDashboard) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
+      }
+
       const dateFilter: Prisma.ClaimWhereInput = {};
       if (input?.startDate || input?.endDate) {
         const createdAt: { gte?: Date; lte?: Date } = {};

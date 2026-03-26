@@ -21,7 +21,7 @@ interface HierarchyAccount {
 interface COAHierarchyViewProps {
   accounts: HierarchyAccount[];
   isLoading?: boolean;
-  userRole: string;
+  canUpdate: boolean;
   onEdit: (account: HierarchyAccount) => void;
   onToggleActive: (account: HierarchyAccount) => void;
 }
@@ -29,13 +29,13 @@ interface COAHierarchyViewProps {
 function HierarchyNode({
   account,
   level = 0,
-  isAdmin,
+  canUpdate,
   onEdit,
   onToggleActive,
 }: {
   account: HierarchyAccount;
   level?: number;
-  isAdmin: boolean;
+  canUpdate: boolean;
   onEdit: (account: HierarchyAccount) => void;
   onToggleActive: (account: HierarchyAccount) => void;
 }) {
@@ -56,31 +56,25 @@ function HierarchyNode({
   return (
     <div className="select-none">
       <div
-        className={`flex items-center gap-3 py-3 px-4 hover:bg-gray-50 rounded-lg transition-colors ${
+        className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-gray-50 ${
           !account.isActive ? "opacity-60" : ""
         }`}
         style={{ paddingLeft: `${level * 2 + 1}rem` }}
       >
-        {/* Expand/Collapse Icon */}
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-600"
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600"
           disabled={!hasChildren}
         >
           {hasChildren ? (
-            isExpanded ? (
-              <span className="text-base">▼</span>
-            ) : (
-              <span className="text-base">▶</span>
-            )
+            <span className="text-base">{isExpanded ? "v" : ">"}</span>
           ) : (
             <span className="text-gray-300">•</span>
           )}
         </button>
 
-        {/* Account Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-mono font-semibold text-gray-900">
               {account.code}
             </span>
@@ -90,28 +84,30 @@ function HierarchyNode({
             >
               {account.accountType}
             </span>
-            <Badge variant={account.isActive ? "success" : "default"} className="text-xs">
+            <Badge
+              variant={account.isActive ? "success" : "default"}
+              className="text-xs"
+            >
               {account.isActive ? "Aktif" : "Nonaktif"}
             </Badge>
-            {account._count && account._count.claims > 0 && (
+            {account._count && account._count.claims > 0 ? (
               <span className="text-xs text-gray-500">
                 {account._count.claims} klaim
               </span>
-            )}
+            ) : null}
           </div>
-          <div className="text-xs text-gray-500 mt-1">{account.category}</div>
+          <div className="mt-1 text-xs text-gray-500">{account.category}</div>
         </div>
 
-        {/* Actions */}
-        {isAdmin && (
-          <div className="flex items-center gap-1 flex-shrink-0">
+        {canUpdate ? (
+          <div className="flex flex-shrink-0 items-center gap-1">
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onEdit(account)}
               title="Ubah akun"
             >
-              ✏️
+              Ubah
             </Button>
             <Button
               size="sm"
@@ -119,27 +115,26 @@ function HierarchyNode({
               onClick={() => onToggleActive(account)}
               title={account.isActive ? "Nonaktifkan" : "Aktifkan"}
             >
-              {account.isActive ? "⏸️" : "▶️"}
+              {account.isActive ? "Nonaktifkan" : "Aktifkan"}
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* Children */}
-      {hasChildren && isExpanded && (
+      {hasChildren && isExpanded ? (
         <div className="ml-2">
           {account.children!.map((child) => (
             <HierarchyNode
               key={child.id}
               account={child}
               level={level + 1}
-              isAdmin={isAdmin}
+              canUpdate={canUpdate}
               onEdit={onEdit}
               onToggleActive={onToggleActive}
             />
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -147,12 +142,10 @@ function HierarchyNode({
 export function COAHierarchyView({
   accounts,
   isLoading,
-  userRole,
+  canUpdate,
   onEdit,
   onToggleActive,
 }: COAHierarchyViewProps) {
-  const isAdmin = userRole === "ADMIN";
-
   if (isLoading) {
     return (
       <div className="rounded-lg border bg-white p-12 text-center">
@@ -165,21 +158,21 @@ export function COAHierarchyView({
   if (accounts.length === 0) {
     return (
       <div className="rounded-lg border bg-white p-12 text-center">
-        <div className="text-6xl mb-4">🌳</div>
+        <div className="mb-4 text-6xl">Tree</div>
         <p className="text-sm text-gray-600">Tidak ada akun untuk ditampilkan</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border bg-white overflow-hidden">
-      <div className="p-4 space-y-1">
+    <div className="overflow-hidden rounded-lg border bg-white">
+      <div className="space-y-1 p-4">
         {accounts.map((account) => (
           <HierarchyNode
             key={account.id}
             account={account}
             level={0}
-            isAdmin={isAdmin}
+            canUpdate={canUpdate}
             onEdit={onEdit}
             onToggleActive={onToggleActive}
           />

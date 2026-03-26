@@ -5,6 +5,7 @@ import { api } from "@/trpc/react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { useSession } from "next-auth/react";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -219,19 +220,19 @@ function BailoutTimeline({ b }: { b: Bailout }) {
 
 function BailoutActions({
   bailout,
-  userRole,
+  canApprove,
+  canReject,
+  canDisburse,
   onRefresh,
 }: {
   bailout: Bailout;
-  userRole: string;
+  canApprove: boolean;
+  canReject: boolean;
+  canDisburse: boolean;
   onRefresh: () => void;
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
-
-  const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
-  const directorRoles = ["DIRECTOR", "ADMIN"];
-  const financeRoles = ["FINANCE", "ADMIN"];
 
   const approveChief = api.bailout.approveByChief.useMutation({ onSuccess: () => { onRefresh(); setShowRejectForm(false); } });
   const approveDirector = api.bailout.approveByDirector.useMutation({ onSuccess: () => { onRefresh(); setShowRejectForm(false); } });
@@ -240,12 +241,19 @@ function BailoutActions({
 
   const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending;
 
-  const canApproveChief = chiefRoles.includes(userRole) && bailout.status === "SUBMITTED";
-  const canApproveDirector = directorRoles.includes(userRole) && bailout.status === "APPROVED_CHIEF";
-  const canDisburse = financeRoles.includes(userRole) && bailout.status === "APPROVED_DIRECTOR";
-  const canReject = chiefRoles.includes(userRole) && ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
+  const canApproveChief =
+    canApprove && bailout.status === "SUBMITTED";
+  const canApproveDirector =
+    canApprove &&
+    bailout.status === "APPROVED_CHIEF";
+  const canDisburseNow =
+    canDisburse &&
+    bailout.status === "APPROVED_DIRECTOR";
+  const canRejectNow =
+    canReject &&
+    ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
 
-  if (!canApproveChief && !canApproveDirector && !canDisburse) return null;
+  if (!canApproveChief && !canApproveDirector && !canDisburseNow && !canRejectNow) return null;
 
   return (
     <div className="space-y-2">
@@ -271,7 +279,7 @@ function BailoutActions({
         </div>
       ) : (
         <div className="flex flex-wrap gap-1">
-          {canReject && (
+          {canRejectNow && (
             <button onClick={() => setShowRejectForm(true)} disabled={isActing} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 border border-red-200">
               Tolak
             </button>
@@ -286,7 +294,7 @@ function BailoutActions({
               ✓ Setujui Direktur
             </Button>
           )}
-          {canDisburse && (
+          {canDisburseNow && (
             <Button isLoading={disburse.isPending} onClick={() => disburse.mutate({ id: bailout.id })}>
               💰 Cairkan Dana
             </Button>
@@ -301,9 +309,13 @@ function BailoutActions({
 
 function CreateBailoutForm({
   travelRequestId,
+  canCreate,
+  canSubmit,
   onSuccess,
 }: {
   travelRequestId: string;
+  canCreate: boolean;
+  canSubmit: boolean;
   onSuccess: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -354,6 +366,10 @@ function CreateBailoutForm({
   });
 
   const isLoading = createMutation.isPending || submitMutation.isPending;
+
+  if (!canCreate || !canSubmit) {
+    return null;
+  }
 
   const handleSubmit = () => {
     setError(null);
@@ -564,12 +580,30 @@ export function BailoutPanel({
   onClose,
 }: BailoutPanelProps) {
   const { data: session } = useSession();
-  const userRole = session?.user?.role ?? "EMPLOYEE";
+  const permissions = session?.user?.permissions;
+  const canReadBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "read");
+  const canCreateBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "create");
+  const canSubmitBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "submit");
+  const canApproveBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "approve");
+  const canRejectBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "reject");
+  const canDisburseBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "disburse");
   const utils = api.useUtils();
 
   const bailoutQuery = api.bailout.getAll.useQuery(
     { travelRequestId, limit: 50 },
-    { enabled: isOpen }
+    { enabled: isOpen && canReadBailout }
   );
   const rawData = bailoutQuery.data as { bailouts: Bailout[] } | undefined;
   const isLoading = bailoutQuery.isLoading;
@@ -586,8 +620,13 @@ export function BailoutPanel({
       size="lg"
     >
       <div className="space-y-4">
+        {!canReadBailout ? (
+          <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-sm text-gray-600">
+            Anda tidak memiliki akses untuk melihat data bailout pada perjalanan ini.
+          </div>
+        ) : null}
         {/* Summary */}
-        {bailouts.length > 0 && (
+        {canReadBailout && bailouts.length > 0 && (
           <div className="flex gap-3 text-xs">
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">{bailouts.length} pengajuan</span>
             <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700">
@@ -597,14 +636,14 @@ export function BailoutPanel({
         )}
 
         {/* Loading */}
-        {isLoading && (
+        {canReadBailout && isLoading && (
           <div className="flex justify-center py-8">
             <div className="h-6 w-6 animate-spin rounded-full border-4 border-blue-400 border-t-transparent" />
           </div>
         )}
 
         {/* Empty */}
-        {!isLoading && bailouts.length === 0 && (
+        {canReadBailout && !isLoading && bailouts.length === 0 && (
           <div className="rounded-lg border-2 border-dashed border-gray-200 p-6 text-center">
             <p className="text-lg">💰</p>
             <p className="text-sm font-medium text-gray-600">Belum ada dana talangan untuk trip ini</p>
@@ -612,7 +651,7 @@ export function BailoutPanel({
         )}
 
         {/* Bailout Cards */}
-        {bailouts.map((b) => (
+        {canReadBailout && bailouts.map((b) => (
           <div key={b.id} className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
@@ -637,13 +676,21 @@ export function BailoutPanel({
             <BailoutTimeline b={b} />
 
             {/* Approver Actions */}
-            <BailoutActions bailout={b} userRole={userRole} onRefresh={refresh} />
+            <BailoutActions
+              bailout={b}
+              canApprove={canApproveBailout}
+              canReject={canRejectBailout}
+              canDisburse={canDisburseBailout}
+              onRefresh={refresh}
+            />
           </div>
         ))}
 
         {/* Create New */}
         <CreateBailoutForm
           travelRequestId={travelRequestId}
+          canCreate={canCreateBailout}
+          canSubmit={canSubmitBailout}
           onSuccess={refresh}
         />
 

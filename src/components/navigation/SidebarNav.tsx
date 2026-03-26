@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Session } from "next-auth";
+import { hasPermissionMap, type PermissionAction } from "@/lib/auth/permissions";
 import {
   CRM_ROLES,
   hasAnyRole,
@@ -12,116 +13,142 @@ import {
 interface NavItem {
   label: string;
   href: string;
-  icon?: string;
+  icon: string;
+  moduleKey?: string;
+  action?: PermissionAction;
   roles?: Role[];
   children?: NavItem[];
   comingSoon?: boolean;
 }
 
 const crmChildren: NavItem[] = [
-  { label: "CRM Dashboard", href: "/crm" },
-  { label: "Customers", href: "/crm/customers" },
-  { label: "Leads", href: "/crm/leads" },
-  { label: "Deals", href: "/crm/deals" },
-  { label: "Activities", href: "/crm/activities" },
-  { label: "Communication", href: "/crm/communication", comingSoon: true },
-  { label: "Sales / Orders", href: "/crm/sales-orders", comingSoon: true },
-  { label: "Reports", href: "/crm/reports" },
-  { label: "Support Tickets", href: "/crm/support-tickets", comingSoon: true },
+  { label: "CRM Dashboard", href: "/crm", icon: "CD" },
+  { label: "Customers", href: "/crm/customers", icon: "CU" },
+  { label: "Leads", href: "/crm/leads", icon: "LE" },
+  { label: "Deals", href: "/crm/deals", icon: "DE" },
+  { label: "Activities", href: "/crm/activities", icon: "AC" },
+  {
+    label: "Communication",
+    href: "/crm/communication",
+    icon: "CM",
+    comingSoon: true,
+  },
+  {
+    label: "Sales / Orders",
+    href: "/crm/sales-orders",
+    icon: "SO",
+    comingSoon: true,
+  },
+  { label: "Reports", href: "/crm/reports", icon: "RP" },
+  {
+    label: "Support Tickets",
+    href: "/crm/support-tickets",
+    icon: "ST",
+    comingSoon: true,
+  },
   {
     label: "Marketing Automation",
     href: "/crm/marketing-automation",
+    icon: "MA",
     comingSoon: true,
   },
   {
     label: "Products / Services",
     href: "/crm/products-services",
+    icon: "PS",
     comingSoon: true,
   },
 ];
 
 const accountingChildren: NavItem[] = [
-  { label: "Finance", href: "/finance" },
-  { label: "Jurnal", href: "/journal" },
-  { label: "Bagan Akun", href: "/chart-of-accounts" },
-  { label: "Employee Advance Control", href: "/reports/employee-advance-control" },
-  { label: "General Ledger", href: "/reports/general-ledger" },
-  { label: "Trial Balance", href: "/reports/trial-balance" },
-  { label: "Laba Rugi", href: "/reports/income-statement" },
-  { label: "Neraca", href: "/reports/balance-sheet" },
+  { label: "Finance", href: "/finance", icon: "FN" },
+  { label: "Jurnal", href: "/journal", icon: "JR" },
+  { label: "Bagan Akun", href: "/chart-of-accounts", icon: "CO" },
+  {
+    label: "Employee Advance Control",
+    href: "/reports/employee-advance-control",
+    icon: "EA",
+  },
+  { label: "General Ledger", href: "/reports/general-ledger", icon: "GL" },
+  { label: "Trial Balance", href: "/reports/trial-balance", icon: "TB" },
+  { label: "Laba Rugi", href: "/reports/income-statement", icon: "LR" },
+  { label: "Neraca", href: "/reports/balance-sheet", icon: "NR" },
 ];
 
 const navigationItems: NavItem[] = [
   {
     label: "Dasbor",
     href: "/dashboard",
-    icon: "📊",
+    icon: "DS",
+    moduleKey: "dashboard",
   },
   {
     label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
-    icon: "✈️",
+    icon: "PD",
+    moduleKey: "travel",
   },
   {
     label: "Proyek",
     href: "/projects",
-    icon: "📁",
-    roles: ["MANAGER", "DIRECTOR", "ADMIN", "SALES_CHIEF", "SALES_EMPLOYEE"],
+    icon: "PR",
+    moduleKey: "projects",
   },
   {
     label: "Persetujuan Bailout",
     href: "/bailout",
-    icon: "💼",
-    roles: ["SALES_CHIEF", "MANAGER", "DIRECTOR", "FINANCE", "ADMIN"],
+    icon: "BO",
+    moduleKey: "bailout",
   },
   {
     label: "Klaim",
     href: "/claims",
-    icon: "💰",
+    icon: "KL",
+    moduleKey: "claims",
   },
   {
     label: "Persetujuan",
     href: "/approvals",
-    icon: "✅",
-    roles: [
-      "SUPERVISOR",
-      "MANAGER",
-      "DIRECTOR",
-      "FINANCE",
-      "ADMIN",
-      "SALES_CHIEF",
-    ],
+    icon: "AP",
+    moduleKey: "approvals",
   },
   {
     label: "CRM",
     href: "/crm",
-    icon: "🤝",
+    icon: "CRM",
     roles: CRM_ROLES,
     children: crmChildren,
   },
   {
     label: "Akuntansi & Keuangan",
     href: "/accounting",
-    icon: "🏦",
-    roles: ["FINANCE", "ADMIN"],
+    icon: "AK",
+    moduleKey: "accounting",
     children: accountingChildren,
   },
   {
     label: "Manajemen Pengguna",
     href: "/admin/users",
-    icon: "👥",
-    roles: ["ADMIN"],
+    icon: "US",
+    moduleKey: "users",
   },
   {
     label: "Master Tenant",
     href: "/admin/tenants",
-    icon: "🏢",
-    roles: ["ROOT"],
+    icon: "TN",
+    moduleKey: "tenants",
   },
   {
-    label: "Profile",
+    label: "Manajemen Peran",
+    href: "/admin/roles",
+    icon: "RB",
+    moduleKey: "roles",
+  },
+  {
+    label: "Profil",
     href: "/profile",
-    icon: "👤",
+    icon: "PF",
+    moduleKey: "profile",
   },
 ];
 
@@ -131,24 +158,36 @@ interface SidebarNavProps {
   onNavigate?: () => void;
 }
 
+function canAccessItem(session: Session, item: NavItem) {
+  if (session.user.isRoot) {
+    return true;
+  }
+
+  if (item.roles?.length) {
+    const roles = normalizeRoles({
+      roles: session.user.roles,
+      role: session.user.role,
+    });
+    return hasAnyRole(roles, item.roles);
+  }
+
+  if (item.moduleKey) {
+    return hasPermissionMap(
+      session.user.permissions,
+      item.moduleKey,
+      item.action ?? "read",
+    );
+  }
+
+  return true;
+}
+
 export function SidebarNav({
   session,
   currentPath,
   onNavigate,
 }: SidebarNavProps) {
-  const userRole = session.user.role ?? "EMPLOYEE";
-  const userRoles = normalizeRoles({
-    roles: session.user.roles,
-    role: userRole,
-  });
-  const canAccessAsRoot = session.user.isRoot === true;
-
-  const allowedItems = navigationItems.filter(
-    (item) =>
-      !item.roles ||
-      canAccessAsRoot ||
-      hasAnyRole(userRoles, [...item.roles, "ROOT"]),
-  );
+  const allowedItems = navigationItems.filter((item) => canAccessItem(session, item));
 
   return (
     <nav className="flex-1 space-y-1 overflow-y-auto p-4">
@@ -156,6 +195,10 @@ export function SidebarNav({
         const isActive =
           currentPath === item.href ||
           (item.href !== "/" && currentPath.startsWith(item.href));
+
+        const allowedChildren = item.children?.filter((child) =>
+          canAccessItem(session, child),
+        );
 
         return (
           <div key={item.href} className="space-y-1">
@@ -169,17 +212,19 @@ export function SidebarNav({
               }`}
             >
               <span className="flex items-center space-x-3">
-                {item.icon ? <span className="text-xl">{item.icon}</span> : null}
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-[10px] font-semibold tracking-[0.14em] text-gray-600">
+                  {item.icon}
+                </span>
                 <span>{item.label}</span>
               </span>
-              {item.children?.length ? (
+              {allowedChildren?.length ? (
                 <span className="text-xs text-gray-400">{isActive ? "▾" : "▸"}</span>
               ) : null}
             </Link>
 
-            {item.children?.length && isActive ? (
+            {allowedChildren?.length && isActive ? (
               <div className="ml-4 space-y-1 border-l border-gray-200 pl-3">
-                {item.children.map((child) => {
+                {allowedChildren.map((child) => {
                   const childActive =
                     currentPath === child.href ||
                     (child.href !== "/" && currentPath.startsWith(child.href));

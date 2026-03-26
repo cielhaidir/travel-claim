@@ -4,14 +4,13 @@ import {
   AuditAction,
   JournalSourceType,
   JournalStatus,
-  Role,
   type Prisma,
 } from "../../../../generated/prisma";
-import { createTRPCRouter, financeProcedure, protectedProcedure } from "@/server/api/trpc";
-import { userHasAnyRole } from "@/lib/auth/role-check";
+import {
+  createTRPCRouter,
+  permissionProcedure,
+} from "@/server/api/trpc";
 import { generateJournalEntryNumber } from "@/lib/utils/numberGenerators";
-
-const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -228,7 +227,7 @@ const lineInput = z.object({
 });
 
 export const journalEntryRouter = createTRPCRouter({
-  list: protectedProcedure
+  list: permissionProcedure("journals", "read")
     .input(
       z.object({
         status: z.nativeEnum(JournalStatus).optional(),
@@ -286,7 +285,7 @@ export const journalEntryRouter = createTRPCRouter({
       return { journalEntries: rows, nextCursor };
     }),
 
-  getById: protectedProcedure
+  getById: permissionProcedure("journals", "read")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .query(async ({ ctx, input }) => {
@@ -328,7 +327,7 @@ export const journalEntryRouter = createTRPCRouter({
       return journal;
     }),
 
-  createDraft: financeProcedure
+  createDraft: permissionProcedure("journals", "create")
     .input(
       z.object({
         transactionDate: z.coerce.date(),
@@ -450,7 +449,7 @@ export const journalEntryRouter = createTRPCRouter({
       return created;
     }),
 
-  post: financeProcedure
+  post: permissionProcedure("journals", "post")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -547,7 +546,7 @@ export const journalEntryRouter = createTRPCRouter({
       return result;
     }),
 
-  void: financeProcedure
+  void: permissionProcedure("journals", "void")
     .input(
       z.object({
         id: z.string(),
@@ -593,18 +592,14 @@ export const journalEntryRouter = createTRPCRouter({
       return updated;
     }),
 
-  getPostingPreview: protectedProcedure
+  getPostingPreview: permissionProcedure("journals", "post")
     .input(
       z.object({
         lines: z.array(lineInput).min(2),
       }),
     )
     .output(z.any())
-    .query(({ ctx, input }) => {
-      if (!userHasAnyRole(ctx.session.user, FINANCE_ROLES)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Hanya Finance atau Admin yang boleh melihat preview posting" });
-      }
-
+    .query(({ input }) => {
       return assertBalanced(input.lines);
     }),
 });

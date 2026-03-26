@@ -9,8 +9,7 @@ import {
 
 import {
   createTRPCRouter,
-  protectedProcedure,
-  adminProcedure,
+  permissionProcedure,
 } from "@/server/api/trpc";
 
 function getTenantScope(ctx: unknown): {
@@ -37,7 +36,7 @@ function withTenantWhere<T extends Record<string, unknown>>(
 
 export const chartOfAccountRouter = createTRPCRouter({
   // Get all Chart of Accounts with optional filters
-  getAll: protectedProcedure
+  getAll: permissionProcedure("chart-of-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -139,7 +138,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Get Chart of Account by ID with full details
-  getById: protectedProcedure
+  getById: permissionProcedure("chart-of-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -214,7 +213,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Get COA hierarchy tree structure
-  getHierarchy: protectedProcedure
+  getHierarchy: permissionProcedure("chart-of-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -282,7 +281,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Get only active accounts (for dropdowns)
-  getActiveAccounts: protectedProcedure
+  getActiveAccounts: permissionProcedure("chart-of-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -323,7 +322,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Get accounts filtered by account type
-  getByType: protectedProcedure
+  getByType: permissionProcedure("chart-of-accounts", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -373,7 +372,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Create new Chart of Account (Admin only)
-  create: adminProcedure
+  create: permissionProcedure("chart-of-accounts", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -491,7 +490,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Update existing Chart of Account (Admin only)
-  update: adminProcedure
+  update: permissionProcedure("chart-of-accounts", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -670,7 +669,7 @@ export const chartOfAccountRouter = createTRPCRouter({
 
   // Delete Chart of Account (Admin only)
   // Soft delete (isActive=false) or hard delete if no dependencies
-  delete: adminProcedure
+  delete: permissionProcedure("chart-of-accounts", "delete")
     .meta({
       openapi: {
         method: "DELETE",
@@ -788,7 +787,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     }),
 
   // Toggle active status (Admin only)
-  toggleActive: adminProcedure
+  toggleActive: permissionProcedure("chart-of-accounts", "update")
     .meta({
       openapi: {
         method: "POST",

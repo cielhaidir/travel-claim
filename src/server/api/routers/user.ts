@@ -11,10 +11,9 @@ import bcrypt from "bcryptjs";
 import {
   createTRPCRouter,
   protectedProcedure,
-  adminProcedure,
-  managerProcedure,
+  permissionProcedure,
 } from "@/server/api/trpc";
-import { userHasAnyRole } from "@/lib/auth/role-check";
+import { userHasPermission } from "@/lib/auth/role-check";
 
 // Role precedence for deriving primary role from a set of roles
 const ROLE_PRECEDENCE_ORDER = [
@@ -65,6 +64,22 @@ function withTenantMembershipFilter(
         },
       },
     ],
+  };
+}
+
+function buildCurrentUserLookup(input: {
+  id: string;
+  email?: string | null;
+}): Prisma.UserWhereInput {
+  const orConditions: Prisma.UserWhereInput[] = [{ id: input.id }];
+
+  if (input.email) {
+    orConditions.push({ email: input.email });
+  }
+
+  return {
+    deletedAt: null,
+    OR: orConditions,
   };
 }
 
@@ -207,7 +222,7 @@ function membershipTimestamps(status: MembershipStatus) {
 
 export const userRouter = createTRPCRouter({
   // Get current user profile
-  getMe: protectedProcedure
+  getMe: permissionProcedure("profile", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -221,7 +236,10 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx }) => {
       const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: ctx.session.user.id }),
+        where: buildCurrentUserLookup({
+          id: ctx.session.user.id,
+          email: ctx.session.user.email,
+        }),
         include: {
           department: true,
           supervisor: {
@@ -309,7 +327,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get user by phone number (dedicated MCP tool)
-  getByPhone: managerProcedure
+  getByPhone: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -378,7 +396,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get all users with filters
-  getAll: managerProcedure
+  getAll: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -546,11 +564,7 @@ export const userRouter = createTRPCRouter({
 
       // Only allow viewing own profile or if user is manager/admin
       const isOwn = user.id === ctx.session.user.id;
-      const canView = userHasAnyRole(ctx.session.user, [
-        "MANAGER",
-        "DIRECTOR",
-        "ADMIN",
-      ]);
+      const canView = userHasPermission(ctx.session.user, "users", "read");
 
       if (!isOwn && !canView) {
         throw new TRPCError({
@@ -598,7 +612,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Get organizational hierarchy
-  getHierarchy: managerProcedure
+  getHierarchy: permissionProcedure("users", "read")
     .meta({
       openapi: {
         method: "GET",
@@ -647,7 +661,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Create user
-  create: adminProcedure
+  create: permissionProcedure("users", "create")
     .meta({
       openapi: {
         method: "POST",
@@ -758,7 +772,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Update user
-  update: adminProcedure
+  update: permissionProcedure("users", "update")
     .meta({
       openapi: {
         method: "PUT",
@@ -928,7 +942,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Update own profile
-  updateMe: protectedProcedure
+  updateMe: permissionProcedure("profile", "update")
     .meta({
       openapi: {
         method: "PATCH",
@@ -940,15 +954,42 @@ export const userRouter = createTRPCRouter({
     })
     .input(
       z.object({
-        name: z.string().min(1).optional(),
-        phoneNumber: z.string().optional(),
+        name: z.string().trim().min(1).optional(),
+        phoneNumber: z.string().trim().optional().nullable(),
       }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
+      const nextPhoneNumber =
+        input.phoneNumber === undefined
+          ? undefined
+          : input.phoneNumber === ""
+            ? null
+            : input.phoneNumber;
+
+      const currentUser = await ctx.db.user.findFirst({
+        where: buildCurrentUserLookup({
+          id: ctx.session.user.id,
+          email: ctx.session.user.email,
+        }),
+        select: { id: true },
+      });
+
+      if (!currentUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+
       return ctx.db.user.update({
-        where: { id: ctx.session.user.id },
-        data: input,
+        where: { id: currentUser.id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(nextPhoneNumber !== undefined
+            ? { phoneNumber: nextPhoneNumber }
+            : {}),
+        },
         include: {
           department: true,
           supervisor: {
@@ -963,7 +1004,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Change password
-  changePassword: protectedProcedure
+  changePassword: permissionProcedure("profile", "update")
     .meta({
       openapi: {
         method: "POST",
@@ -981,9 +1022,12 @@ export const userRouter = createTRPCRouter({
     )
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: ctx.session.user.id },
-        select: { password: true },
+      const user = await ctx.db.user.findFirst({
+        where: buildCurrentUserLookup({
+          id: ctx.session.user.id,
+          email: ctx.session.user.email,
+        }),
+        select: { id: true, password: true },
       });
 
       if (!user?.password) {
@@ -1009,7 +1053,7 @@ export const userRouter = createTRPCRouter({
       const hashedPassword = await bcrypt.hash(input.newPassword, 10);
 
       await ctx.db.user.update({
-        where: { id: ctx.session.user.id },
+        where: { id: user.id },
         data: { password: hashedPassword },
       });
 
@@ -1017,7 +1061,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Admin reset password
-  resetPassword: adminProcedure
+  resetPassword: permissionProcedure("users", "update")
     .input(z.object({ id: z.string(), newPassword: z.string().min(8) }))
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -1036,7 +1080,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Soft delete user
-  delete: adminProcedure
+  delete: permissionProcedure("users", "delete")
     .meta({
       openapi: {
         method: "DELETE",
@@ -1082,7 +1126,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Restore deleted user
-  restore: adminProcedure
+  restore: permissionProcedure("users", "update")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
@@ -1113,7 +1157,7 @@ export const userRouter = createTRPCRouter({
     }),
 
   // Bulk import users from Excel/CSV (only userType = member)
-  bulkImport: adminProcedure
+  bulkImport: permissionProcedure("users", "import")
     .input(
       z.object({
         users: z.array(

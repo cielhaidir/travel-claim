@@ -30,6 +30,10 @@ interface OpenApiMeta {
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
 import { normalizeRoles } from "@/lib/constants/roles";
+import {
+  hasPermissionMap,
+  type PermissionAction,
+} from "@/lib/auth/permissions";
 
 function hasRootSessionAccess(ctx: {
   session?: {
@@ -300,6 +304,44 @@ const enforceRole = (allowedRoles: Role[]) => {
   });
 };
 
+const enforcePermission = (
+  moduleKey: string,
+  action: PermissionAction = "read",
+) => {
+  return t.middleware(({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Authentication required",
+      });
+    }
+
+    const isRoot = hasRootSessionAccess(ctx);
+    if (isRoot) {
+      return next({
+        ctx: {
+          ...ctx,
+          session: { ...ctx.session, user: ctx.session.user },
+        },
+      });
+    }
+
+    if (!hasPermissionMap(ctx.session.user.permissions, moduleKey, action)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Insufficient permissions for this operation",
+      });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        session: { ...ctx.session, user: ctx.session.user },
+      },
+    });
+  });
+};
+
 /**
  * Protected (authenticated) procedure
  *
@@ -328,6 +370,11 @@ export const protectedProcedure = t.procedure
       },
     });
   });
+
+export const permissionProcedure = (
+  moduleKey: string,
+  action: PermissionAction = "read",
+) => protectedProcedure.use(enforcePermission(moduleKey, action));
 
 /**
  * Supervisor procedure - requires SUPERVISOR, SALES_CHIEF, MANAGER, DIRECTOR, or ADMIN role

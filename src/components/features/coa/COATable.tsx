@@ -28,7 +28,8 @@ export interface COAAccount {
 interface COATableProps {
   accounts: COAAccount[];
   isLoading?: boolean;
-  userRole: string;
+  canUpdate: boolean;
+  canDelete: boolean;
   onEdit: (account: COAAccount) => void;
   onDelete: (account: COAAccount) => void;
   onToggleActive: (account: COAAccount) => void;
@@ -37,23 +38,24 @@ interface COATableProps {
 export function COATable({
   accounts,
   isLoading,
-  userRole,
+  canUpdate,
+  canDelete,
   onEdit,
   onDelete,
   onToggleActive,
 }: COATableProps) {
   const [sortField, setSortField] = useState<keyof COAAccount>("code");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-
-  const isAdmin = userRole === "ADMIN";
+  const canManage = canUpdate || canDelete;
 
   const handleSort = (field: keyof COAAccount) => {
     if (sortField === field) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDirection("asc");
+      return;
     }
+
+    setSortField(field);
+    setSortDirection("asc");
   };
 
   const sortedAccounts = [...accounts].sort((a, b) => {
@@ -84,13 +86,12 @@ export function COATable({
   };
 
   const getIndentation = (account: COAAccount) => {
-    // Calculate indentation level based on parent relationship
     return account.parentId ? "pl-8" : "";
   };
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border bg-white overflow-hidden">
+      <div className="overflow-hidden rounded-lg border bg-white">
         <div className="p-12 text-center">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
           <p className="mt-4 text-sm text-gray-600">Memuat akun...</p>
@@ -100,13 +101,13 @@ export function COATable({
   }
 
   return (
-    <div className="rounded-lg border bg-white overflow-hidden">
+    <div className="overflow-hidden rounded-lg border bg-white">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50 border-b">
+          <thead className="border-b bg-gray-50">
             <tr>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                 onClick={() => handleSort("code")}
               >
                 <div className="flex items-center gap-1">
@@ -117,7 +118,7 @@ export function COATable({
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                 onClick={() => handleSort("name")}
               >
                 <div className="flex items-center gap-1">
@@ -128,7 +129,7 @@ export function COATable({
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                 onClick={() => handleSort("accountType")}
               >
                 <div className="flex items-center gap-1">
@@ -138,28 +139,30 @@ export function COATable({
                   )}
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                 Kategori
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                 Penggunaan
               </th>
-              {isAdmin && (
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              {canManage ? (
+                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                   Aksi
                 </th>
-              )}
+              ) : null}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="divide-y divide-gray-200 bg-white">
             {sortedAccounts.map((account) => (
               <tr key={account.id} className="hover:bg-gray-50">
-                <td className={`px-6 py-4 whitespace-nowrap ${getIndentation(account)}`}>
+                <td className={`whitespace-nowrap px-6 py-4 ${getIndentation(account)}`}>
                   <div className="flex items-center gap-2">
-                    {account.parentId && <span className="text-gray-400">└─</span>}
+                    {account.parentId ? (
+                      <span className="text-gray-400">|-</span>
+                    ) : null}
                     <span className="text-sm font-mono font-medium text-gray-900">
                       {account.code}
                     </span>
@@ -167,13 +170,13 @@ export function COATable({
                 </td>
                 <td className="px-6 py-4">
                   <div className="text-sm text-gray-900">{account.name}</div>
-                  {account.parent && (
+                  {account.parent ? (
                     <div className="text-xs text-gray-500">
                       Induk: {account.parent.code}
                     </div>
-                  )}
+                  ) : null}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="whitespace-nowrap px-6 py-4">
                   <span
                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getAccountTypeColor(account.accountType)}`}
                   >
@@ -182,59 +185,65 @@ export function COATable({
                 </td>
                 <td className="px-6 py-4">
                   <div className="text-sm text-gray-900">{account.category}</div>
-                  {account.subcategory && (
+                  {account.subcategory ? (
                     <div className="text-xs text-gray-500">{account.subcategory}</div>
-                  )}
+                  ) : null}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="whitespace-nowrap px-6 py-4">
                   <Badge variant={account.isActive ? "success" : "default"}>
                     {account.isActive ? "Aktif" : "Nonaktif"}
                   </Badge>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="whitespace-nowrap px-6 py-4">
                   <div className="text-sm text-gray-600">
                     {account._count?.claims ?? 0} klaim
-                    {account._count && account._count.children > 0 && (
+                    {account._count && account._count.children > 0 ? (
                       <span className="ml-2 text-gray-400">
                         • {account._count.children} akun turunan
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </td>
-                {isAdmin && (
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                {canManage ? (
+                  <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-medium">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onEdit(account)}
-                        title="Ubah akun"
-                      >
-                        ✏️
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onToggleActive(account)}
-                        title={account.isActive ? "Nonaktifkan" : "Aktifkan"}
-                      >
-                        {account.isActive ? "⏸️" : "▶️"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onDelete(account)}
-                        title="Hapus akun"
-                        disabled={
-                          (account._count?.claims ?? 0) > 0 ||
-                          (account._count?.children ?? 0) > 0
-                        }
-                      >
-                        🗑️
-                      </Button>
+                      {canUpdate ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onEdit(account)}
+                            title="Ubah akun"
+                          >
+                            Ubah
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onToggleActive(account)}
+                            title={account.isActive ? "Nonaktifkan" : "Aktifkan"}
+                          >
+                            {account.isActive ? "Nonaktifkan" : "Aktifkan"}
+                          </Button>
+                        </>
+                      ) : null}
+                      {canDelete ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onDelete(account)}
+                          title="Hapus akun"
+                          disabled={
+                            (account._count?.claims ?? 0) > 0 ||
+                            (account._count?.children ?? 0) > 0
+                          }
+                        >
+                          Hapus
+                        </Button>
+                      ) : null}
                     </div>
                   </td>
-                )}
+                ) : null}
               </tr>
             ))}
           </tbody>

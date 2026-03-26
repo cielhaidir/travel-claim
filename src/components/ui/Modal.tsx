@@ -70,6 +70,7 @@ interface ConfirmModalProps {
   title: string;
   message: string;
   confirmLabel?: string;
+  confirmDisabled?: boolean;
   isLoading?: boolean;
   variant?: "danger" | "warning";
 }
@@ -81,6 +82,7 @@ export function ConfirmModal({
   title,
   message,
   confirmLabel = "Confirm",
+  confirmDisabled = false,
   isLoading = false,
   variant = "danger",
 }: ConfirmModalProps) {
@@ -102,7 +104,7 @@ export function ConfirmModal({
         </button>
         <button
           onClick={onConfirm}
-          disabled={isLoading}
+          disabled={isLoading || confirmDisabled}
           className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${confirmStyles}`}
         >
           {isLoading ? "Processing..." : confirmLabel}

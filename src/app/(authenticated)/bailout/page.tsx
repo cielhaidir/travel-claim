@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { BailoutFileUpload } from "@/components/features/BailoutFileUpload";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,23 +365,25 @@ function ActionModal({
   bailout,
   onClose,
   onDone,
-  userRole,
   currentUserId,
+  canSubmit,
+  canApprove,
+  canReject,
+  canDisburse,
 }: {
   bailout: Bailout;
   onClose: () => void;
   onDone: () => void;
-  userRole: string;
   currentUserId: string;
+  canSubmit: boolean;
+  canApprove: boolean;
+  canReject: boolean;
+  canDisburse: boolean;
 }) {
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [disbursementRef, setDisbursementRef] = useState("");
   const [currentStorageUrl, setCurrentStorageUrl] = useState(bailout.storageUrl);
-
-  const chiefRoles = ["SALES_CHIEF", "MANAGER", "DIRECTOR", "ADMIN"];
-  const directorRoles = ["DIRECTOR", "ADMIN"];
-  const financeRoles = ["FINANCE", "ADMIN"];
 
   const utils = api.useUtils();
   const refresh = () => { void utils.bailout.getAll.invalidate(); onDone(); onClose(); };
@@ -393,8 +397,20 @@ function ActionModal({
   const isActing = approveChief.isPending || approveDirector.isPending || reject.isPending || disburse.isPending || submit.isPending;
   const isLegacyReady = isLegacyTravelBailoutReady(bailout);
   const canFinanceDisburse =
-    financeRoles.includes(userRole) &&
+    canDisburse &&
     (bailout.status === "APPROVED_DIRECTOR" || isLegacyReady);
+  const canApproveChief =
+    canApprove && bailout.status === "SUBMITTED";
+  const canApproveDirector =
+    canApprove &&
+    bailout.status === "APPROVED_CHIEF";
+  const canShowReject =
+    canReject &&
+    ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status);
+  const canSubmitOwnDraft =
+    canSubmit &&
+    bailout.status === "DRAFT" &&
+    bailout.requester.id === currentUserId;
 
   return (
     <div className="space-y-5">
@@ -433,6 +449,7 @@ function ActionModal({
             category={bailout.category}
             currentUrl={currentStorageUrl}
             onUploaded={(key) => setCurrentStorageUrl(key)}
+            canManage={canFinanceDisburse}
           />
         </div>
       )}
@@ -484,6 +501,7 @@ function ActionModal({
               category={bailout.category}
               currentUrl={currentStorageUrl}
               onUploaded={(key) => setCurrentStorageUrl(key)}
+              canManage={canFinanceDisburse}
             />
           </div>
           <div className="flex gap-2 justify-end">
@@ -501,23 +519,23 @@ function ActionModal({
       {/* Action Buttons */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
         <Button variant="secondary" onClick={onClose}>Tutup</Button>
-        {bailout.status === "DRAFT" && bailout.requester.id === currentUserId && (
+        {canSubmitOwnDraft && (
           <Button isLoading={submit.isPending} onClick={() => submit.mutate({ id: bailout.id })}>
             Kirim Pengajuan
           </Button>
         )}
-        {!showReject && chiefRoles.includes(userRole) && ["SUBMITTED", "APPROVED_CHIEF"].includes(bailout.status) && (
+        {!showReject && canShowReject && (
           <button onClick={() => setShowReject(true)} disabled={isActing}
             className="rounded px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200">
             Tolak
           </button>
         )}
-        {chiefRoles.includes(userRole) && bailout.status === "SUBMITTED" && (
+        {canApproveChief && (
           <Button isLoading={approveChief.isPending} onClick={() => approveChief.mutate({ id: bailout.id })}>
             ✓ Setujui (Chief)
           </Button>
         )}
-        {directorRoles.includes(userRole) && bailout.status === "APPROVED_CHIEF" && (
+        {canApproveDirector && (
           <Button isLoading={approveDirector.isPending} onClick={() => approveDirector.mutate({ id: bailout.id })}>
             ✓ Setujui (Direktur)
           </Button>
@@ -538,8 +556,27 @@ function selectBailouts(d: { bailouts: Bailout[] }) {
 
 export default function BailoutApprovalPage() {
   const { data: session } = useSession();
-  const userRole = session?.user?.role ?? "EMPLOYEE";
+  const router = useRouter();
   const currentUserId = session?.user?.id ?? "";
+  const permissions = session?.user?.permissions;
+  const canReadBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "read");
+  const canCreateBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "create");
+  const canSubmitBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "submit");
+  const canApproveBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "approve");
+  const canRejectBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "reject");
+  const canDisburseBailout =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(permissions, "bailout", "disburse");
 
   const [statusFilter, setStatusFilter] = useState<BailoutStatus | "ALL">("ALL");
   const [selected, setSelected] = useState<Bailout | null>(null);
@@ -558,7 +595,7 @@ export default function BailoutApprovalPage() {
   // „select" uses a stable function reference to avoid infinite re-fetches.
   const { data: allBailouts = [], isLoading } = api.bailout.getAll.useQuery(
     { limit: 100 },
-    { select: selectBailouts },
+    { enabled: canReadBailout, select: selectBailouts },
   );
 
   // Derive the filtered list and the pending count from the same data.
@@ -570,10 +607,16 @@ export default function BailoutApprovalPage() {
   ).length;
 
   useEffect(() => {
-    if (!["FINANCE", "ADMIN"].includes(userRole)) return;
+    if (session && !canReadBailout) {
+      void router.replace("/dashboard");
+    }
+  }, [canReadBailout, router, session]);
+
+  useEffect(() => {
+    if (!canDisburseBailout) return;
     if (repairLegacyMutation.isPending || repairLegacyMutation.isSuccess) return;
     repairLegacyMutation.mutate({});
-  }, [repairLegacyMutation, userRole]);
+  }, [canDisburseBailout, repairLegacyMutation]);
 
   const statusFilters: { value: BailoutStatus | "ALL"; label: string }[] = [
     { value: "ALL", label: "Semua" },
@@ -584,20 +627,26 @@ export default function BailoutApprovalPage() {
     { value: "REJECTED", label: "Ditolak" },
   ];
 
+  if (!session || !canReadBailout) return null;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Bailout Approval"
         description="Kelola dan setujui pengajuan dana talangan perjalanan dinas"
-        primaryAction={{
-          label: "Ajukan Bailout Manual",
-          onClick: () => setIsCreateOpen(true),
-        }}
+        primaryAction={
+          canCreateBailout
+            ? {
+                label: "Ajukan Bailout Manual",
+                onClick: () => setIsCreateOpen(true),
+              }
+            : undefined
+        }
       />
 
       {/* Pending Summary */}
       {pendingCount > 0 && (
-        <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 shadow-sm">
           <p className="text-sm font-medium text-yellow-800">
             ⏳ Ada <strong>{pendingCount}</strong> pengajuan bailout yang menunggu tindakan Anda
           </p>
@@ -605,28 +654,32 @@ export default function BailoutApprovalPage() {
       )}
 
       {/* Status Filters */}
-      <div className="flex flex-wrap gap-2">
-        {statusFilters.map(f => (
-          <button key={f.value} onClick={() => setStatusFilter(f.value)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === f.value ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-            {f.label}
-          </button>
-        ))}
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-2">
+          {statusFilters.map(f => (
+            <button key={f.value} onClick={() => setStatusFilter(f.value)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === f.value ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="flex justify-center py-16">
+        <div className="content-section flex justify-center py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
         </div>
       ) : bailouts.length === 0 ? (
-        <EmptyState
-          icon="✅"
-          title={statusFilter === "ALL" ? "Belum Ada Bailout" : `Tidak ada bailout berstatus "${STATUS_LABELS[statusFilter]}"`}
-          description="Bailout akan muncul di sini dari travel yang sudah di-approve atau dari pengajuan manual."
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="✅"
+            title={statusFilter === "ALL" ? "Belum Ada Bailout" : `Tidak ada bailout berstatus "${STATUS_LABELS[statusFilter]}"`}
+            description="Bailout akan muncul di sini dari travel yang sudah di-approve atau dari pengajuan manual."
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
               <tr>
@@ -694,15 +747,18 @@ export default function BailoutApprovalPage() {
             bailout={selected}
             onClose={() => setSelected(null)}
             onDone={() => void utils.bailout.getAll.invalidate()}
-            userRole={userRole}
             currentUserId={currentUserId}
+            canSubmit={canSubmitBailout}
+            canApprove={canApproveBailout}
+            canReject={canRejectBailout}
+            canDisburse={canDisburseBailout}
           />
         )}
       </Modal>
 
       {/* Create Bailout Modal */}
       <Modal
-        isOpen={isCreateOpen}
+        isOpen={isCreateOpen && canCreateBailout}
         onClose={() => setIsCreateOpen(false)}
         title="Ajukan Dana Talangan Manual"
         size="lg"

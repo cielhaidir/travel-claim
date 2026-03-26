@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
@@ -10,12 +11,14 @@ import { COATable, type COAAccount } from "@/components/features/coa/COATable";
 import { COAHierarchyView } from "@/components/features/coa/COAHierarchyView";
 import { COAForm, type COAFormData } from "@/components/features/coa/COAForm";
 import { Button } from "@/components/ui/Button";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import type { COAType } from "../../../../generated/prisma";
 
 type ViewMode = "table" | "hierarchy";
 
 export default function ChartOfAccountsPage() {
   const { data: session } = useSession();
+  const router = useRouter();
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [accountTypeFilter, setAccountTypeFilter] = useState<COAType | "ALL">("ALL");
   const [isActiveFilter, setIsActiveFilter] = useState<boolean | "ALL">("ALL");
@@ -23,8 +26,24 @@ export default function ChartOfAccountsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<COAAccount | null>(null);
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAdmin = userRole === "ADMIN";
+  const canReadCoa =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "read");
+  const canCreateCoa =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "create");
+  const canUpdateCoa =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "update");
+  const canDeleteCoa =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "delete");
+
+  useEffect(() => {
+    if (session && !canReadCoa) {
+      void router.replace("/dashboard");
+    }
+  }, [canReadCoa, router, session]);
 
   // Fetch all accounts
   const {
@@ -37,6 +56,7 @@ export default function ChartOfAccountsPage() {
       isActive: isActiveFilter === "ALL" ? undefined : isActiveFilter,
     },
     {
+      enabled: canReadCoa,
       refetchOnWindowFocus: false,
     }
   );
@@ -53,7 +73,7 @@ export default function ChartOfAccountsPage() {
       isActive: isActiveFilter === "ALL" ? undefined : isActiveFilter,
     },
     {
-      enabled: viewMode === "hierarchy",
+      enabled: canReadCoa && viewMode === "hierarchy",
       refetchOnWindowFocus: false,
     }
   );
@@ -63,6 +83,7 @@ export default function ChartOfAccountsPage() {
   const { data: activeAccountsRaw } = api.chartOfAccount.getActiveAccounts.useQuery( // eslint-disable-line @typescript-eslint/no-unsafe-assignment
     {},
     {
+      enabled: canReadCoa,
       refetchOnWindowFocus: false,
     }
   );
@@ -139,16 +160,19 @@ export default function ChartOfAccountsPage() {
 
   // Handlers
   const handleCreateNew = () => {
+    if (!canCreateCoa) return;
     setEditingAccount(null);
     setIsFormOpen(true);
   };
 
   const handleEdit = (account: COAAccount) => {
+    if (!canUpdateCoa) return;
     setEditingAccount(account);
     setIsFormOpen(true);
   };
 
   const handleDelete = (account: COAAccount) => {
+    if (!canDeleteCoa) return;
     const hasChildren = (account._count?.children ?? 0) > 0;
     const hasClaims = (account._count?.claims ?? 0) > 0;
 
@@ -172,6 +196,7 @@ export default function ChartOfAccountsPage() {
   };
 
   const handleToggleActive = (account: COAAccount) => {
+    if (!canUpdateCoa) return;
     const message = account.isActive
       ? `Menonaktifkan akun ini juga akan menonaktifkan semua akun turunannya. Lanjutkan?`
       : `Yakin ingin mengaktifkan akun "${account.code} - ${account.name}"?`;
@@ -183,6 +208,7 @@ export default function ChartOfAccountsPage() {
 
   const handleFormSubmit = (data: COAFormData) => {
     if (editingAccount) {
+      if (!canUpdateCoa) return;
       updateMutation.mutate({
         id: editingAccount.id,
         ...data,
@@ -191,6 +217,7 @@ export default function ChartOfAccountsPage() {
         description: data.description || null,
       });
     } else {
+      if (!canCreateCoa) return;
       createMutation.mutate({
         ...data,
         parentId: data.parentId || undefined,
@@ -212,13 +239,15 @@ export default function ChartOfAccountsPage() {
     deleteMutation.isPending ||
     toggleActiveMutation.isPending;
 
+  if (!session || !canReadCoa) return null;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Bagan Akun"
         description="Kelola struktur akun keuangan untuk pencatatan pengeluaran"
         primaryAction={
-          isAdmin
+          canCreateCoa
             ? {
                 label: "Tambah Akun",
                 onClick: handleCreateNew,
@@ -256,7 +285,7 @@ export default function ChartOfAccountsPage() {
       />
 
       {/* Form Modal/Panel */}
-      {isFormOpen && (
+      {isFormOpen && (canCreateCoa || canUpdateCoa) && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-screen items-center justify-center p-4">
             <div
@@ -301,12 +330,12 @@ export default function ChartOfAccountsPage() {
             icon="💼"
             title="Belum ada bagan akun"
             description={
-              isAdmin
+              canCreateCoa
                 ? "Tambahkan akun pertama untuk mulai mengelola data keuangan"
                 : "Belum ada akun yang tersedia. Hubungi administrator Anda."
             }
             action={
-              isAdmin
+              canCreateCoa
                 ? {
                     label: "Tambah Akun Pertama",
                     onClick: handleCreateNew,
@@ -327,7 +356,8 @@ export default function ChartOfAccountsPage() {
         <COATable
           accounts={filteredAccounts}
           isLoading={false}
-          userRole={userRole}
+          canUpdate={canUpdateCoa}
+          canDelete={canDeleteCoa}
           onEdit={handleEdit}
           onDelete={handleDelete}
           onToggleActive={handleToggleActive}
@@ -336,7 +366,7 @@ export default function ChartOfAccountsPage() {
         <COAHierarchyView
           accounts={hierarchyData ?? []}
           isLoading={isLoadingHierarchy}
-          userRole={userRole}
+          canUpdate={canUpdateCoa}
           onEdit={(account) => handleEdit(account as COAAccount)}
           onToggleActive={(account) => handleToggleActive(account as COAAccount)}
         />

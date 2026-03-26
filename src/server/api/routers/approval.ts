@@ -15,11 +15,13 @@ import {
 import {
   createTRPCRouter,
   protectedProcedure,
+  permissionProcedure,
   supervisorProcedure,
 } from "@/server/api/trpc";
 import { generateApprovalNumber } from "@/lib/utils/numberGenerators";
 import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
 import { userHasAnyRole } from "@/lib/auth/role-check";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared input shapes
@@ -235,7 +237,7 @@ export const approvalRouter = createTRPCRouter({
   // Entity type is auto-detected from the linked record; the caller does NOT
   // need to declare it separately.
   // ───────────────────────────────────────────────────────────────────────────
-  actOnApproval: supervisorProcedure
+  actOnApproval: protectedProcedure
     .meta({
       openapi: {
         method: "POST",
@@ -307,6 +309,51 @@ export const approvalRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
+      const isRoot = ctx.session.user.isRoot ?? false;
+      const canReadApprovals =
+        isRoot ||
+        hasPermissionMap(ctx.session.user.permissions, "approvals", "read");
+      const canApprove =
+        isRoot ||
+        hasPermissionMap(ctx.session.user.permissions, "approvals", "approve");
+      const canReject =
+        isRoot ||
+        hasPermissionMap(ctx.session.user.permissions, "approvals", "reject");
+      const canRevision =
+        isRoot ||
+        hasPermissionMap(ctx.session.user.permissions, "approvals", "revision");
+
+      if (
+        ["list", "pending_count", "get"].includes(input.action) &&
+        !canReadApprovals
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
+      }
+
+      if (input.action === "approve" && !canApprove) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
+      }
+
+      if (input.action === "reject" && !canReject) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
+      }
+
+      if (input.action === "revision" && !canRevision) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Insufficient permissions",
+        });
+      }
+
       // ══════════════════════════════════════════════════════════════════════
       // ACTION: list
       // ══════════════════════════════════════════════════════════════════════
@@ -1547,7 +1594,7 @@ export const approvalRouter = createTRPCRouter({
   // ─── UI QUERY PROCEDURES (non-MCP, used by the web frontend) ─────────────
 
   // List approvals assigned to the current user (used by approvals page)
-  getMyApprovals: supervisorProcedure
+  getMyApprovals: permissionProcedure("approvals", "read")
     .input(
       z.object({
         status: z.nativeEnum(ApprovalStatus).optional(),
@@ -1558,10 +1605,9 @@ export const approvalRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const isAdmin = ctx.session.user.role === "ADMIN";
-      const where: Prisma.ApprovalWhereInput = isAdmin
-        ? {} // ADMIN sees all approvals
-        : { approverId: ctx.session.user.id };
+      const where: Prisma.ApprovalWhereInput = {
+        approverId: ctx.session.user.id,
+      };
 
       if (input?.status) {
         where.status = input.status;
@@ -1669,14 +1715,13 @@ export const approvalRouter = createTRPCRouter({
     }),
 
   // Count pending approvals for the current user (used by badge / header)
-  getPendingCount: supervisorProcedure
+  getPendingCount: permissionProcedure("approvals", "read")
     .input(z.object({}))
     .output(z.number())
     .query(async ({ ctx }) => {
-      const isAdmin = ctx.session.user.role === "ADMIN";
       return ctx.db.approval.count({
         where: applyTenantFilter(ctx, {
-          ...(isAdmin ? {} : { approverId: ctx.session.user.id }),
+          approverId: ctx.session.user.id,
           status: ApprovalStatus.PENDING,
         } satisfies Prisma.ApprovalWhereInput),
       });

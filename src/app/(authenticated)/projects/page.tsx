@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,20 +174,53 @@ function ProjectForm({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ProjectsPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [showForm, setShowForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
+  const canReadProjects =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "projects", "read");
+  const canCreateProjects =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "projects", "create");
+  const canUpdateProjects =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "projects", "update");
+  const canDeleteProjects =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "projects", "delete");
+
+  if (status === "loading") {
+    return (
+      <div className="content-section p-12 text-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
+
+  if (session && !canReadProjects) {
+    router.replace("/");
+    return null;
+  }
+
   const utils = api.useUtils();
 
   // ─── Queries ──────────────────────────────────────────────────────────────
-  const projectQuery = api.project.getAll.useQuery({
-    search: search || undefined,
-    isActive: activeFilter === "ALL" ? undefined : activeFilter === "ACTIVE",
-    limit: 50,
-  });
+  const projectQuery = api.project.getAll.useQuery(
+    {
+      search: search || undefined,
+      isActive: activeFilter === "ALL" ? undefined : activeFilter === "ACTIVE",
+      limit: 50,
+    },
+    {
+      enabled: canReadProjects,
+    },
+  );
   const isLoading: boolean = projectQuery.isLoading;
   const rawData: unknown = projectQuery.data;
   const projects = (rawData as { projects: Project[] } | undefined)?.projects ?? [];
@@ -245,48 +281,60 @@ export default function ProjectsPage() {
       <PageHeader
         title="Manajemen Project"
         description="Kelola project untuk referensi perjalanan dinas Sales"
-        primaryAction={{ label: "+ Tambah Project", onClick: () => setShowForm(true) }}
+        primaryAction={
+          canCreateProjects
+            ? { label: "+ Tambah Project", onClick: () => setShowForm(true) }
+            : undefined
+        }
       />
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          placeholder="🔍 Cari kode, nama, atau client..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[240px]"
-        />
-        <div className="flex gap-2">
-          {(["ALL", "ACTIVE", "INACTIVE"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setActiveFilter(f)}
-              className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                activeFilter === f
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              {f === "ALL" ? "Semua" : f === "ACTIVE" ? "Aktif" : "Tidak Aktif"}
-            </button>
-          ))}
+      <div className="content-section p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            placeholder="🔍 Cari kode, nama, atau client..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[240px]"
+          />
+          <div className="flex gap-2">
+            {(["ALL", "ACTIVE", "INACTIVE"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                  activeFilter === f
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {f === "ALL" ? "Semua" : f === "ACTIVE" ? "Aktif" : "Tidak Aktif"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Table */}
       {isLoading ? (
-        <div className="flex justify-center py-16">
+        <div className="content-section flex justify-center py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
         </div>
       ) : projects.length === 0 ? (
-        <EmptyState
-          title="Belum Ada Project"
-          description={search ? "Tidak ada project yang cocok dengan pencarian" : "Tambahkan project pertama untuk memulai"}
-          action={!search ? { label: "Tambah Project", onClick: () => setShowForm(true) } : undefined}
-        />
+        <div className="content-section">
+          <EmptyState
+            title="Belum Ada Project"
+            description={search ? "Tidak ada project yang cocok dengan pencarian" : "Tambahkan project pertama untuk memulai"}
+            action={
+              !search && canCreateProjects
+                ? { label: "Tambah Project", onClick: () => setShowForm(true) }
+                : undefined
+            }
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
               <tr>
@@ -328,18 +376,22 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(project.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => setEditingProject(project)}
-                        className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => setDeletingProject(project)}
-                        className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        Hapus
-                      </button>
+                      {canUpdateProjects && (
+                        <button
+                          onClick={() => setEditingProject(project)}
+                          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {canDeleteProjects && (
+                        <button
+                          onClick={() => setDeletingProject(project)}
+                          className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          Hapus
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

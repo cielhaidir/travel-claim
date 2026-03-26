@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/features/PageHeader";
 import { EmptyState } from "@/components/features/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency } from "@/lib/utils/format";
 import type { JournalEntryType } from "../../../../generated/prisma";
 
@@ -57,8 +58,58 @@ export default function AccountingPage() {
   const { data: session } = useSession();
   const router = useRouter();
 
-  const userRole = session?.user?.role ?? "EMPLOYEE";
-  const isAllowed = userRole === "FINANCE" || userRole === "ADMIN";
+  const isRoot = session?.user?.isRoot ?? false;
+  const canReadAccounting =
+    isRoot || hasPermissionMap(session?.user?.permissions, "accounting", "read");
+  const canReadDashboard =
+    isRoot || hasPermissionMap(session?.user?.permissions, "dashboard", "read");
+  const canReadBalanceAccounts =
+    isRoot ||
+    hasPermissionMap(session?.user?.permissions, "balance-accounts", "read");
+  const canReadCoa =
+    isRoot ||
+    hasPermissionMap(session?.user?.permissions, "chart-of-accounts", "read");
+  const canReadJournals =
+    isRoot || hasPermissionMap(session?.user?.permissions, "journals", "read");
+  const canReadReports =
+    isRoot ||
+    (hasPermissionMap(session?.user?.permissions, "reports", "read") &&
+      canReadJournals);
+  const canAccessFinanceDashboard =
+    isRoot ||
+    (hasPermissionMap(session?.user?.permissions, "bailout", "read") &&
+      hasPermissionMap(session?.user?.permissions, "bailout", "disburse") &&
+      canReadCoa &&
+      canReadBalanceAccounts) ||
+    (hasPermissionMap(session?.user?.permissions, "claims", "read") &&
+      hasPermissionMap(session?.user?.permissions, "claims", "pay") &&
+      canReadCoa &&
+      canReadBalanceAccounts) ||
+    (hasPermissionMap(session?.user?.permissions, "bailout", "read") &&
+      canReadJournals &&
+      hasPermissionMap(session?.user?.permissions, "journals", "create") &&
+      canReadCoa) ||
+    (hasPermissionMap(session?.user?.permissions, "travel", "read") &&
+      (hasPermissionMap(session?.user?.permissions, "travel", "lock") ||
+        hasPermissionMap(session?.user?.permissions, "travel", "close")));
+  const canCreateBalanceAccounts =
+    (isRoot ||
+      hasPermissionMap(
+        session?.user?.permissions,
+        "balance-accounts",
+        "create",
+      )) &&
+    canReadBalanceAccounts &&
+    canReadCoa;
+  const canUpdateBalanceAccounts =
+    (isRoot ||
+      hasPermissionMap(
+        session?.user?.permissions,
+        "balance-accounts",
+        "update",
+      )) &&
+    canReadBalanceAccounts &&
+    canReadCoa;
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<BalanceAccount | null>(null);
@@ -74,10 +125,10 @@ export default function AccountingPage() {
   const [adjustForm, setAdjustForm] = useState(DEFAULT_ADJUST_FORM);
 
   useEffect(() => {
-    if (session && !isAllowed) {
+    if (session && !canReadAccounting) {
       void router.replace("/dashboard");
     }
-  }, [session, isAllowed, router]);
+  }, [canReadAccounting, router, session]);
 
   const {
     data: accountsRaw,
@@ -90,7 +141,7 @@ export default function AccountingPage() {
         activeFilter === "ALL" ? undefined : activeFilter === "ACTIVE",
     },
     {
-      enabled: isAllowed,
+      enabled: canReadBalanceAccounts,
       refetchOnWindowFocus: false,
     },
   );
@@ -98,7 +149,9 @@ export default function AccountingPage() {
   const { data: coaRaw } = api.chartOfAccount.getActiveAccounts.useQuery(
     {},
     {
-      enabled: isAllowed,
+      enabled:
+        canReadCoa &&
+        (canCreateBalanceAccounts || canUpdateBalanceAccounts),
       refetchOnWindowFocus: false,
     },
   );
@@ -136,6 +189,7 @@ export default function AccountingPage() {
   });
 
   function openEdit(account: BalanceAccount) {
+    if (!canUpdateBalanceAccounts) return;
     setEditingAccount(account);
     setEditForm({
       name: account.name,
@@ -146,6 +200,7 @@ export default function AccountingPage() {
   }
 
   function openAdjust(account: BalanceAccount) {
+    if (!canUpdateBalanceAccounts) return;
     setAdjustingAccount(account);
     setAdjustForm({
       ...DEFAULT_ADJUST_FORM,
@@ -154,17 +209,21 @@ export default function AccountingPage() {
     });
   }
 
-  if (!session || !isAllowed) return null;
+  if (!session || !canReadAccounting) return null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Akuntansi & Keuangan"
         description="Pusat menu finance, jurnal, laporan, COA, dan pengelolaan akun saldo dalam satu halaman"
-        primaryAction={{
-          label: "Tambah Akun",
-          onClick: () => setIsCreateOpen(true),
-        }}
+        primaryAction={
+          canCreateBalanceAccounts
+            ? {
+                label: "Tambah Akun",
+                onClick: () => setIsCreateOpen(true),
+              }
+            : undefined
+        }
         secondaryAction={{
           label: "Muat Ulang",
           onClick: () => void refetch(),
@@ -235,7 +294,7 @@ export default function AccountingPage() {
         <SummaryCard label="Total Saldo" value={formatCurrency(totalBalance)} color="blue" />
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="content-section p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm font-semibold text-gray-900">Filter Status Akun</p>
@@ -256,22 +315,34 @@ export default function AccountingPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {!canReadBalanceAccounts ? (
+        <div className="content-section">
+          <EmptyState
+            icon="🏦"
+            title="Akses akun saldo dibatasi"
+            description="Halaman ini tetap menampilkan pintasan akuntansi, tetapi daftar akun saldo memerlukan izin baca akun saldo."
+          />
+        </div>
+      ) : isLoading ? (
         <Skeleton />
       ) : accounts.length === 0 ? (
-        <div className="rounded-lg border bg-white">
+        <div className="content-section">
           <EmptyState
             icon="🏦"
             title="Belum ada akun saldo"
             description="Tambahkan akun perusahaan untuk mulai mencatat saldo dan penyesuaian jurnal."
-            action={{
-              label: "Tambah Akun",
-              onClick: () => setIsCreateOpen(true),
-            }}
+            action={
+              canCreateBalanceAccounts
+                ? {
+                    label: "Tambah Akun",
+                    onClick: () => setIsCreateOpen(true),
+                  }
+                : undefined
+            }
           />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <div className="content-table overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
@@ -317,12 +388,16 @@ export default function AccountingPage() {
                       >
                         Detail
                       </Link>
-                      <Button size="sm" variant="secondary" onClick={() => openEdit(account)}>
-                        Ubah
-                      </Button>
-                      <Button size="sm" variant="primary" onClick={() => openAdjust(account)}>
-                        Sesuaikan
-                      </Button>
+                      {canUpdateBalanceAccounts ? (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => openEdit(account)}>
+                            Ubah
+                          </Button>
+                          <Button size="sm" variant="primary" onClick={() => openAdjust(account)}>
+                            Sesuaikan
+                          </Button>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -333,7 +408,7 @@ export default function AccountingPage() {
       )}
 
       <Modal
-        isOpen={isCreateOpen}
+        isOpen={isCreateOpen && canCreateBalanceAccounts}
         onClose={() => {
           setIsCreateOpen(false);
           setCreateForm(DEFAULT_CREATE_FORM);
@@ -430,7 +505,7 @@ export default function AccountingPage() {
       </Modal>
 
       <Modal
-        isOpen={!!editingAccount}
+        isOpen={!!editingAccount && canUpdateBalanceAccounts}
         onClose={() => setEditingAccount(null)}
         title="Ubah Akun Saldo"
       >
@@ -514,7 +589,7 @@ export default function AccountingPage() {
       </Modal>
 
       <Modal
-        isOpen={!!adjustingAccount}
+        isOpen={!!adjustingAccount && canUpdateBalanceAccounts}
         onClose={() => {
           setAdjustingAccount(null);
           setAdjustForm(DEFAULT_ADJUST_FORM);
@@ -523,7 +598,7 @@ export default function AccountingPage() {
       >
         <div className="space-y-4">
           {adjustingAccount ? (
-            <div className="rounded-lg bg-gray-50 p-4 text-sm">
+            <div className="content-subcard p-4 text-sm">
               <p className="font-semibold text-gray-900">{adjustingAccount.code} - {adjustingAccount.name}</p>
               <p className="mt-1 text-gray-500">Saldo saat ini: {formatCurrency(Number(adjustingAccount.balance ?? 0))}</p>
             </div>
@@ -690,13 +765,13 @@ function SummaryCard({
   color?: "gray" | "blue" | "green";
 }) {
   const colors = {
-    gray: "border-gray-200 bg-gray-50 text-gray-900",
-    blue: "border-blue-200 bg-blue-50 text-blue-900",
-    green: "border-green-200 bg-green-50 text-green-900",
+    gray: "border-gray-200 bg-white text-gray-900",
+    blue: "border-blue-200 bg-white text-blue-900",
+    green: "border-green-200 bg-white text-green-900",
   } as const;
 
   return (
-    <div className={`rounded-xl border p-5 ${colors[color]}`}>
+    <div className={`rounded-xl border p-5 shadow-sm ${colors[color]}`}>
       <p className="text-sm font-medium text-gray-500">{label}</p>
       <p className="mt-2 text-2xl font-bold">{value}</p>
     </div>
@@ -705,10 +780,12 @@ function SummaryCard({
 
 function Skeleton() {
   return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="h-12 animate-pulse rounded-lg bg-gray-100" />
-      ))}
+    <div className="content-section p-5">
+      <div className="space-y-3">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+        ))}
+      </div>
     </div>
   );
 }

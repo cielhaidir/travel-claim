@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { PageHeader } from "@/components/features/PageHeader";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal, ConfirmModal } from "@/components/ui/Modal";
 import { ClaimForm, type ClaimFormData } from "@/components/features/claims/ClaimForm";
 import { ClaimAttachments } from "@/components/features/claims/ClaimAttachments";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { ClaimType, ClaimStatus, TravelType, TravelStatus } from "../../../../generated/prisma";
 
@@ -85,7 +87,20 @@ function toEditableClaim(raw: Claim): Claim {
 
 export default function ClaimsPage() {
   const { data: session } = useSession();
+  const router = useRouter();
   const userId = session?.user?.id;
+  const canReadClaims =
+    (session?.user?.isRoot ?? false) ||
+    hasPermissionMap(session?.user?.permissions, "claims", "read");
+  const canCreateClaims =
+    !!userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "create"));
+
+  if (session && !canReadClaims) {
+    router.replace("/");
+    return null;
+  }
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<ClaimStatus | "ALL">("ALL");
@@ -106,7 +121,7 @@ export default function ClaimsPage() {
       claimType: typeFilter === "ALL" ? undefined : typeFilter,
       limit: 50,
     },
-    { refetchOnWindowFocus: false }
+    { refetchOnWindowFocus: false, enabled: canReadClaims }
   );
   const claimsData = rawClaims as { claims: Claim[] } | undefined;
   const claims = claimsData?.claims ?? [];
@@ -235,8 +250,20 @@ export default function ClaimsPage() {
   };
 
   const canEdit = (c: Claim) => EDITABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
-  const canDelete = (c: Claim) => DELETABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
-  const canSubmit = (c: Claim) => SUBMITTABLE_STATUSES.includes(c.status) && c.submitter.id === userId;
+  const canDelete = (c: Claim) =>
+    DELETABLE_STATUSES.includes(c.status) &&
+    c.submitter.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "delete"));
+  const canSubmit = (c: Claim) =>
+    SUBMITTABLE_STATUSES.includes(c.status) &&
+    c.submitter.id === userId &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "submit"));
+  const canEditClaim = (c: Claim) =>
+    canEdit(c) &&
+    ((session?.user?.isRoot ?? false) ||
+      hasPermissionMap(session?.user?.permissions, "claims", "update"));
 
   const isCreateLoading = createEntMutation.isPending || createNonEntMutation.isPending;
 
@@ -245,47 +272,59 @@ export default function ClaimsPage() {
       <PageHeader
         title="Expense Claims"
         description="Submit and track your expense claims"
-        primaryAction={{ label: "New Claim", onClick: () => setIsFormOpen(true) }}
+        primaryAction={
+          canCreateClaims
+            ? { label: "New Claim", onClick: () => setIsFormOpen(true) }
+            : undefined
+        }
       />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ClaimStatus | "ALL")}
-        >
-          <option value="ALL">All Status</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="REVISION">Revision</option>
-          <option value="PAID">Paid</option>
-        </select>
-        <select
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as ClaimType | "ALL")}
-        >
-          <option value="ALL">All Types</option>
-          <option value="ENTERTAINMENT">Entertainment</option>
-          <option value="NON_ENTERTAINMENT">Non-Entertainment</option>
-        </select>
+      <div className="content-section p-4">
+        <div className="flex flex-wrap gap-3">
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as ClaimStatus | "ALL")}
+          >
+            <option value="ALL">All Status</option>
+            <option value="DRAFT">Draft</option>
+            <option value="SUBMITTED">Submitted</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="REVISION">Revision</option>
+            <option value="PAID">Paid</option>
+          </select>
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as ClaimType | "ALL")}
+          >
+            <option value="ALL">All Types</option>
+            <option value="ENTERTAINMENT">Entertainment</option>
+            <option value="NON_ENTERTAINMENT">Non-Entertainment</option>
+          </select>
+        </div>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-12 text-center text-gray-500">Loading...</div>
+        <div className="content-section p-12 text-center text-gray-500">Loading...</div>
       ) : claims.length === 0 ? (
-        <EmptyState
-          icon="💰"
-          title="No claims yet"
-          description="Submit your first expense claim to get reimbursed"
-          action={{ label: "Create Claim", onClick: () => setIsFormOpen(true) }}
-        />
+        <div className="content-section">
+          <EmptyState
+            icon="💰"
+            title="No claims yet"
+            description="Submit your first expense claim to get reimbursed"
+            action={
+              canCreateClaims
+                ? { label: "Create Claim", onClick: () => setIsFormOpen(true) }
+                : undefined
+            }
+          />
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-white">
+        <div className="content-table">
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50 text-left text-xs font-semibold uppercase text-gray-500">
               <tr>
@@ -328,7 +367,7 @@ export default function ClaimsPage() {
                           Submit
                         </button>
                       )}
-                      {canEdit(c) && (
+                      {canEditClaim(c) && (
                         <button
                           onClick={() => setEditingClaim(toEditableClaim(c))}
                           className="rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
@@ -409,7 +448,10 @@ export default function ClaimsPage() {
             onSubmit={handleUpdate}
             onCancel={() => setEditingClaim(null)}
           >
-            <ClaimAttachments claimId={editingClaim.id} canManage={canEdit(editingClaim)} />
+            <ClaimAttachments
+              claimId={editingClaim.id}
+              canManage={canEditClaim(editingClaim)}
+            />
           </ClaimForm>
         )}
       </Modal>
@@ -428,13 +470,13 @@ export default function ClaimsPage() {
               onEdit={() => { setEditingClaim(toEditableClaim(viewingClaim)); setViewingClaim(null); }}
               onSubmit={() => { setSubmittingClaim(viewingClaim); setViewingClaim(null); }}
               onDelete={() => { setDeletingClaim(viewingClaim); setViewingClaim(null); }}
-              canEdit={canEdit(viewingClaim)}
+              canEdit={canEditClaim(viewingClaim)}
               canDelete={canDelete(viewingClaim)}
               canSubmit={canSubmit(viewingClaim)}
             />
             <ClaimAttachments
               claimId={viewingClaim.id}
-              canManage={canEdit(viewingClaim)}
+              canManage={canEditClaim(viewingClaim)}
             />
           </div>
         )}
@@ -542,7 +584,7 @@ function ClaimDetail({
             {claim.approvals.map((a) => (
               <div
                 key={a.id}
-                className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-2 text-xs"
+                className="content-subcard flex items-center justify-between px-4 py-2 text-xs"
               >
                 <span className="text-gray-600">{a.level.replace(/_/g, " ")}</span>
                 <span className="text-gray-700">{a.approver.name ?? "—"}</span>
