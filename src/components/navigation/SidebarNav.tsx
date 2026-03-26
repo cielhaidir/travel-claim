@@ -47,6 +47,8 @@ const accountingChildren: NavItem[] = [
   { label: "Employee Advance Control", href: "/reports/employee-advance-control" },
   { label: "General Ledger", href: "/reports/general-ledger" },
   { label: "Trial Balance", href: "/reports/trial-balance" },
+  { label: "Laba Rugi", href: "/reports/income-statement" },
+  { label: "Neraca", href: "/reports/balance-sheet" },
 ];
 
 const navigationItems: NavItem[] = [

@@ -203,6 +203,16 @@ export default function AccountingPage() {
           description="Buku besar per akun COA dengan running balance tenant aktif"
         />
         <ModuleLinkCard
+          href="/reports/income-statement"
+          title="Laba Rugi"
+          description="Laporan pendapatan, beban, dan laba rugi bersih tenant aktif"
+        />
+        <ModuleLinkCard
+          href="/reports/balance-sheet"
+          title="Neraca"
+          description="Posisi aset, kewajiban, dan ekuitas tenant aktif sampai tanggal laporan"
+        />
+        <ModuleLinkCard
           href="/reports/expense-summary"
           title="Expense Summary"
           description="Ringkasan beban tenant aktif per akun expense dan sumber jurnal"
