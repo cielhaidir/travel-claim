@@ -620,7 +620,16 @@ async function main() {
   await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
   console.log("  ✅ Chart of Accounts ready\n");
 
-  // ── 6. Balance accounts, projects, travel, claims, bailouts, journals ───────
+  // ── 6. Inventory sample data ────────────────────────────────────────────────
+  console.log("📦 Creating inventory sample data…");
+  await createInventorySampleData({
+    tenantId: defaultTenantId,
+    adminUserId: adminChief.id,
+    salesUserId: salesStaff1.id,
+  });
+  console.log("  ✅ Inventory sample data ready\n");
+
+  // ── 7. Balance accounts, projects, travel, claims, bailouts, journals ───────
   console.log("📚 Creating accounting and transaction sample data…");
   await createSampleBusinessData({
     tenantId: defaultTenantId,
@@ -631,7 +640,7 @@ async function main() {
   });
   console.log("  ✅ Sample accounting and transaction data ready\n");
 
-  // ── 7. Summary ────────────────────────────────────────────────────────────────
+  // ── 8. Summary ────────────────────────────────────────────────────────────────
   console.log("🎉 Seeding completed!\n");
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -701,6 +710,483 @@ async function findCoaByCode(tenantId: string, code: string) {
   }
 
   return coa;
+}
+
+async function createInventorySeedCoas(input: {
+  tenantId: string;
+  userId: string;
+}) {
+  const assetParent = await findCoaByCode(input.tenantId, "1000");
+
+  const stockCoa = await prisma.chartOfAccount.upsert({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: "1150" },
+    },
+    update: {
+      name: "Persediaan Barang Dagang",
+      accountType: "ASSET",
+      category: "Aset",
+      subcategory: "Persediaan",
+      parentId: assetParent.id,
+      isActive: true,
+      description: "Akun persediaan untuk barang yang tersedia untuk dijual.",
+      updatedById: input.userId,
+    },
+    create: {
+      tenantId: input.tenantId,
+      code: "1150",
+      name: "Persediaan Barang Dagang",
+      accountType: "ASSET",
+      category: "Aset",
+      subcategory: "Persediaan",
+      parentId: assetParent.id,
+      isActive: true,
+      description: "Akun persediaan untuk barang yang tersedia untuk dijual.",
+      createdById: input.userId,
+      updatedById: input.userId,
+    },
+  });
+
+  const tempAssetCoa = await prisma.chartOfAccount.upsert({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: "1151" },
+    },
+    update: {
+      name: "Aset Sementara Inventory",
+      accountType: "ASSET",
+      category: "Aset",
+      subcategory: "Aset Sementara",
+      parentId: assetParent.id,
+      isActive: true,
+      description:
+        "Akun aset sementara untuk barang yang belum diputuskan menjadi stok jual atau dipakai internal.",
+      updatedById: input.userId,
+    },
+    create: {
+      tenantId: input.tenantId,
+      code: "1151",
+      name: "Aset Sementara Inventory",
+      accountType: "ASSET",
+      category: "Aset",
+      subcategory: "Aset Sementara",
+      parentId: assetParent.id,
+      isActive: true,
+      description:
+        "Akun aset sementara untuk barang yang belum diputuskan menjadi stok jual atau dipakai internal.",
+      createdById: input.userId,
+      updatedById: input.userId,
+    },
+  });
+
+  const cogsCoa = await prisma.chartOfAccount.upsert({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: "5100" },
+    },
+    update: {
+      name: "Beban Pokok Penjualan",
+      accountType: "EXPENSE",
+      category: "Beban",
+      subcategory: "COGS",
+      isActive: true,
+      description: "Akun biaya pokok penjualan untuk issue stok penjualan.",
+      updatedById: input.userId,
+    },
+    create: {
+      tenantId: input.tenantId,
+      code: "5100",
+      name: "Beban Pokok Penjualan",
+      accountType: "EXPENSE",
+      category: "Beban",
+      subcategory: "COGS",
+      isActive: true,
+      description: "Akun biaya pokok penjualan untuk issue stok penjualan.",
+      createdById: input.userId,
+      updatedById: input.userId,
+    },
+  });
+
+  return { stockCoa, tempAssetCoa, cogsCoa };
+}
+
+async function createInventorySampleData(input: {
+  tenantId: string;
+  adminUserId: string;
+  salesUserId: string;
+}) {
+  const { stockCoa, tempAssetCoa, cogsCoa } = await createInventorySeedCoas({
+    tenantId: input.tenantId,
+    userId: input.adminUserId,
+  });
+
+  const mainWarehouse = await prisma.warehouse.upsert({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: "MAIN-WH" },
+    },
+    update: {
+      name: "Gudang Pusat",
+      description: "Gudang utama untuk stok jual dan aset sementara.",
+      isActive: true,
+    },
+    create: {
+      tenantId: input.tenantId,
+      code: "MAIN-WH",
+      name: "Gudang Pusat",
+      description: "Gudang utama untuk stok jual dan aset sementara.",
+      isActive: true,
+    },
+  });
+
+  const branchWarehouse = await prisma.warehouse.upsert({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: "SITE-WH" },
+    },
+    update: {
+      name: "Gudang Site / Operasional",
+      description: "Gudang untuk buffer stok proyek dan penggunaan operasional.",
+      isActive: true,
+    },
+    create: {
+      tenantId: input.tenantId,
+      code: "SITE-WH",
+      name: "Gudang Site / Operasional",
+      description: "Gudang untuk buffer stok proyek dan penggunaan operasional.",
+      isActive: true,
+    },
+  });
+
+  const items = [
+    {
+      sku: "INV-ROUTER-001",
+      name: "Router Mikrotik RB750",
+      category: "Networking",
+      unitOfMeasure: "PCS",
+      description: "Router untuk stok jual dan kebutuhan implementasi lapangan.",
+      standardCost: 850000,
+      minStock: 2,
+      reorderPoint: 4,
+      warehouseId: mainWarehouse.id,
+      saleQty: 8,
+      tempQty: 2,
+      reclassifyQty: 1,
+    },
+    {
+      sku: "INV-SWITCH-001",
+      name: "Switch 8 Port Gigabit",
+      category: "Networking",
+      unitOfMeasure: "PCS",
+      description: "Switch unmanaged 8 port untuk kebutuhan distribusi jaringan.",
+      standardCost: 475000,
+      minStock: 3,
+      reorderPoint: 5,
+      warehouseId: mainWarehouse.id,
+      saleQty: 6,
+      tempQty: 4,
+      reclassifyQty: 2,
+    },
+    {
+      sku: "INV-AP-001",
+      name: "Access Point Indoor",
+      category: "Wireless",
+      unitOfMeasure: "PCS",
+      description: "Access point indoor untuk deployment kantor dan pelanggan.",
+      standardCost: 920000,
+      minStock: 2,
+      reorderPoint: 3,
+      warehouseId: branchWarehouse.id,
+      saleQty: 5,
+      tempQty: 1,
+      reclassifyQty: 0,
+    },
+  ];
+
+  for (const entry of items) {
+    const item = await prisma.inventoryItem.upsert({
+      where: {
+        tenantId_sku: { tenantId: input.tenantId, sku: entry.sku },
+      },
+      update: {
+        name: entry.name,
+        category: entry.category,
+        unitOfMeasure: entry.unitOfMeasure,
+        description: entry.description,
+        isStockTracked: true,
+        minStock: entry.minStock,
+        reorderPoint: entry.reorderPoint,
+        standardCost: entry.standardCost,
+        inventoryCoaId: stockCoa.id,
+        temporaryAssetCoaId: tempAssetCoa.id,
+        cogsCoaId: cogsCoa.id,
+        isActive: true,
+        deletedAt: null,
+      },
+      create: {
+        tenantId: input.tenantId,
+        sku: entry.sku,
+        name: entry.name,
+        category: entry.category,
+        unitOfMeasure: entry.unitOfMeasure,
+        description: entry.description,
+        isStockTracked: true,
+        minStock: entry.minStock,
+        reorderPoint: entry.reorderPoint,
+        standardCost: entry.standardCost,
+        inventoryCoaId: stockCoa.id,
+        temporaryAssetCoaId: tempAssetCoa.id,
+        cogsCoaId: cogsCoa.id,
+        isActive: true,
+      },
+    });
+
+    const saleBalance = await prisma.inventoryBalance.upsert({
+      where: {
+        itemId_warehouseId_bucketType: {
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "SALE_STOCK",
+        },
+      },
+      update: {
+        qtyOnHand: entry.saleQty + entry.reclassifyQty,
+        qtyReserved: 0,
+      },
+      create: {
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "SALE_STOCK",
+        qtyOnHand: entry.saleQty + entry.reclassifyQty,
+        qtyReserved: 0,
+      },
+    });
+
+    const tempBalance = await prisma.inventoryBalance.upsert({
+      where: {
+        itemId_warehouseId_bucketType: {
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "TEMP_ASSET",
+        },
+      },
+      update: {
+        qtyOnHand: entry.tempQty - entry.reclassifyQty,
+        qtyReserved: 0,
+      },
+      create: {
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "TEMP_ASSET",
+        qtyOnHand: entry.tempQty - entry.reclassifyQty,
+        qtyReserved: 0,
+      },
+    });
+
+    const receiptSaleRef = `SEED-RECEIPT-${entry.sku}-SALE`;
+    const receiptTempRef = `SEED-RECEIPT-${entry.sku}-TEMP`;
+
+    await prisma.inventoryLedgerEntry.upsert({
+      where: { id: `${item.id}-sale-receipt` },
+      update: {
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "SALE_STOCK",
+        movementType: "RECEIPT",
+        referenceType: "Seeder",
+        referenceId: receiptSaleRef,
+        chartOfAccountId: stockCoa.id,
+        quantityBefore: 0,
+        quantityChange: entry.saleQty,
+        quantityAfter: entry.saleQty,
+        unitCost: entry.standardCost,
+        totalCost: entry.saleQty * entry.standardCost,
+        notes: `Seed manual receipt sale stock for ${entry.sku}`,
+        createdById: input.adminUserId,
+      },
+      create: {
+        id: `${item.id}-sale-receipt`,
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "SALE_STOCK",
+        movementType: "RECEIPT",
+        referenceType: "Seeder",
+        referenceId: receiptSaleRef,
+        chartOfAccountId: stockCoa.id,
+        quantityBefore: 0,
+        quantityChange: entry.saleQty,
+        quantityAfter: entry.saleQty,
+        unitCost: entry.standardCost,
+        totalCost: entry.saleQty * entry.standardCost,
+        notes: `Seed manual receipt sale stock for ${entry.sku}`,
+        createdById: input.adminUserId,
+      },
+    });
+
+    await prisma.inventoryLedgerEntry.upsert({
+      where: { id: `${item.id}-temp-receipt` },
+      update: {
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "TEMP_ASSET",
+        movementType: "RECEIPT",
+        referenceType: "Seeder",
+        referenceId: receiptTempRef,
+        chartOfAccountId: tempAssetCoa.id,
+        quantityBefore: 0,
+        quantityChange: entry.tempQty,
+        quantityAfter: entry.tempQty,
+        unitCost: entry.standardCost,
+        totalCost: entry.tempQty * entry.standardCost,
+        notes: `Seed manual receipt temporary asset for ${entry.sku}`,
+        createdById: input.adminUserId,
+      },
+      create: {
+        id: `${item.id}-temp-receipt`,
+        tenantId: input.tenantId,
+        itemId: item.id,
+        warehouseId: entry.warehouseId,
+        bucketType: "TEMP_ASSET",
+        movementType: "RECEIPT",
+        referenceType: "Seeder",
+        referenceId: receiptTempRef,
+        chartOfAccountId: tempAssetCoa.id,
+        quantityBefore: 0,
+        quantityChange: entry.tempQty,
+        quantityAfter: entry.tempQty,
+        unitCost: entry.standardCost,
+        totalCost: entry.tempQty * entry.standardCost,
+        notes: `Seed manual receipt temporary asset for ${entry.sku}`,
+        createdById: input.adminUserId,
+      },
+    });
+
+    if (entry.reclassifyQty > 0) {
+      const reclassRef = `SEED-RECLASS-${entry.sku}`;
+      await prisma.inventoryLedgerEntry.upsert({
+        where: { id: `${item.id}-temp-transfer-out` },
+        update: {
+          tenantId: input.tenantId,
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "TEMP_ASSET",
+          movementType: "TRANSFER_OUT",
+          referenceType: "SeederReclassification",
+          referenceId: reclassRef,
+          chartOfAccountId: tempAssetCoa.id,
+          quantityBefore: entry.tempQty,
+          quantityChange: -entry.reclassifyQty,
+          quantityAfter: entry.tempQty - entry.reclassifyQty,
+          unitCost: entry.standardCost,
+          totalCost: entry.reclassifyQty * entry.standardCost,
+          notes: `Seed reclassification from temporary asset to sale stock for ${entry.sku}`,
+          createdById: input.adminUserId,
+        },
+        create: {
+          id: `${item.id}-temp-transfer-out`,
+          tenantId: input.tenantId,
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "TEMP_ASSET",
+          movementType: "TRANSFER_OUT",
+          referenceType: "SeederReclassification",
+          referenceId: reclassRef,
+          chartOfAccountId: tempAssetCoa.id,
+          quantityBefore: entry.tempQty,
+          quantityChange: -entry.reclassifyQty,
+          quantityAfter: entry.tempQty - entry.reclassifyQty,
+          unitCost: entry.standardCost,
+          totalCost: entry.reclassifyQty * entry.standardCost,
+          notes: `Seed reclassification from temporary asset to sale stock for ${entry.sku}`,
+          createdById: input.adminUserId,
+        },
+      });
+
+      await prisma.inventoryLedgerEntry.upsert({
+        where: { id: `${item.id}-sale-transfer-in` },
+        update: {
+          tenantId: input.tenantId,
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "SALE_STOCK",
+          movementType: "TRANSFER_IN",
+          referenceType: "SeederReclassification",
+          referenceId: reclassRef,
+          chartOfAccountId: stockCoa.id,
+          quantityBefore: entry.saleQty,
+          quantityChange: entry.reclassifyQty,
+          quantityAfter: entry.saleQty + entry.reclassifyQty,
+          unitCost: entry.standardCost,
+          totalCost: entry.reclassifyQty * entry.standardCost,
+          notes: `Seed reclassification from temporary asset to sale stock for ${entry.sku}`,
+          createdById: input.adminUserId,
+        },
+        create: {
+          id: `${item.id}-sale-transfer-in`,
+          tenantId: input.tenantId,
+          itemId: item.id,
+          warehouseId: entry.warehouseId,
+          bucketType: "SALE_STOCK",
+          movementType: "TRANSFER_IN",
+          referenceType: "SeederReclassification",
+          referenceId: reclassRef,
+          chartOfAccountId: stockCoa.id,
+          quantityBefore: entry.saleQty,
+          quantityChange: entry.reclassifyQty,
+          quantityAfter: entry.saleQty + entry.reclassifyQty,
+          unitCost: entry.standardCost,
+          totalCost: entry.reclassifyQty * entry.standardCost,
+          notes: `Seed reclassification from temporary asset to sale stock for ${entry.sku}`,
+          createdById: input.adminUserId,
+        },
+      });
+    }
+
+    await prisma.auditLog.upsert({
+      where: { id: `${item.id}-inventory-seed` },
+      update: {
+        tenantId: input.tenantId,
+        userId: input.adminUserId,
+        action: "CREATE",
+        entityType: "InventorySeed",
+        entityId: item.id,
+        changes: {
+          after: {
+            sku: entry.sku,
+            warehouseId: entry.warehouseId,
+            saleStock: Number(saleBalance.qtyOnHand),
+            temporaryAsset: Number(tempBalance.qtyOnHand),
+          },
+        },
+      },
+      create: {
+        id: `${item.id}-inventory-seed`,
+        tenantId: input.tenantId,
+        userId: input.adminUserId,
+        action: "CREATE",
+        entityType: "InventorySeed",
+        entityId: item.id,
+        changes: {
+          after: {
+            sku: entry.sku,
+            warehouseId: entry.warehouseId,
+            saleStock: Number(saleBalance.qtyOnHand),
+            temporaryAsset: Number(tempBalance.qtyOnHand),
+          },
+        },
+      },
+    });
+  }
+
+  console.log(`    Warehouses : MAIN-WH, SITE-WH`);
+  console.log(`    Inventory COA : 1150 Persediaan Barang Dagang`);
+  console.log(`    Temp Asset COA: 1151 Aset Sementara Inventory`);
+  console.log(`    COGS COA      : 5100 Beban Pokok Penjualan`);
+  console.log(`    Sample items  : INV-ROUTER-001, INV-SWITCH-001, INV-AP-001`);
+  console.log(`    Scenario      : manual receipt split + reclassification seeded`);
+
+  void input.salesUserId;
 }
 
 async function createSampleBusinessData(input: {

@@ -8,6 +8,8 @@ import {
   CrmLeadPriority,
   CrmLeadSource,
   CrmLeadStage,
+  CrmProductType,
+  JournalStatus,
   type Prisma,
   type Role,
 } from "../../../../generated/prisma";
@@ -62,6 +64,7 @@ const leadSourceSchema = z.nativeEnum(CrmLeadSource);
 const customerSegmentSchema = z.nativeEnum(CrmCustomerSegment);
 const customerStatusSchema = z.nativeEnum(CrmCustomerStatus);
 const activityTypeSchema = z.nativeEnum(CrmActivityType);
+const crmProductTypeSchema = z.nativeEnum(CrmProductType);
 
 const customerInputSchema = z.object({
   name: z.string().min(2).max(150),
@@ -100,6 +103,27 @@ const activityInputSchema = z.object({
   type: activityTypeSchema.default(CrmActivityType.FOLLOW_UP),
   ownerName: z.string().min(2).max(150),
   scheduledAt: z.string(),
+});
+
+const crmProductInputSchema = z.object({
+  code: z.string().min(1).max(50),
+  name: z.string().min(2).max(200),
+  description: z.string().optional(),
+  type: crmProductTypeSchema.default(CrmProductType.PRODUCT),
+  inventoryItemId: z.string().optional(),
+  isActive: z.boolean().default(true),
+});
+
+const leadLineInputSchema = z.object({
+  leadId: z.string(),
+  crmProductId: z.string().optional(),
+  inventoryItemId: z.string().optional(),
+  warehousePreferenceId: z.string().optional(),
+  description: z.string().optional(),
+  qty: z.number().positive(),
+  unitPrice: z.number().min(0).default(0),
+  totalPrice: z.number().min(0).default(0),
+  requiresInventory: z.boolean().default(false),
 });
 
 async function getCustomerOrThrow(ctx: Parameters<typeof requireCrmAccess>[0] & { db: Prisma.TransactionClient | Prisma.DefaultPrismaClient }, id: string) {
@@ -322,6 +346,43 @@ export const crmRouter = createTRPCRouter({
               customer: { select: { id: true, company: true } },
             },
           },
+          lines: {
+            orderBy: [{ createdAt: "asc" }],
+            include: {
+              crmProduct: {
+                select: { id: true, code: true, name: true, type: true },
+              },
+              inventoryItem: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  unitOfMeasure: true,
+                  balances: {
+                    select: { qtyOnHand: true, qtyReserved: true },
+                  },
+                },
+              },
+              warehousePreference: {
+                select: { id: true, code: true, name: true },
+              },
+            },
+          },
+          fulfillmentRequests: {
+            orderBy: [{ createdAt: "desc" }],
+            include: {
+              lines: {
+                include: {
+                  inventoryItem: {
+                    select: { id: true, sku: true, name: true, unitOfMeasure: true },
+                  },
+                  warehouse: {
+                    select: { id: true, code: true, name: true },
+                  },
+                },
+              },
+            },
+          },
         },
       });
 
@@ -332,7 +393,225 @@ export const crmRouter = createTRPCRouter({
         });
       }
 
-      return lead;
+      const requestIds = (lead.fulfillmentRequests ?? []).map((request) => request.id);
+      const requestNumbers = (lead.fulfillmentRequests ?? []).map((request) => request.requestNumber);
+
+      const cogsJournals = requestIds.length
+        ? await ctx.db.journalEntry.findMany({
+            where: withTenantWhere(ctx, {
+              sourceId: { in: requestIds },
+              referenceNumber: { in: requestNumbers },
+              status: JournalStatus.POSTED,
+            }),
+            select: {
+              id: true,
+              sourceId: true,
+              journalNumber: true,
+              transactionDate: true,
+              description: true,
+              lines: {
+                orderBy: { lineNumber: "asc" },
+                select: {
+                  id: true,
+                  description: true,
+                  debitAmount: true,
+                  creditAmount: true,
+                  lineNumber: true,
+                  chartOfAccount: {
+                    select: { id: true, code: true, name: true },
+                  },
+                },
+              },
+            },
+            orderBy: [{ createdAt: "desc" }],
+          })
+        : [];
+
+      const cogsJournalMap = new Map<string, (typeof cogsJournals)[number]>();
+      for (const journal of cogsJournals) {
+        if (journal.sourceId && !cogsJournalMap.has(journal.sourceId)) {
+          cogsJournalMap.set(journal.sourceId, journal);
+        }
+      }
+
+      return {
+        ...lead,
+        fulfillmentRequests: (lead.fulfillmentRequests ?? []).map((request) => ({
+          ...request,
+          cogsJournal: cogsJournalMap.get(request.id) ?? null,
+        })),
+      };
+    }),
+
+  listProducts: protectedProcedure
+    .input(
+      z.object({
+        search: z.string().optional(),
+        isActive: z.boolean().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      requireCrmAccess(ctx);
+
+      const products = await ctx.db.crmProduct.findMany({
+        where: withTenantWhere(ctx, {
+          deletedAt: null,
+          ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+          ...(input.search
+            ? {
+                OR: [
+                  { code: { contains: input.search, mode: "insensitive" as const } },
+                  { name: { contains: input.search, mode: "insensitive" as const } },
+                ],
+              }
+            : {}),
+        }),
+        include: {
+          inventoryItem: {
+            select: { id: true, sku: true, name: true, unitOfMeasure: true },
+          },
+        },
+        orderBy: [{ name: "asc" }],
+      });
+
+      return { products };
+    }),
+
+  createProduct: protectedProcedure
+    .input(crmProductInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      requireCrmAccess(ctx);
+
+      const existing = await ctx.db.crmProduct.findFirst({
+        where: withTenantWhere(ctx, { code: input.code }),
+      });
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Produk CRM dengan kode \"${input.code}\" sudah ada`,
+        });
+      }
+
+      const product = await ctx.db.crmProduct.create({
+        data: {
+          tenantId: getTenantScope(ctx).tenantId,
+          code: input.code,
+          name: input.name,
+          description: input.description ?? null,
+          type: input.type,
+          inventoryItemId: input.inventoryItemId ?? null,
+          isActive: input.isActive,
+        },
+        include: {
+          inventoryItem: {
+            select: { id: true, sku: true, name: true, unitOfMeasure: true },
+          },
+        },
+      });
+
+      await ctx.db.auditLog.create({
+        data: {
+          tenantId: product.tenantId,
+          userId: ctx.session.user.id,
+          action: AuditAction.CREATE,
+          entityType: "CrmProduct",
+          entityId: product.id,
+          changes: { after: product },
+        },
+      });
+
+      return product;
+    }),
+
+  createLeadLine: protectedProcedure
+    .input(leadLineInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      requireCrmAccess(ctx);
+      const lead = await getLeadOrThrow(ctx, input.leadId);
+
+      if (input.crmProductId) {
+        const product = await ctx.db.crmProduct.findFirst({
+          where: withTenantWhere(ctx, { id: input.crmProductId, deletedAt: null }),
+        });
+        if (!product) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Produk CRM tidak ditemukan" });
+        }
+      }
+
+      if (input.inventoryItemId) {
+        const item = await ctx.db.inventoryItem.findFirst({
+          where: withTenantWhere(ctx, { id: input.inventoryItemId, deletedAt: null }),
+        });
+        if (!item) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Item inventory tidak ditemukan" });
+        }
+      }
+
+      const line = await ctx.db.crmLeadLine.create({
+        data: {
+          tenantId: getTenantScope(ctx).tenantId,
+          leadId: lead.id,
+          crmProductId: input.crmProductId ?? null,
+          inventoryItemId: input.inventoryItemId ?? null,
+          warehousePreferenceId: input.warehousePreferenceId ?? null,
+          description: input.description ?? null,
+          qty: input.qty,
+          unitPrice: input.unitPrice,
+          totalPrice: input.totalPrice || input.qty * input.unitPrice,
+          requiresInventory: input.requiresInventory,
+        },
+        include: {
+          crmProduct: {
+            select: { id: true, code: true, name: true, type: true },
+          },
+          inventoryItem: {
+            select: {
+              id: true,
+              sku: true,
+              name: true,
+              unitOfMeasure: true,
+              balances: {
+                select: { qtyOnHand: true, qtyReserved: true },
+              },
+            },
+          },
+          warehousePreference: {
+            select: { id: true, code: true, name: true },
+          },
+        },
+      });
+
+      const leadLines = await ctx.db.crmLeadLine.findMany({
+        where: { leadId: lead.id },
+        select: { totalPrice: true, requiresInventory: true },
+      });
+
+      const nextValue = leadLines.reduce(
+        (sum, row) => sum + Number(row.totalPrice ?? 0),
+        0,
+      );
+      const requiresInventory = leadLines.some((row) => row.requiresInventory);
+
+      await ctx.db.crmLead.update({
+        where: { id: lead.id },
+        data: {
+          value: nextValue,
+          requiresInventory,
+        },
+      });
+
+      await ctx.db.auditLog.create({
+        data: {
+          tenantId: line.tenantId,
+          userId: ctx.session.user.id,
+          action: AuditAction.CREATE,
+          entityType: "CrmLeadLine",
+          entityId: line.id,
+          changes: { after: line },
+        },
+      });
+
+      return line;
     }),
 
   getDealById: protectedProcedure

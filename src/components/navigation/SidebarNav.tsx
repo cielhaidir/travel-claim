@@ -75,6 +75,11 @@ const accountingChildren: NavItem[] = [
   { label: "Neraca", href: "/reports/balance-sheet", icon: "NR" },
 ];
 
+const inventoryChildren: NavItem[] = [
+  { label: "Inventory Dashboard", href: "/inventory", icon: "ID" },
+  { label: "Fulfillment Requests", href: "/inventory/fulfillment", icon: "FR" },
+];
+
 const navigationItems: NavItem[] = [
   {
     label: "Dasbor",
@@ -125,6 +130,13 @@ const navigationItems: NavItem[] = [
     icon: "AK",
     moduleKey: "accounting",
     children: accountingChildren,
+  },
+  {
+    label: "Inventory",
+    href: "/inventory",
+    icon: "IV",
+    moduleKey: "inventory",
+    children: inventoryChildren,
   },
   {
     label: "Manajemen Pengguna",

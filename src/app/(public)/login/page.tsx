@@ -35,10 +35,9 @@ export default function LoginPage() {
      urlError ? (authErrorMessages[urlError] ?? `Sign-in error: ${urlError}`) : ""
    );
   
-  // Redirect to dashboard if already authenticated
   useEffect(() => {
     if (session) {
-      router.push("/");
+      router.replace("/");
     }
   }, [session, router]);
 
@@ -70,8 +69,8 @@ export default function LoginPage() {
         setIsLoading(false);
       } else if (result?.ok) {
         console.log("Login successful, redirecting...");
-        // Successfully logged in, redirect to home
-        window.location.href = "/";
+        router.replace(result?.url ?? "/");
+        return;
       } else {
         setError("Login failed. Please check your credentials.");
         setIsLoading(false);
