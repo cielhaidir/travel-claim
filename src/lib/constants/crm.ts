@@ -11,13 +11,13 @@ export type CrmActiveModule = {
 };
 
 export const CRM_ACTIVE_MODULES: CrmActiveModule[] = [
-  { label: "CRM Dashboard", href: "/crm" },
-  { label: "Leads", href: "/crm/leads" },
-  { label: "Deals", href: "/crm/deals" },
-  { label: "Contacts", href: "/crm/contacts" },
-  { label: "Organizations", href: "/crm/organizations" },
-  { label: "Tasks", href: "/crm/tasks" },
-  { label: "Notes", href: "/crm/notes" },
+  { label: "Dasbor CRM", href: "/crm" },
+  { label: "Prospek", href: "/crm/leads" },
+  { label: "Peluang", href: "/crm/deals" },
+  { label: "Kontak", href: "/crm/contacts" },
+  { label: "Organisasi", href: "/crm/organizations" },
+  { label: "Tugas", href: "/crm/tasks" },
+  { label: "Catatan", href: "/crm/notes" },
 ];
 
 export const CRM_GENDER_OPTIONS = ["MALE", "FEMALE", "OTHER"] as const;
@@ -27,6 +27,14 @@ export const CRM_LEAD_STATUS_OPTIONS = [
   "NURTURE",
   "QUALIFIED",
   "CONVERTED",
+  "UNQUALIFIED",
+  "JUNK",
+] as const;
+export const CRM_LEAD_MANUAL_STATUS_OPTIONS = [
+  "NEW",
+  "CONTACTED",
+  "NURTURE",
+  "QUALIFIED",
   "UNQUALIFIED",
   "JUNK",
 ] as const;
@@ -68,45 +76,74 @@ export const CRM_INDUSTRY_OPTIONS = [
 ] as const;
 
 const CRM_LABELS: Record<string, string> = {
-  MALE: "Male",
-  FEMALE: "Female",
-  OTHER: "Other",
-  NEW: "New",
-  CONTACTED: "Contacted",
-  NURTURE: "Nurture",
-  QUALIFIED: "Qualified",
-  CONVERTED: "Converted",
-  UNQUALIFIED: "Unqualified",
-  JUNK: "Junk",
-  QUALIFICATION: "Qualification",
-  DEMO_MAKING: "Demo / Making",
-  PROPOSAL_QUOTATION: "Proposal / Quotation",
-  NEGOTIATION: "Negotiation",
-  READY_TO_CLOSE: "Ready To Close",
-  WON: "Won",
-  LOST: "Lost",
-  OPEN: "Open",
-  IN_PROGRESS: "In Progress",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  LOW: "Low",
-  MEDIUM: "Medium",
-  HIGH: "High",
+  MALE: "Laki-laki",
+  FEMALE: "Perempuan",
+  OTHER: "Lainnya",
+  NEW: "Baru",
+  CONTACTED: "Sudah Dihubungi",
+  NURTURE: "Dipelihara",
+  QUALIFIED: "Terkualifikasi",
+  CONVERTED: "Dikonversi",
+  UNQUALIFIED: "Tidak Terkualifikasi",
+  JUNK: "Tidak Valid",
+  QUALIFICATION: "Kualifikasi",
+  DEMO_MAKING: "Demo / Presentasi",
+  PROPOSAL_QUOTATION: "Proposal / Penawaran",
+  NEGOTIATION: "Negosiasi",
+  READY_TO_CLOSE: "Siap Ditutup",
+  WON: "Menang",
+  LOST: "Kalah",
+  OPEN: "Terbuka",
+  IN_PROGRESS: "Sedang Dikerjakan",
+  COMPLETED: "Selesai",
+  CANCELLED: "Dibatalkan",
+  LOW: "Rendah",
+  MEDIUM: "Sedang",
+  HIGH: "Tinggi",
   ONE_TO_TEN: "1-10",
   ELEVEN_TO_FIFTY: "11-50",
   FIFTY_ONE_TO_TWO_HUNDRED: "51-200",
   TWO_HUNDRED_ONE_TO_FIVE_HUNDRED: "201-500",
   FIVE_HUNDRED_ONE_TO_ONE_THOUSAND: "501-1,000",
   OVER_ONE_THOUSAND: "1,000+",
-  TECHNOLOGY: "Technology",
-  FINANCE: "Finance",
-  HEALTHCARE: "Healthcare",
-  EDUCATION: "Education",
-  MANUFACTURING: "Manufacturing",
-  RETAIL: "Retail",
-  LOGISTICS: "Logistics",
-  HOSPITALITY: "Hospitality",
-  GOVERNMENT: "Government",
+  TECHNOLOGY: "Teknologi",
+  FINANCE: "Keuangan",
+  HEALTHCARE: "Kesehatan",
+  EDUCATION: "Pendidikan",
+  MANUFACTURING: "Manufaktur",
+  RETAIL: "Ritel",
+  LOGISTICS: "Logistik",
+  HOSPITALITY: "Perhotelan",
+  GOVERNMENT: "Pemerintahan",
+  REFERRAL: "Referensi",
+  WEBSITE: "Situs Web",
+  EVENT: "Acara",
+  OUTBOUND: "Penjangkauan Aktif",
+  PARTNER: "Mitra",
+  ENTERPRISE: "Perusahaan Besar",
+  SMB: "UKM",
+  ACTIVE: "Aktif",
+  INACTIVE: "Tidak Aktif",
+  VIP: "VIP",
+  DISCOVERY: "Eksplorasi",
+  PROPOSAL: "Proposal",
+  VERBAL_WON: "Verbal Menang",
+  ON_HOLD: "Ditunda",
+  CALL: "Panggilan",
+  MEETING: "Pertemuan",
+  EMAIL: "Email",
+  FOLLOW_UP: "Tindak Lanjut",
+  CHAT: "Obrolan",
+  STAGE_CHANGE: "Perubahan Tahap",
+  NOTE: "Catatan",
+  TASK: "Tugas",
+  ATTACHMENT: "Lampiran",
+  SYSTEM: "Sistem",
+  WAITING_REPLY: "Menunggu Balasan",
+  CLOSED: "Ditutup",
+  DRAFT: "Draf",
+  SENT: "Terkirim",
+  RECEIVED: "Diterima",
 };
 
 const CRM_BADGE_VARIANTS: Record<string, CrmBadgeVariant> = {
@@ -141,4 +178,27 @@ export function getCrmLabel(value: string | null | undefined) {
 export function getCrmBadgeVariant(value: string | null | undefined): CrmBadgeVariant {
   if (!value) return "default";
   return CRM_BADGE_VARIANTS[value] ?? "default";
+}
+
+export function canConvertLeadStatus(value: string | null | undefined) {
+  return value === "QUALIFIED";
+}
+
+export function getLeadConversionBlockedReason(value: string | null | undefined) {
+  switch (value) {
+    case "NEW":
+      return "Prospek masih baru dan belum lolos kualifikasi.";
+    case "CONTACTED":
+      return "Prospek sudah dihubungi, tetapi peluangnya belum terverifikasi.";
+    case "NURTURE":
+      return "Prospek masih dalam tahap pemeliharaan dan belum siap menjadi peluang.";
+    case "UNQUALIFIED":
+      return "Prospek dengan status Tidak Terkualifikasi tidak dapat dikonversi.";
+    case "JUNK":
+      return "Prospek dengan status Tidak Valid tidak dapat dikonversi.";
+    case "CONVERTED":
+      return "Prospek ini sudah pernah dikonversi menjadi peluang.";
+    default:
+      return null;
+  }
 }

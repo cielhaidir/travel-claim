@@ -6,25 +6,10 @@ import {
   permissionProcedure,
 } from "@/server/api/trpc";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -50,7 +35,7 @@ export const projectRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = withTenantWhere(ctx, {
+      const where: Record<string, unknown> = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -98,7 +83,7 @@ export const projectRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const project = await ctx.db.project.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           _count: { select: { travelRequests: true } },
         },
@@ -138,7 +123,7 @@ export const projectRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Check unique code
       const existing = await ctx.db.project.findFirst({
-        where: withTenantWhere(ctx, { code: input.code }),
+        where: applyScope(ctx, { code: input.code }),
       });
       if (existing) {
         throw new TRPCError({
@@ -147,16 +132,10 @@ export const projectRouter = createTRPCRouter({
         });
       }
 
-      const project = await ctx.db.project.create({
-        data: {
-          ...input,
-          tenantId: getTenantScope(ctx).tenantId,
-        },
-      });
+      const project = await ctx.db.project.create({ data: input });
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: project.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Project",
@@ -194,7 +173,7 @@ export const projectRouter = createTRPCRouter({
       const { id, ...data } = input;
 
       const existing = await ctx.db.project.findFirst({
-        where: withTenantWhere(ctx, { id }),
+        where: applyScope(ctx, { id }),
       });
       if (!existing) {
         throw new TRPCError({
@@ -206,7 +185,7 @@ export const projectRouter = createTRPCRouter({
       // Check code uniqueness if changed
       if (data.code && data.code !== existing.code) {
         const codeConflict = await ctx.db.project.findFirst({
-          where: withTenantWhere(ctx, { code: data.code }),
+          where: applyScope(ctx, { code: data.code }),
         });
         if (codeConflict) {
           throw new TRPCError({
@@ -220,7 +199,6 @@ export const projectRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Project",
@@ -247,7 +225,7 @@ export const projectRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.project.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: { _count: { select: { travelRequests: true } } },
       });
 
@@ -273,7 +251,6 @@ export const projectRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "Project",

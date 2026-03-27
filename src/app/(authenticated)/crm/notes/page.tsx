@@ -26,36 +26,36 @@ export default function CrmNotesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Notes"
-        description="Aggregate notes across all leads and deals."
-        primaryAction={{ label: "Refresh", onClick: () => void refetch() }}
+        title="Catatan CRM"
+        description="Rekap catatan dari seluruh prospek dan peluang."
+        primaryAction={{ label: "Muat Ulang", onClick: () => void refetch() }}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <CrmMetricCard label="Notes" value={String(notes.length)} />
-        <CrmMetricCard label="Lead Notes" value={String(notes.filter((note) => !!note.lead).length)} />
-        <CrmMetricCard label="Deal Notes" value={String(notes.filter((note) => !!note.deal).length)} />
+        <CrmMetricCard label="Catatan" value={String(notes.length)} />
+        <CrmMetricCard label="Catatan Prospek" value={String(notes.filter((note) => !!note.lead).length)} />
+        <CrmMetricCard label="Catatan Peluang" value={String(notes.filter((note) => !!note.deal).length)} />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search note title, content, writer, lead, or deal"
+          placeholder="Cari judul catatan, isi, penulis, prospek, atau peluang"
           className={crmInputClassName}
         />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">All Notes</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Semua Catatan</h2>
         </div>
 
         {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Loading notes...</div>
+          <div className="p-5 text-sm text-gray-500">Memuat catatan...</div>
         ) : notes.length === 0 ? (
           <div className="p-5">
-            <CrmEmptyHint text="No CRM notes available." />
+            <CrmEmptyHint text="Belum ada catatan CRM." />
           </div>
         ) : (
           <div className="grid gap-3 p-5 xl:grid-cols-2">
@@ -64,7 +64,7 @@ export default function CrmNotesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-gray-900">{note.title}</p>
-                    <p className="mt-1 text-xs uppercase tracking-wide text-gray-400">{note.writerName ?? "Unknown writer"}</p>
+                    <p className="mt-1 text-xs uppercase tracking-wide text-gray-400">{note.writerName ?? "Penulis tidak diketahui"}</p>
                   </div>
                   <span className="text-xs text-gray-500">{formatDate(note.updatedAt)}</span>
                 </div>

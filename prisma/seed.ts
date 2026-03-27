@@ -11,10 +11,10 @@ import {
   type Role,
 } from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
-import { bootstrapTenantAccounting } from "../src/lib/accounting/bootstrap";
+import { createCrmSampleData } from "./crm-seed";
+import { bootstrapAccountingCatalog } from "../src/lib/accounting/bootstrap";
 import {
-  ensureTenantRoleCatalog,
-  getTenantSystemRoleId,
+  ensureRolePermissionCatalog,
 } from "../src/server/auth/permission-store";
 
 const prisma = new PrismaClient();
@@ -27,176 +27,57 @@ async function hash(plain: string) {
   return bcrypt.hash(plain, 10);
 }
 
-async function syncUserRoles(
-  users: Array<{ id: string; role: Role; tenantId: string }>,
-) {
-  for (const user of users) {
-    await prisma.userRole.deleteMany({
-      where: {
-        userId: user.id,
-      },
-    });
-
-    await prisma.userRole.create({
-      data: {
-        userId: user.id,
-        role: user.role,
-        tenantId: user.tenantId,
-      },
-    });
-  }
-}
-
-async function ensureTenantBootstrap() {
-  await prisma.$executeRaw`
-    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
-    VALUES (md5(random()::text || clock_timestamp()::text), 'root', 'Root Tenant', true, NOW(), NOW())
-    ON CONFLICT ("slug") DO UPDATE
-    SET "name" = EXCLUDED."name", "isRoot" = true, "updatedAt" = NOW()
-  `;
-
-  await prisma.$executeRaw`
-    INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
-    VALUES (md5(random()::text || clock_timestamp()::text), 'default', 'Default Tenant', false, NOW(), NOW())
-    ON CONFLICT ("slug") DO UPDATE
-    SET "name" = EXCLUDED."name", "updatedAt" = NOW()
-  `;
-
-  const rows = await prisma.$queryRaw<Array<{ slug: string; id: string }>>`
-    SELECT "slug", "id" FROM "Tenant" WHERE "slug" IN ('root', 'default')
-  `;
-
-  return {
-    rootTenantId: rows.find((row) => row.slug === "root")?.id ?? "",
-    defaultTenantId: rows.find((row) => row.slug === "default")?.id ?? "",
-  };
-}
-
-async function backfillTenantOwnership(defaultTenantId: string) {
-  await prisma.$executeRaw`UPDATE "Department" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Project" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "TravelRequest" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "TravelParticipant" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Bailout" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Approval" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Claim" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Attachment" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "Notification" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "AuditLog" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "BalanceAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "JournalTransaction" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-  await prisma.$executeRaw`UPDATE "UserRole" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
-}
-
-async function upsertDefaultMembership(
-  userId: string,
-  role: Role,
-  tenantId: string,
-  isDefault = true,
-) {
-  const customRoleId = await getTenantSystemRoleId(prisma, tenantId, role);
-
-  await prisma.tenantMembership.upsert({
-    where: {
-      userId_tenantId: {
-        userId,
-        tenantId,
-      },
-    },
-    update: {
-      role,
-      customRoleId,
-      status: "ACTIVE",
-      isDefault,
-      activatedAt: new Date(),
-      invitedAt: null,
-      suspendedAt: null,
-      suspendedReason: null,
-    },
-    create: {
-      userId,
-      tenantId,
-      role,
-      customRoleId,
-      status: "ACTIVE",
-      isDefault,
-      activatedAt: new Date(),
-    },
-  });
-}
-
-async function pruneMemberships(userId: string, allowedTenantIds: string[]) {
-  await prisma.tenantMembership.deleteMany({
-    where: {
-      userId,
-      tenantId: {
-        notIn: allowedTenantIds,
-      },
-    },
-  });
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
 async function main() {
   console.log("🌱 Starting database seeding (master data only)…\n");
 
   const pw = await hash(PASSWORD);
-  const { rootTenantId, defaultTenantId } = await ensureTenantBootstrap();
-  await ensureTenantRoleCatalog(prisma, rootTenantId);
-  await ensureTenantRoleCatalog(prisma, defaultTenantId);
-  await backfillTenantOwnership(defaultTenantId);
+  await ensureRolePermissionCatalog(prisma);
 
   // ── 1. Departments (no chiefId yet — set after users are created) ───────────
   console.log("📂 Creating departments…");
   const deptSales = await prisma.department.upsert({
-    where: { tenantId_code: { tenantId: defaultTenantId, code: "SALES" } },
+    where: { code: "SALES" },
     update: {
       name: "Sales",
       description: "Sales operations and customer relations",
     },
     create: {
-      tenantId: defaultTenantId,
       code: "SALES",
       name: "Sales",
       description: "Sales operations and customer relations",
     },
   });
   const deptEng = await prisma.department.upsert({
-    where: { tenantId_code: { tenantId: defaultTenantId, code: "ENG" } },
+    where: { code: "ENG" },
     update: {
       name: "Engineering",
       description: "Software engineering and technical operations",
     },
     create: {
-      tenantId: defaultTenantId,
       code: "ENG",
       name: "Engineering",
       description: "Software engineering and technical operations",
     },
   });
   const deptFinance = await prisma.department.upsert({
-    where: { tenantId_code: { tenantId: defaultTenantId, code: "FIN" } },
+    where: { code: "FIN" },
     update: {
       name: "Finance",
       description: "Finance and accounting",
     },
     create: {
-      tenantId: defaultTenantId,
       code: "FIN",
       name: "Finance",
       description: "Finance and accounting",
     },
   });
   const deptAdmin = await prisma.department.upsert({
-    where: { tenantId_code: { tenantId: defaultTenantId, code: "ADMIN" } },
+    where: { code: "ADMIN" },
     update: {
       name: "Administration",
       description: "Administrative and support operations",
     },
     create: {
-      tenantId: defaultTenantId,
       code: "ADMIN",
       name: "Administration",
       description: "Administrative and support operations",
@@ -527,87 +408,6 @@ async function main() {
 
   console.log("\n✅ All users created\n");
 
-  await syncUserRoles([
-    { id: rootUser.id, role: "ADMIN", tenantId: defaultTenantId },
-    { id: executive.id, role: executive.role, tenantId: defaultTenantId },
-    { id: director.id, role: director.role, tenantId: defaultTenantId },
-    { id: financeChief.id, role: financeChief.role, tenantId: defaultTenantId },
-    { id: financeStaff1.id, role: financeStaff1.role, tenantId: defaultTenantId },
-    { id: financeStaff2.id, role: financeStaff2.role, tenantId: defaultTenantId },
-    { id: salesChief.id, role: salesChief.role, tenantId: defaultTenantId },
-    { id: salesStaff1.id, role: salesStaff1.role, tenantId: defaultTenantId },
-    { id: salesStaff2.id, role: salesStaff2.role, tenantId: defaultTenantId },
-    { id: engChief.id, role: engChief.role, tenantId: defaultTenantId },
-    { id: engStaff1.id, role: engStaff1.role, tenantId: defaultTenantId },
-    { id: engStaff2.id, role: engStaff2.role, tenantId: defaultTenantId },
-    { id: adminChief.id, role: adminChief.role, tenantId: defaultTenantId },
-    { id: adminStaff1.id, role: adminStaff1.role, tenantId: defaultTenantId },
-  ]);
-  console.log("  ✅ UserRole rows synchronized from legacy role\n");
-
-  await upsertDefaultMembership(rootUser.id, "ROOT", rootTenantId, false);
-  await upsertDefaultMembership(rootUser.id, "ADMIN", defaultTenantId, true);
-  await upsertDefaultMembership(executive.id, executive.role, defaultTenantId);
-  await upsertDefaultMembership(director.id, director.role, defaultTenantId);
-  await upsertDefaultMembership(
-    financeChief.id,
-    financeChief.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    financeStaff1.id,
-    financeStaff1.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    financeStaff2.id,
-    financeStaff2.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    salesChief.id,
-    salesChief.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    salesStaff1.id,
-    salesStaff1.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    salesStaff2.id,
-    salesStaff2.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(engChief.id, engChief.role, defaultTenantId);
-  await upsertDefaultMembership(engStaff1.id, engStaff1.role, defaultTenantId);
-  await upsertDefaultMembership(engStaff2.id, engStaff2.role, defaultTenantId);
-  await upsertDefaultMembership(
-    adminChief.id,
-    adminChief.role,
-    defaultTenantId,
-  );
-  await upsertDefaultMembership(
-    adminStaff1.id,
-    adminStaff1.role,
-    defaultTenantId,
-  );
-  await pruneMemberships(rootUser.id, [rootTenantId, defaultTenantId]);
-  await pruneMemberships(executive.id, [defaultTenantId]);
-  await pruneMemberships(director.id, [defaultTenantId]);
-  await pruneMemberships(financeChief.id, [defaultTenantId]);
-  await pruneMemberships(financeStaff1.id, [defaultTenantId]);
-  await pruneMemberships(financeStaff2.id, [defaultTenantId]);
-  await pruneMemberships(salesChief.id, [defaultTenantId]);
-  await pruneMemberships(salesStaff1.id, [defaultTenantId]);
-  await pruneMemberships(salesStaff2.id, [defaultTenantId]);
-  await pruneMemberships(engChief.id, [defaultTenantId]);
-  await pruneMemberships(engStaff1.id, [defaultTenantId]);
-  await pruneMemberships(engStaff2.id, [defaultTenantId]);
-  await pruneMemberships(adminChief.id, [defaultTenantId]);
-  await pruneMemberships(adminStaff1.id, [defaultTenantId]);
-  console.log("  ✅ TenantMembership rows synchronized\n");
-
   // ── 4. Wire Department.chiefId ────────────────────────────────────────────────
   console.log("🔗 Wiring department chiefs…");
   await prisma.department.update({
@@ -633,20 +433,27 @@ async function main() {
 
   // ── 5. Chart of Accounts (master data) ───────────────────────────────────────
   console.log("💰 Creating Chart of Accounts…");
-  await createChartOfAccounts(adminChief.id, defaultTenantId);
-  await prisma.$executeRaw`UPDATE "ChartOfAccount" SET "tenantId" = ${defaultTenantId} WHERE "tenantId" IS NULL`;
+  await createChartOfAccounts(adminChief.id);
   console.log("  ✅ Chart of Accounts ready\n");
 
   // ── 6. Balance accounts, projects, travel, claims, bailouts, journals ───────
   console.log("📚 Creating accounting and transaction sample data…");
   await createSampleBusinessData({
-    tenantId: defaultTenantId,
     adminUserId: adminChief.id,
     financeUserId: financeStaff1.id,
     salesRequesterId: salesStaff1.id,
     engineerRequesterId: engStaff1.id,
   });
   console.log("  ✅ Sample accounting and transaction data ready\n");
+
+  await createCrmSampleData({
+    db: prisma,
+    salesChief: { id: salesChief.id, name: salesChief.name },
+    salesStaff1: { id: salesStaff1.id, name: salesStaff1.name },
+    salesStaff2: { id: salesStaff2.id, name: salesStaff2.name },
+    director: { id: director.id, name: director.name },
+    adminChief: { id: adminChief.id, name: adminChief.name },
+  });
 
   // ── 7. Summary ────────────────────────────────────────────────────────────────
   console.log("🎉 Seeding completed!\n");
@@ -708,9 +515,9 @@ async function main() {
 
 // ─── Chart of Accounts & Sample Data ───────────────────────────────────────
 
-async function findCoaByCode(tenantId: string, code: string) {
+async function findCoaByCode(code: string) {
   const coa = await prisma.chartOfAccount.findFirst({
-    where: { tenantId, code, isActive: true },
+    where: { code, isActive: true },
   });
 
   if (!coa) {
@@ -721,26 +528,25 @@ async function findCoaByCode(tenantId: string, code: string) {
 }
 
 async function createSampleBusinessData(input: {
-  tenantId: string;
   adminUserId: string;
   financeUserId: string;
   salesRequesterId: string;
   engineerRequesterId: string;
 }) {
-  const { tenantId, adminUserId, financeUserId, salesRequesterId, engineerRequesterId } = input;
+  const { adminUserId, financeUserId, salesRequesterId, engineerRequesterId } = input;
 
   const [cashCoa, bankCoa, advanceCoa, equityCoa, airfareCoa, accommodationCoa] =
     await Promise.all([
-      findCoaByCode(tenantId, "1110"),
-      findCoaByCode(tenantId, "1120"),
-      findCoaByCode(tenantId, "1131"),
-      findCoaByCode(tenantId, "3100"),
-      findCoaByCode(tenantId, "6110"),
-      findCoaByCode(tenantId, "6130"),
+      findCoaByCode("1110"),
+      findCoaByCode("1120"),
+      findCoaByCode("1131"),
+      findCoaByCode("3100"),
+      findCoaByCode("6110"),
+      findCoaByCode("6130"),
     ]);
 
   const bankOps = await prisma.balanceAccount.upsert({
-    where: { tenantId_code: { tenantId, code: "BANK-OPS" } },
+    where: { code: "BANK-OPS" },
     update: {
       name: "Rekening Operasional Utama",
       balance: 46650000,
@@ -749,7 +555,6 @@ async function createSampleBusinessData(input: {
       isActive: true,
     },
     create: {
-      tenantId,
       code: "BANK-OPS",
       name: "Rekening Operasional Utama",
       balance: 46650000,
@@ -760,7 +565,7 @@ async function createSampleBusinessData(input: {
   });
 
   const pettyCash = await prisma.balanceAccount.upsert({
-    where: { tenantId_code: { tenantId, code: "KAS-KECIL" } },
+    where: { code: "KAS-KECIL" },
     update: {
       name: "Kas Kecil Kantor",
       balance: 5000000,
@@ -769,7 +574,6 @@ async function createSampleBusinessData(input: {
       isActive: true,
     },
     create: {
-      tenantId,
       code: "KAS-KECIL",
       name: "Kas Kecil Kantor",
       balance: 5000000,
@@ -780,7 +584,7 @@ async function createSampleBusinessData(input: {
   });
 
   const project = await prisma.project.upsert({
-    where: { tenantId_code: { tenantId, code: "PRJ-SALES-001" } },
+    where: { code: "PRJ-SALES-001" },
     update: {
       name: "Ekspansi Klien Nasional",
       description: "Proyek penjualan untuk kunjungan klien nasional.",
@@ -788,7 +592,6 @@ async function createSampleBusinessData(input: {
       isActive: true,
     },
     create: {
-      tenantId,
       code: "PRJ-SALES-001",
       name: "Ekspansi Klien Nasional",
       description: "Proyek penjualan untuk kunjungan klien nasional.",
@@ -802,10 +605,9 @@ async function createSampleBusinessData(input: {
   const lockedTravelNumber = "TR-2026-00002";
 
   const approvedTravel = await prisma.travelRequest.upsert({
-    where: { tenantId_requestNumber: { tenantId, requestNumber: approvedTravelNumber } },
+    where: { requestNumber: approvedTravelNumber },
     update: {},
     create: {
-      tenantId,
       requestNumber: approvedTravelNumber,
       requesterId: salesRequesterId,
       purpose: "Kunjungan prospek dan presentasi solusi ke klien baru.",
@@ -820,10 +622,9 @@ async function createSampleBusinessData(input: {
   });
 
   const lockedTravel = await prisma.travelRequest.upsert({
-    where: { tenantId_requestNumber: { tenantId, requestNumber: lockedTravelNumber } },
+    where: { requestNumber: lockedTravelNumber },
     update: {},
     create: {
-      tenantId,
       requestNumber: lockedTravelNumber,
       requesterId: engineerRequesterId,
       purpose: "Implementasi sistem dan pendampingan user di lokasi proyek.",
@@ -846,7 +647,6 @@ async function createSampleBusinessData(input: {
     },
     update: {},
     create: {
-      tenantId,
       travelRequestId: approvedTravel.id,
       userId: salesRequesterId,
       role: "Presenter",
@@ -862,7 +662,6 @@ async function createSampleBusinessData(input: {
     },
     update: {},
     create: {
-      tenantId,
       travelRequestId: lockedTravel.id,
       userId: engineerRequesterId,
       role: "Implementor",
@@ -873,10 +672,9 @@ async function createSampleBusinessData(input: {
   const disbursedBailoutNumber = "BLT-2026-00002";
 
   await prisma.bailout.upsert({
-    where: { tenantId_bailoutNumber: { tenantId, bailoutNumber: approvedBailoutNumber } },
+    where: { bailoutNumber: approvedBailoutNumber },
     update: {},
     create: {
-      tenantId,
       bailoutNumber: approvedBailoutNumber,
       travelRequestId: approvedTravel.id,
       requesterId: salesRequesterId,
@@ -889,10 +687,9 @@ async function createSampleBusinessData(input: {
   });
 
   const disbursedBailout = await prisma.bailout.upsert({
-    where: { tenantId_bailoutNumber: { tenantId, bailoutNumber: disbursedBailoutNumber } },
+    where: { bailoutNumber: disbursedBailoutNumber },
     update: {},
     create: {
-      tenantId,
       bailoutNumber: disbursedBailoutNumber,
       travelRequestId: lockedTravel.id,
       requesterId: engineerRequesterId,
@@ -912,10 +709,9 @@ async function createSampleBusinessData(input: {
   const paidClaimNumber = "CLM-2026-00002";
 
   await prisma.claim.upsert({
-    where: { tenantId_claimNumber: { tenantId, claimNumber: approvedClaimNumber } },
+    where: { claimNumber: approvedClaimNumber },
     update: {},
     create: {
-      tenantId,
       claimNumber: approvedClaimNumber,
       travelRequestId: lockedTravel.id,
       submitterId: engineerRequesterId,
@@ -931,10 +727,9 @@ async function createSampleBusinessData(input: {
   });
 
   const paidClaim = await prisma.claim.upsert({
-    where: { tenantId_claimNumber: { tenantId, claimNumber: paidClaimNumber } },
+    where: { claimNumber: paidClaimNumber },
     update: {},
     create: {
-      tenantId,
       claimNumber: paidClaimNumber,
       travelRequestId: lockedTravel.id,
       submitterId: engineerRequesterId,
@@ -956,10 +751,9 @@ async function createSampleBusinessData(input: {
 
   const openingNumber = "JE-2026-00001";
   await prisma.journalEntry.upsert({
-    where: { tenantId_journalNumber: { tenantId, journalNumber: openingNumber } },
+    where: { journalNumber: openingNumber },
     update: {},
     create: {
-      tenantId,
       journalNumber: openingNumber,
       transactionDate: new Date("2026-03-01"),
       description: "Saldo awal rekening operasional",
@@ -992,10 +786,9 @@ async function createSampleBusinessData(input: {
 
   const pettyCashNumber = "JE-2026-00002";
   await prisma.journalEntry.upsert({
-    where: { tenantId_journalNumber: { tenantId, journalNumber: pettyCashNumber } },
+    where: { journalNumber: pettyCashNumber },
     update: {},
     create: {
-      tenantId,
       journalNumber: pettyCashNumber,
       transactionDate: new Date("2026-03-02"),
       description: "Pembentukan kas kecil",
@@ -1029,10 +822,9 @@ async function createSampleBusinessData(input: {
 
   const disbursementJeNumber = "JE-2026-00003";
   await prisma.journalEntry.upsert({
-    where: { tenantId_journalNumber: { tenantId, journalNumber: disbursementJeNumber } },
+    where: { journalNumber: disbursementJeNumber },
     update: {},
     create: {
-      tenantId,
       journalNumber: disbursementJeNumber,
       transactionDate: new Date("2026-03-08"),
       description: `Pencairan bailout ${disbursedBailout.bailoutNumber}`,
@@ -1068,10 +860,9 @@ async function createSampleBusinessData(input: {
 
   const claimPaymentJeNumber = "JE-2026-00004";
   await prisma.journalEntry.upsert({
-    where: { tenantId_journalNumber: { tenantId, journalNumber: claimPaymentJeNumber } },
+    where: { journalNumber: claimPaymentJeNumber },
     update: {},
     create: {
-      tenantId,
       journalNumber: claimPaymentJeNumber,
       transactionDate: new Date("2026-03-14"),
       description: `Pembayaran klaim ${paidClaim.claimNumber}`,
@@ -1107,10 +898,9 @@ async function createSampleBusinessData(input: {
 
   const settlementJeNumber = "JE-2026-00005";
   await prisma.journalEntry.upsert({
-    where: { tenantId_journalNumber: { tenantId, journalNumber: settlementJeNumber } },
+    where: { journalNumber: settlementJeNumber },
     update: {},
     create: {
-      tenantId,
       journalNumber: settlementJeNumber,
       transactionDate: new Date("2026-03-15"),
       description: `Settlement bailout ${disbursedBailout.bailoutNumber}`,
@@ -1169,10 +959,9 @@ async function createSampleBusinessData(input: {
   for (const sample of legacySamples) {
     const transactionNumber = sample.referenceNumber?.startsWith("BANK-TFR-20260308") ? "JRN-2026-00001" : "JRN-2026-00002";
     await prisma.journalTransaction.upsert({
-      where: { tenantId_transactionNumber: { tenantId, transactionNumber } },
+      where: { transactionNumber },
       update: {},
       create: {
-        tenantId,
         transactionNumber,
         transactionDate: sample.date,
         description: sample.description,
@@ -1188,10 +977,9 @@ async function createSampleBusinessData(input: {
   }
 }
 
-async function createChartOfAccounts(createdById: string, tenantId: string) {
+async function createChartOfAccounts(createdById: string) {
   await prisma.$transaction(async (tx) => {
-    await bootstrapTenantAccounting(tx, {
-      tenantId,
+    await bootstrapAccountingCatalog(tx, {
       userId: createdById,
     });
   });
@@ -1212,3 +1000,8 @@ main()
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());
+
+
+
+
+

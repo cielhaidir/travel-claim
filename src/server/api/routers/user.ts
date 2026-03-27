@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import {
-  MembershipStatus,
   Role,
-  type PrismaClient,
   type Prisma,
+  type PrismaClient,
 } from "../../../../generated/prisma";
 import bcrypt from "bcryptjs";
 
@@ -13,63 +12,7 @@ import {
   protectedProcedure,
   permissionProcedure,
 } from "@/server/api/trpc";
-import {
-  ensureTenantRoleCatalog,
-  getTenantSystemRoleId,
-} from "@/server/auth/permission-store";
 import { userHasPermission } from "@/lib/auth/role-check";
-
-// Role precedence for deriving primary role from a set of roles
-const ROLE_PRECEDENCE_ORDER = [
-  Role.ROOT,
-  Role.ADMIN,
-  Role.FINANCE,
-  Role.DIRECTOR,
-  Role.MANAGER,
-  Role.SALES_CHIEF,
-  Role.SUPERVISOR,
-  Role.SALES_EMPLOYEE,
-  Role.EMPLOYEE,
-] as const;
-
-function derivePrimary(roles: Role[]): Role {
-  for (const r of ROLE_PRECEDENCE_ORDER) {
-    if (roles.includes(r)) return r;
-  }
-  return Role.EMPLOYEE;
-}
-
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantMembershipFilter(
-  ctx: unknown,
-  where: Prisma.UserWhereInput,
-): Prisma.UserWhereInput {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (isRoot || !tenantId) return where;
-  return {
-    AND: [
-      where,
-      {
-        memberships: {
-          some: {
-            tenantId,
-            status: MembershipStatus.ACTIVE,
-          },
-        },
-      },
-    ],
-  };
-}
 
 function buildCurrentUserLookup(input: {
   id: string;
@@ -87,248 +30,17 @@ function buildCurrentUserLookup(input: {
   };
 }
 
-const tenantMembershipInput = z.object({
-  tenantId: z.string(),
-  role: z.nativeEnum(Role),
-  customRoleId: z.string().optional().nullable(),
-  status: z.nativeEnum(MembershipStatus).default(MembershipStatus.ACTIVE),
-  isDefault: z.boolean().default(false),
+const userMutationInput = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  employeeId: z.string().optional(),
+  role: z.nativeEnum(Role).optional(),
+  departmentId: z.string().optional().nullable(),
+  supervisorId: z.string().optional().nullable(),
+  phoneNumber: z.string().optional().nullable(),
 });
 
-type TenantMembershipInput = z.infer<typeof tenantMembershipInput>;
-
-function normalizeTenantMemberships(input: {
-  requested?: TenantMembershipInput[];
-  currentTenantId: string | null;
-  isRoot: boolean;
-  fallbackRole: Role;
-}): TenantMembershipInput[] {
-  const baseMemberships =
-    input.requested && input.requested.length > 0
-      ? input.requested.map((membership) => ({ ...membership }))
-      : input.currentTenantId
-        ? [
-            {
-              tenantId: input.currentTenantId,
-              role: input.fallbackRole,
-              status: MembershipStatus.ACTIVE,
-              isDefault: true,
-            },
-          ]
-        : [];
-
-  if (baseMemberships.length === 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "At least one tenant access entry is required",
-    });
-  }
-
-  const seenTenantIds = new Set<string>();
-  const normalized = baseMemberships.map((membership, index) => {
-    if (!input.isRoot && membership.tenantId !== input.currentTenantId) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "You can only manage access for the active tenant",
-      });
-    }
-
-    if (seenTenantIds.has(membership.tenantId)) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Duplicate tenant access entries are not allowed",
-      });
-    }
-    seenTenantIds.add(membership.tenantId);
-
-    return {
-      ...membership,
-      customRoleId: membership.customRoleId ?? null,
-      isDefault: membership.isDefault,
-      status: membership.status ?? MembershipStatus.ACTIVE,
-      role: membership.role,
-      tenantId: membership.tenantId,
-      _index: index,
-    };
-  });
-
-  const hasDefault = normalized.some((membership) => membership.isDefault);
-  const withDefault = normalized.map((membership, index) => ({
-    tenantId: membership.tenantId,
-    role: membership.role,
-    customRoleId: membership.customRoleId,
-    status: membership.status,
-    isDefault: hasDefault ? membership.isDefault : index === 0,
-  }));
-
-  const defaultCount = withDefault.filter(
-    (membership) => membership.isDefault,
-  ).length;
-  if (defaultCount > 1) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Only one tenant can be marked as default",
-    });
-  }
-
-  return withDefault;
-}
-
-async function resolveCustomRolesForMemberships(
-  db: PrismaClient,
-  memberships: TenantMembershipInput[],
-): Promise<TenantMembershipInput[]> {
-  const tenantIds = [...new Set(memberships.map((membership) => membership.tenantId))];
-  for (const tenantId of tenantIds) {
-    await ensureTenantRoleCatalog(db, tenantId);
-  }
-
-  const customRoleIds = [
-    ...new Set(
-      memberships
-        .map((membership) => membership.customRoleId)
-        .filter((value): value is string => !!value),
-    ),
-  ];
-
-  if (customRoleIds.length === 0) {
-    const resolvedMemberships: TenantMembershipInput[] = [];
-
-    for (const membership of memberships) {
-      const systemRoleId = await getTenantSystemRoleId(
-        db,
-        membership.tenantId,
-        membership.role,
-      );
-
-      resolvedMemberships.push({
-        ...membership,
-        customRoleId: systemRoleId ?? null,
-      });
-    }
-
-    return resolvedMemberships;
-  }
-
-  const customRoles = await db.tenantCustomRole.findMany({
-    where: {
-      id: { in: customRoleIds },
-    },
-    select: {
-      id: true,
-      tenantId: true,
-      baseRole: true,
-      isArchived: true,
-    },
-  });
-
-  const customRoleById = new Map(customRoles.map((role) => [role.id, role]));
-
-  const resolvedMemberships: TenantMembershipInput[] = [];
-
-  for (const membership of memberships) {
-    if (!membership.customRoleId) {
-      const systemRoleId = await getTenantSystemRoleId(
-        db,
-        membership.tenantId,
-        membership.role,
-      );
-
-      resolvedMemberships.push({
-        ...membership,
-        customRoleId: systemRoleId ?? null,
-      });
-      continue;
-    }
-
-    const customRole = customRoleById.get(membership.customRoleId);
-    if (customRole?.tenantId !== membership.tenantId) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Invalid custom role selection",
-      });
-    }
-
-    if (customRole.isArchived) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Archived custom roles cannot be assigned",
-      });
-    }
-
-    resolvedMemberships.push({
-      ...membership,
-      role: customRole.baseRole ?? membership.role,
-      customRoleId: customRole.id,
-    });
-  }
-
-  return resolvedMemberships;
-}
-
-function resolvePrimaryMembership(memberships: TenantMembershipInput[]) {
-  return (
-    memberships.find(
-      (membership) =>
-        membership.status === MembershipStatus.ACTIVE && membership.isDefault,
-    ) ??
-    memberships.find(
-      (membership) => membership.status === MembershipStatus.ACTIVE,
-    ) ??
-    memberships[0] ??
-    null
-  );
-}
-
-function buildUserRoleRows(memberships: TenantMembershipInput[]) {
-  const primaryMembership = resolvePrimaryMembership(memberships);
-  if (!primaryMembership) {
-    return [];
-  }
-
-  return [
-    {
-      role: primaryMembership.role,
-      tenantId: primaryMembership.tenantId,
-    },
-  ];
-}
-
-function derivePrimaryFromMemberships(
-  memberships: TenantMembershipInput[],
-): Role {
-  return resolvePrimaryMembership(memberships)?.role ?? Role.EMPLOYEE;
-}
-
-async function assertTenantRecordsExist(
-  db: PrismaClient,
-  tenantIds: string[],
-): Promise<void> {
-  const existing = await db.tenant.count({
-    where: {
-      id: { in: tenantIds },
-      deletedAt: null,
-    },
-  });
-
-  if (existing !== tenantIds.length) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "One or more tenant access entries are invalid",
-    });
-  }
-}
-
-function membershipTimestamps(status: MembershipStatus) {
-  return {
-    invitedAt: status === MembershipStatus.INVITED ? new Date() : null,
-    activatedAt: status === MembershipStatus.ACTIVE ? new Date() : null,
-    suspendedAt: status === MembershipStatus.SUSPENDED ? new Date() : null,
-  };
-}
-
 export const userRouter = createTRPCRouter({
-  // Get current user profile
   getMe: permissionProcedure("profile", "read")
     .meta({
       openapi: {
@@ -380,7 +92,6 @@ export const userRouter = createTRPCRouter({
       return user;
     }),
 
-  // Get active users (lightweight, for participant pickers - accessible to all logged-in users)
   getActiveUsers: protectedProcedure
     .meta({
       openapi: {
@@ -398,8 +109,8 @@ export const userRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const users = await ctx.db.user.findMany({
-        where: withTenantMembershipFilter(ctx, {
+      return ctx.db.user.findMany({
+        where: {
           deletedAt: null,
           ...(input.search
             ? {
@@ -412,7 +123,7 @@ export const userRouter = createTRPCRouter({
                 ],
               }
             : {}),
-        }),
+        },
         select: {
           id: true,
           name: true,
@@ -429,11 +140,8 @@ export const userRouter = createTRPCRouter({
         orderBy: { name: "asc" },
         take: 100,
       });
-
-      return users;
     }),
 
-  // Get user by phone number (dedicated MCP tool)
   getByPhone: permissionProcedure("users", "read")
     .meta({
       openapi: {
@@ -457,10 +165,10 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, {
+        where: {
           deletedAt: null,
           phoneNumber: { contains: input.search, mode: "insensitive" },
-        }),
+        },
         select: {
           id: true,
           name: true,
@@ -502,7 +210,6 @@ export const userRouter = createTRPCRouter({
       return { user };
     }),
 
-  // Get all users with filters
   getAll: permissionProcedure("users", "read")
     .meta({
       openapi: {
@@ -527,24 +234,9 @@ export const userRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const where: Prisma.UserWhereInput = {
         deletedAt: input?.includeDeleted ? undefined : null,
+        ...(input?.role ? { role: input.role } : {}),
+        ...(input?.departmentId ? { departmentId: input.departmentId } : {}),
       };
-
-      if (input?.role) {
-        const tenantScope = getTenantScope(ctx);
-        where.memberships = {
-          some: {
-            role: input.role,
-            status: MembershipStatus.ACTIVE,
-            ...(!tenantScope.isRoot && tenantScope.tenantId
-              ? { tenantId: tenantScope.tenantId }
-              : {}),
-          },
-        };
-      }
-
-      if (input?.departmentId) {
-        where.departmentId = input.departmentId;
-      }
 
       if (input?.search) {
         where.OR = [
@@ -558,7 +250,7 @@ export const userRouter = createTRPCRouter({
       const users = await ctx.db.user.findMany({
         take: input?.limit ? input.limit + 1 : 51,
         cursor: input?.cursor ? { id: input.cursor } : undefined,
-        where: withTenantMembershipFilter(ctx, where),
+        where,
         include: {
           department: {
             select: {
@@ -574,29 +266,6 @@ export const userRouter = createTRPCRouter({
               email: true,
             },
           },
-          userRoles: {
-            select: { role: true },
-          },
-          memberships: {
-            include: {
-              customRole: {
-                select: {
-                  id: true,
-                  displayName: true,
-                  baseRole: true,
-                },
-              },
-              tenant: {
-                select: {
-                  id: true,
-                  name: true,
-                  slug: true,
-                  isRoot: true,
-                },
-              },
-            },
-            orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-          },
           _count: {
             select: {
               directReports: true,
@@ -610,7 +279,7 @@ export const userRouter = createTRPCRouter({
         },
       });
 
-      let nextCursor: string | undefined = undefined;
+      let nextCursor: string | undefined;
       const limit = input?.limit ?? 50;
       if (users.length > limit) {
         const nextItem = users.pop();
@@ -623,7 +292,6 @@ export const userRouter = createTRPCRouter({
       };
     }),
 
-  // Get user by ID
   getById: protectedProcedure
     .meta({
       openapi: {
@@ -638,7 +306,7 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: input.id }),
+        where: { id: input.id },
         include: {
           department: true,
           supervisor: {
@@ -676,7 +344,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Only allow viewing own profile or if user is manager/admin
       const isOwn = user.id === ctx.session.user.id;
       const canView = userHasPermission(ctx.session.user, "users", "read");
 
@@ -690,7 +357,6 @@ export const userRouter = createTRPCRouter({
       return user;
     }),
 
-  // Get direct reports
   getDirectReports: protectedProcedure
     .meta({
       openapi: {
@@ -705,10 +371,10 @@ export const userRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx }) => {
       return ctx.db.user.findMany({
-        where: withTenantMembershipFilter(ctx, {
+        where: {
           supervisorId: ctx.session.user.id,
           deletedAt: null,
-        }),
+        },
         include: {
           department: true,
           _count: {
@@ -725,7 +391,6 @@ export const userRouter = createTRPCRouter({
       });
     }),
 
-  // Get organizational hierarchy
   getHierarchy: permissionProcedure("users", "read")
     .meta({
       openapi: {
@@ -746,7 +411,7 @@ export const userRouter = createTRPCRouter({
       const rootUserId = input?.userId ?? ctx.session.user.id;
 
       const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: rootUserId }),
+        where: { id: rootUserId },
         include: {
           department: true,
           directReports: {
@@ -774,7 +439,6 @@ export const userRouter = createTRPCRouter({
       return user;
     }),
 
-  // Create user
   create: permissionProcedure("users", "create")
     .meta({
       openapi: {
@@ -786,24 +450,14 @@ export const userRouter = createTRPCRouter({
       },
     })
     .input(
-      z.object({
-        name: z.string().min(1),
-        email: z.string().email(),
+      userMutationInput.extend({
         password: z.string().min(8),
-        employeeId: z.string().optional(),
-        role: z.nativeEnum(Role).optional(),
-        roles: z.array(z.nativeEnum(Role)).min(1).optional(),
-        tenantMemberships: z.array(tenantMembershipInput).min(1).optional(),
-        departmentId: z.string().optional(),
-        supervisorId: z.string().optional(),
-        phoneNumber: z.string().optional(),
       }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      // Check if email already exists
-      const existing = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { email: input.email }),
+      const existing = await ctx.db.user.findUnique({
+        where: { email: input.email },
       });
 
       if (existing) {
@@ -813,7 +467,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Check if employeeId already exists
       if (input.employeeId) {
         const existingEmployee = await ctx.db.user.findUnique({
           where: { employeeId: input.employeeId },
@@ -827,31 +480,21 @@ export const userRouter = createTRPCRouter({
         }
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(input.password, 10);
+      if (input.supervisorId) {
+        const isCircular = await checkCircularSupervisor(
+          ctx.db,
+          "",
+          input.supervisorId,
+        );
+        if (isCircular) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Circular supervisor reference detected",
+          });
+        }
+      }
 
-      // Resolve roles
-      const allRoles =
-        input.roles && input.roles.length > 0
-          ? input.roles
-          : [input.role ?? Role.EMPLOYEE];
-      const tenantScope = getTenantScope(ctx);
-      const tenantMemberships = normalizeTenantMemberships({
-        requested: input.tenantMemberships,
-        currentTenantId: tenantScope.tenantId,
-        isRoot: tenantScope.isRoot,
-        fallbackRole: derivePrimary(allRoles),
-      });
-      await assertTenantRecordsExist(
-        ctx.db,
-        tenantMemberships.map((membership) => membership.tenantId),
-      );
-      const resolvedMemberships = await resolveCustomRolesForMemberships(
-        ctx.db,
-        tenantMemberships,
-      );
-      const primaryRole = derivePrimaryFromMemberships(resolvedMemberships);
-      const userRoleRows = buildUserRoleRows(resolvedMemberships);
+      const hashedPassword = await bcrypt.hash(input.password, 10);
 
       return ctx.db.user.create({
         data: {
@@ -859,23 +502,10 @@ export const userRouter = createTRPCRouter({
           email: input.email,
           password: hashedPassword,
           employeeId: input.employeeId,
-          role: primaryRole,
-          departmentId: input.departmentId,
-          supervisorId: input.supervisorId,
-          phoneNumber: input.phoneNumber,
-          userRoles: {
-            create: userRoleRows,
-          },
-          memberships: {
-            create: resolvedMemberships.map((membership) => ({
-              tenantId: membership.tenantId,
-              role: membership.role,
-              customRoleId: membership.customRoleId,
-              status: membership.status,
-              isDefault: membership.isDefault,
-              ...membershipTimestamps(membership.status),
-            })),
-          },
+          role: input.role ?? Role.EMPLOYEE,
+          departmentId: input.departmentId ?? null,
+          supervisorId: input.supervisorId ?? null,
+          phoneNumber: input.phoneNumber ?? null,
         },
         include: {
           department: true,
@@ -890,7 +520,6 @@ export const userRouter = createTRPCRouter({
       });
     }),
 
-  // Update user
   update: permissionProcedure("users", "update")
     .meta({
       openapi: {
@@ -902,42 +531,16 @@ export const userRouter = createTRPCRouter({
       },
     })
     .input(
-      z.object({
+      userMutationInput.extend({
         id: z.string(),
-        name: z.string().min(1).optional(),
-        email: z.string().email().optional(),
-        employeeId: z.string().optional(),
-        role: z.nativeEnum(Role).optional(),
-        roles: z.array(z.nativeEnum(Role)).min(1).optional(),
-        tenantMemberships: z.array(tenantMembershipInput).min(1).optional(),
-        departmentId: z.string().optional().nullable(),
-        supervisorId: z.string().optional().nullable(),
-        phoneNumber: z.string().optional().nullable(),
       }),
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const {
-        id,
-        roles: inputRoles,
-        tenantMemberships: inputTenantMemberships,
-        ...updateData
-      } = input;
+      const { id, ...updateData } = input;
 
-      // Check if user exists
-      const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id }),
-        include: {
-          memberships: {
-            select: {
-              tenantId: true,
-              role: true,
-              customRoleId: true,
-              status: true,
-              isDefault: true,
-            },
-          },
-        },
+      const user = await ctx.db.user.findUnique({
+        where: { id },
       });
 
       if (!user) {
@@ -947,7 +550,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Check email uniqueness
       if (input.email && input.email !== user.email) {
         const existing = await ctx.db.user.findUnique({
           where: { email: input.email },
@@ -960,7 +562,6 @@ export const userRouter = createTRPCRouter({
         }
       }
 
-      // Check employeeId uniqueness
       if (input.employeeId && input.employeeId !== user.employeeId) {
         const existing = await ctx.db.user.findUnique({
           where: { employeeId: input.employeeId },
@@ -973,7 +574,6 @@ export const userRouter = createTRPCRouter({
         }
       }
 
-      // Prevent circular supervisor references
       if (input.supervisorId) {
         if (input.supervisorId === id) {
           throw new TRPCError({
@@ -995,78 +595,28 @@ export const userRouter = createTRPCRouter({
         }
       }
 
-      const tenantScope = getTenantScope(ctx);
-      const fallbackRole =
-        inputRoles && inputRoles.length > 0
-          ? derivePrimary(inputRoles)
-          : user.role;
-
-      const nextMemberships = normalizeTenantMemberships({
-        requested: inputTenantMemberships,
-        currentTenantId: tenantScope.tenantId,
-        isRoot: tenantScope.isRoot,
-        fallbackRole,
-      });
-      await assertTenantRecordsExist(
-        ctx.db,
-        nextMemberships.map((membership) => membership.tenantId),
-      );
-      const resolvedMemberships = await resolveCustomRolesForMemberships(
-        ctx.db,
-        nextMemberships,
-      );
-      updateData.role = derivePrimaryFromMemberships(resolvedMemberships);
-
-      return ctx.db.$transaction(async (tx) => {
-        await tx.tenantMembership.deleteMany({
-          where: { userId: id },
-        });
-
-        await tx.tenantMembership.createMany({
-          data: resolvedMemberships.map((membership) => ({
-            userId: id,
-            tenantId: membership.tenantId,
-            role: membership.role,
-            customRoleId: membership.customRoleId,
-            status: membership.status,
-            isDefault: membership.isDefault,
-            ...membershipTimestamps(membership.status),
-          })),
-        });
-
-        await tx.userRole.deleteMany({
-          where: { userId: id },
-        });
-
-        const userRoleRows = buildUserRoleRows(resolvedMemberships);
-        if (userRoleRows.length > 0) {
-          await tx.userRole.createMany({
-            data: userRoleRows.map((row) => ({
-              userId: id,
-              role: row.role,
-              tenantId: row.tenantId,
-            })),
-          });
-        }
-
-        return tx.user.update({
-          where: { id },
-          data: updateData,
-          include: {
-            department: true,
-            supervisor: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
+      return ctx.db.user.update({
+        where: { id },
+        data: {
+          ...updateData,
+          role: updateData.role ?? user.role,
+          departmentId: updateData.departmentId ?? null,
+          supervisorId: updateData.supervisorId ?? null,
+          phoneNumber: updateData.phoneNumber ?? null,
+        },
+        include: {
+          department: true,
+          supervisor: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
             },
           },
-        });
+        },
       });
     }),
 
-  // Update own profile
   updateMe: permissionProcedure("profile", "update")
     .meta({
       openapi: {
@@ -1128,7 +678,6 @@ export const userRouter = createTRPCRouter({
       });
     }),
 
-  // Change password
   changePassword: permissionProcedure("profile", "update")
     .meta({
       openapi: {
@@ -1162,7 +711,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Verify current password
       const isValid = await bcrypt.compare(
         input.currentPassword,
         user.password,
@@ -1174,7 +722,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Hash new password
       const hashedPassword = await bcrypt.hash(input.newPassword, 10);
 
       await ctx.db.user.update({
@@ -1185,17 +732,17 @@ export const userRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Admin reset password
   resetPassword: permissionProcedure("users", "update")
     .input(z.object({ id: z.string(), newPassword: z.string().min(8) }))
     .output(z.object({ success: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: input.id }),
+      const user = await ctx.db.user.findUnique({
+        where: { id: input.id },
       });
       if (!user) {
         throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       }
+
       const hashedPassword = await bcrypt.hash(input.newPassword, 10);
       await ctx.db.user.update({
         where: { id: input.id },
@@ -1204,7 +751,6 @@ export const userRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Soft delete user
   delete: permissionProcedure("users", "delete")
     .meta({
       openapi: {
@@ -1218,8 +764,8 @@ export const userRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: input.id }),
+      const user = await ctx.db.user.findUnique({
+        where: { id: input.id },
         include: {
           directReports: {
             where: { deletedAt: null },
@@ -1234,7 +780,6 @@ export const userRouter = createTRPCRouter({
         });
       }
 
-      // Check if user has active direct reports
       if (user.directReports.length > 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1250,13 +795,12 @@ export const userRouter = createTRPCRouter({
       });
     }),
 
-  // Restore deleted user
   restore: permissionProcedure("users", "update")
     .input(z.object({ id: z.string() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findFirst({
-        where: withTenantMembershipFilter(ctx, { id: input.id }),
+      const user = await ctx.db.user.findUnique({
+        where: { id: input.id },
       });
 
       if (!user) {
@@ -1281,7 +825,6 @@ export const userRouter = createTRPCRouter({
       });
     }),
 
-  // Bulk import users from Excel/CSV (only userType = member)
   bulkImport: permissionProcedure("users", "import")
     .input(
       z.object({
@@ -1305,10 +848,8 @@ export const userRouter = createTRPCRouter({
 
       for (const row of input.users) {
         const email = row.userPrincipalName.toLowerCase().trim();
-
-        // Check if email already exists
-        const existing = await ctx.db.user.findFirst({
-          where: withTenantMembershipFilter(ctx, { email }),
+        const existing = await ctx.db.user.findUnique({
+          where: { email },
         });
 
         if (existing) {
@@ -1321,53 +862,25 @@ export const userRouter = createTRPCRouter({
         }
 
         const hashedPassword = await bcrypt.hash(input.defaultPassword, 10);
-
-        const tenantId = getTenantScope(ctx).tenantId;
-        if (tenantId) {
-          await ensureTenantRoleCatalog(ctx.db, tenantId);
-        }
-        const employeeRoleId = tenantId
-          ? await getTenantSystemRoleId(ctx.db, tenantId, Role.EMPLOYEE)
-          : null;
         await ctx.db.user.create({
           data: {
             name: row.displayName.trim(),
             email,
             password: hashedPassword,
             role: Role.EMPLOYEE,
-            memberships: tenantId
-              ? {
-                  create: [
-                    {
-                      tenantId,
-                      role: Role.EMPLOYEE,
-                      customRoleId: employeeRoleId,
-                      status: MembershipStatus.ACTIVE,
-                      isDefault: true,
-                      activatedAt: new Date(),
-                    },
-                  ],
-                }
-              : undefined,
-            userRoles: tenantId
-              ? {
-                  create: [{ role: Role.EMPLOYEE, tenantId }],
-                }
-              : undefined,
           },
         });
 
         results.push({ email, status: "created" });
       }
 
-      const created = results.filter((r) => r.status === "created").length;
-      const skipped = results.filter((r) => r.status === "skipped").length;
+      const created = results.filter((result) => result.status === "created").length;
+      const skipped = results.filter((result) => result.status === "skipped").length;
 
       return { results, created, skipped, total: input.users.length };
     }),
 });
 
-// Helper function to check circular supervisor references
 async function checkCircularSupervisor(
   db: PrismaClient,
   userId: string,

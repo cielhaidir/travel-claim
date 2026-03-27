@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { ArrowRightLeft, Eye, Pencil, Trash2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmModal, Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/features/PageHeader";
+import { CrmLeadConvertModal } from "@/components/features/crm/lead-convert-modal";
 import {
   crmInputClassName,
+  CrmActionIconButton,
+  CrmActionIconLink,
   CrmEmptyHint,
   CrmMetricCard,
   crmTextareaClassName,
@@ -19,9 +22,12 @@ import {
   CRM_EMPLOYEE_RANGE_OPTIONS,
   CRM_GENDER_OPTIONS,
   CRM_INDUSTRY_OPTIONS,
+  CRM_LEAD_MANUAL_STATUS_OPTIONS,
   CRM_LEAD_STATUS_OPTIONS,
+  canConvertLeadStatus,
   getCrmBadgeVariant,
   getCrmLabel,
+  getLeadConversionBlockedReason,
 } from "@/lib/constants/crm";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { api } from "@/trpc/react";
@@ -42,6 +48,13 @@ type LeadFormState = {
   ownerId: string;
   expectedCloseDate: string;
   notes: string;
+};
+
+type LeadConversionTarget = {
+  id: string;
+  company: string;
+  name: string;
+  customerId: string | null;
 };
 
 const initialFormState: LeadFormState = {
@@ -77,6 +90,7 @@ export default function CrmLeadsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [convertingLead, setConvertingLead] = useState<LeadConversionTarget | null>(null);
   const [form, setForm] = useState<LeadFormState>(initialFormState);
 
   const utils = api.useUtils();
@@ -119,6 +133,8 @@ export default function CrmLeadsPage() {
   });
 
   const leads = data ?? [];
+  const editableStatusOptions =
+    form.status === "CONVERTED" ? [form.status] : [...CRM_LEAD_MANUAL_STATUS_OPTIONS];
 
   function fillOrganization(customerId: string) {
     const organization = options?.organizations.find((item) => item.id === customerId);
@@ -183,10 +199,10 @@ export default function CrmLeadsPage() {
     try {
       if (editingId) {
         await updateMutation.mutateAsync({ id: editingId, ...payload });
-        showToast({ title: "Lead updated", message: "Lead data has been saved.", variant: "success" });
+        showToast({ title: "Prospek diperbarui", message: "Data prospek berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Lead created", message: "Lead has been added to CRM.", variant: "success" });
+        showToast({ title: "Prospek ditambahkan", message: "Prospek berhasil ditambahkan ke CRM.", variant: "success" });
       }
 
       setIsModalOpen(false);
@@ -194,8 +210,8 @@ export default function CrmLeadsPage() {
       setEditingId(null);
     } catch (error) {
       showToast({
-        title: "Failed to save lead",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan prospek",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -206,25 +222,36 @@ export default function CrmLeadsPage() {
 
     try {
       await deleteMutation.mutateAsync({ id: deleteId });
-      showToast({ title: "Lead deleted", message: "Lead has been removed from CRM.", variant: "success" });
+      showToast({ title: "Prospek dihapus", message: "Prospek berhasil dihapus dari CRM.", variant: "success" });
       setDeleteId(null);
     } catch (error) {
       showToast({
-        title: "Failed to delete lead",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menghapus prospek",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
   }
 
-  async function handleConvert(leadId: string) {
+  function openConvertModal(lead: LeadConversionTarget) {
+    setConvertingLead(lead);
+  }
+
+  async function handleConvert(input: {
+    id: string;
+    existingOrganization: boolean;
+    customerId: string | null;
+    existingContact: boolean;
+    contactId: string | null;
+  }) {
     try {
-      await convertMutation.mutateAsync({ id: leadId });
-      showToast({ title: "Deal created from lead", message: "The lead has been converted into a deal.", variant: "success" });
+      await convertMutation.mutateAsync(input);
+      showToast({ title: "Peluang dibuat dari prospek", message: "Prospek berhasil dikonversi menjadi peluang.", variant: "success" });
+      setConvertingLead(null);
     } catch (error) {
       showToast({
-        title: "Failed to convert lead",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal mengonversi prospek",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -235,16 +262,16 @@ export default function CrmLeadsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Leads"
-        description="Lead management with detail tabs for activity, data, tasks, notes, and attachments."
-        primaryAction={{ label: "Add Lead", onClick: openCreateModal }}
+        title="Prospek CRM"
+        description="Pengelolaan prospek dengan tab detail untuk aktivitas, data, tugas, catatan, dan lampiran."
+        primaryAction={{ label: "Tambah Prospek", onClick: openCreateModal }}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <CrmMetricCard label="Leads" value={String(leads.length)} />
-        <CrmMetricCard label="Qualified" value={String(leads.filter((lead) => lead.status === "QUALIFIED").length)} />
+        <CrmMetricCard label="Prospek" value={String(leads.length)} />
+        <CrmMetricCard label="Terkualifikasi" value={String(leads.filter((lead) => lead.status === "QUALIFIED").length)} />
         <CrmMetricCard
-          label="Annual Revenue"
+          label="Pendapatan Tahunan"
           value={formatCurrency(leads.reduce((sum, lead) => sum + Number(lead.annualRevenue ?? 0), 0))}
         />
       </div>
@@ -253,7 +280,7 @@ export default function CrmLeadsPage() {
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search name, email, mobile, organization, or owner"
+          placeholder="Cari nama, email, seluler, organisasi, atau pemilik prospek"
           className={crmInputClassName}
         />
         <select
@@ -261,7 +288,7 @@ export default function CrmLeadsPage() {
           onChange={(event) => setStatusFilter(event.target.value)}
           className={crmInputClassName}
         >
-          <option value="">All statuses</option>
+          <option value="">Semua status</option>
           {CRM_LEAD_STATUS_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {getCrmLabel(option)}
@@ -272,82 +299,91 @@ export default function CrmLeadsPage() {
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Leads</h2>
-          <p className="text-sm text-gray-500">{leads.length} records</p>
+          <h2 className="text-lg font-semibold text-gray-900">Prospek</h2>
+          <p className="text-sm text-gray-500">{leads.length} data</p>
         </div>
 
         {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Loading leads...</div>
+          <div className="p-5 text-sm text-gray-500">Memuat prospek...</div>
         ) : leads.length === 0 ? (
           <div className="p-5">
-            <CrmEmptyHint text="No leads available." />
+            <CrmEmptyHint text="Belum ada prospek." />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">First Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Last Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Nama Depan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Nama Belakang</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Mobile</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Gender</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organization</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Seluler</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Jenis Kelamin</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organisasi</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Lead Owner</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Last Modified</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pemilik Prospek</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Terakhir Diubah</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
-                {leads.map((lead) => (
-                  <tr key={lead.id}>
-                    <td className="px-4 py-3 text-gray-700">{lead.firstName ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-700">{lead.lastName ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-700">{lead.email}</td>
-                    <td className="px-4 py-3 text-gray-700">{lead.mobileNo ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-700">{getCrmLabel(lead.gender)}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-900">{lead.company}</p>
-                      <p className="text-xs text-gray-500">{lead.customer?.company ?? "Manual organization"}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={getCrmBadgeVariant(lead.status)}>{getCrmLabel(lead.status)}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{lead.ownerName}</td>
-                    <td className="px-4 py-3 text-gray-700">{formatDate(lead.updatedAt)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Link href={`/crm/leads/${lead.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                          Detail
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(lead)}
-                          className="text-sm font-medium text-gray-700 hover:text-gray-900"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteId(lead.id)}
-                          className="text-sm font-medium text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
-                        {lead.status !== "CONVERTED" ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleConvert(lead.id)}
-                            className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
-                          >
-                            Create Deal
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {leads.map((lead) => {
+                  const canConvert = canConvertLeadStatus(lead.status);
+                  const conversionHint =
+                    getLeadConversionBlockedReason(lead.status) ??
+                    "Prospek hanya dapat dikonversi saat statusnya Terkualifikasi.";
+
+                  return (
+                    <tr key={lead.id}>
+                      <td className="px-4 py-3 text-gray-700">{lead.firstName ?? "-"}</td>
+                      <td className="px-4 py-3 text-gray-700">{lead.lastName ?? "-"}</td>
+                      <td className="px-4 py-3 text-gray-700">{lead.email}</td>
+                      <td className="px-4 py-3 text-gray-700">{lead.mobileNo ?? "-"}</td>
+                      <td className="px-4 py-3 text-gray-700">{getCrmLabel(lead.gender)}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-gray-900">{lead.company}</p>
+                        <p className="text-xs text-gray-500">{lead.customer?.company ?? "Organisasi manual"}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={getCrmBadgeVariant(lead.status)}>{getCrmLabel(lead.status)}</Badge>
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{lead.ownerName}</td>
+                      <td className="px-4 py-3 text-gray-700">{formatDate(lead.updatedAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <CrmActionIconLink href={`/crm/leads/${lead.id}`} label="Lihat detail prospek" tone="primary">
+                            <Eye className="h-4 w-4" />
+                          </CrmActionIconLink>
+                          <CrmActionIconButton label="Ubah prospek" onClick={() => openEditModal(lead)}>
+                            <Pencil className="h-4 w-4" />
+                          </CrmActionIconButton>
+                          <CrmActionIconButton label="Hapus prospek" tone="danger" onClick={() => setDeleteId(lead.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </CrmActionIconButton>
+                          {lead.status !== "CONVERTED" ? (
+                            <CrmActionIconButton
+                              label={canConvert ? "Buat peluang dari prospek" : conversionHint}
+                              tone="success"
+                              disabled={!canConvert}
+                              onClick={() => {
+                                if (!canConvert) return;
+
+                                openConvertModal({
+                                  id: lead.id,
+                                  company: lead.company,
+                                  name: lead.name,
+                                  customerId: lead.customerId ?? null,
+                                });
+                              }}
+                            >
+                              <ArrowRightLeft className="h-4 w-4" />
+                            </CrmActionIconButton>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -357,18 +393,18 @@ export default function CrmLeadsPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Lead" : "Create Lead"}
+        title={editingId ? "Ubah Prospek" : "Tambah Prospek"}
         size="xl"
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Linked Organization</span>
+            <span className="text-sm font-medium text-gray-700">Organisasi Tertaut</span>
             <select
               value={form.customerId}
               onChange={(event) => fillOrganization(event.target.value)}
               className={crmInputClassName}
             >
-              <option value="">Manual organization</option>
+              <option value="">Organisasi manual</option>
               {options?.organizations.map((organization) => (
                 <option key={organization.id} value={organization.id}>
                   {organization.company}
@@ -377,7 +413,7 @@ export default function CrmLeadsPage() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">First Name</span>
+            <span className="text-sm font-medium text-gray-700">Nama Depan</span>
             <input
               value={form.firstName}
               onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
@@ -385,7 +421,7 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Last Name</span>
+            <span className="text-sm font-medium text-gray-700">Nama Belakang</span>
             <input
               value={form.lastName}
               onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
@@ -401,7 +437,7 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Mobile No.</span>
+            <span className="text-sm font-medium text-gray-700">No. Seluler</span>
             <input
               value={form.mobileNo}
               onChange={(event) => setForm((current) => ({ ...current, mobileNo: event.target.value }))}
@@ -409,13 +445,13 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Gender</span>
+            <span className="text-sm font-medium text-gray-700">Jenis Kelamin</span>
             <select
               value={form.gender}
               onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select gender</option>
+              <option value="">Pilih jenis kelamin</option>
               {CRM_GENDER_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -424,7 +460,7 @@ export default function CrmLeadsPage() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Organization</span>
+            <span className="text-sm font-medium text-gray-700">Organisasi</span>
             <input
               value={form.organizationName}
               onChange={(event) => setForm((current) => ({ ...current, organizationName: event.target.value }))}
@@ -432,7 +468,7 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Website</span>
+            <span className="text-sm font-medium text-gray-700">Situs Web</span>
             <input
               value={form.website}
               onChange={(event) => setForm((current) => ({ ...current, website: event.target.value }))}
@@ -440,13 +476,13 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">No. of Employees</span>
+            <span className="text-sm font-medium text-gray-700">Jumlah Karyawan</span>
             <select
               value={form.employeeCount}
               onChange={(event) => setForm((current) => ({ ...current, employeeCount: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select employee range</option>
+              <option value="">Pilih rentang karyawan</option>
               {CRM_EMPLOYEE_RANGE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -455,7 +491,7 @@ export default function CrmLeadsPage() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Annual Revenue</span>
+            <span className="text-sm font-medium text-gray-700">Pendapatan Tahunan</span>
             <input
               type="number"
               value={form.annualRevenue}
@@ -464,13 +500,13 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Industry</span>
+            <span className="text-sm font-medium text-gray-700">Industri</span>
             <select
               value={form.industry}
               onChange={(event) => setForm((current) => ({ ...current, industry: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select industry</option>
+              <option value="">Pilih industri</option>
               {CRM_INDUSTRY_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -484,22 +520,26 @@ export default function CrmLeadsPage() {
               value={form.status}
               onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
               className={crmInputClassName}
+              disabled={form.status === "CONVERTED"}
             >
-              {CRM_LEAD_STATUS_OPTIONS.map((option) => (
+              {editableStatusOptions.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
                 </option>
               ))}
             </select>
+            {form.status === "CONVERTED" ? (
+              <p className="text-xs text-gray-500">Status Dikonversi dikelola otomatis saat prospek dibuat menjadi peluang.</p>
+            ) : null}
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Lead Owner</span>
+            <span className="text-sm font-medium text-gray-700">Pemilik Prospek</span>
             <select
               value={form.ownerId}
               onChange={(event) => setForm((current) => ({ ...current, ownerId: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select owner</option>
+              <option value="">Pilih pemilik</option>
               {options?.users.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.name ?? user.email ?? user.id}
@@ -508,7 +548,7 @@ export default function CrmLeadsPage() {
             </select>
           </label>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Expected Close Date</span>
+            <span className="text-sm font-medium text-gray-700">Perkiraan Tanggal Penutupan</span>
             <input
               type="date"
               value={form.expectedCloseDate}
@@ -517,7 +557,7 @@ export default function CrmLeadsPage() {
             />
           </label>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Notes</span>
+            <span className="text-sm font-medium text-gray-700">Catatan</span>
             <textarea
               value={form.notes}
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
@@ -528,10 +568,10 @@ export default function CrmLeadsPage() {
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingId ? "Save Changes" : "Create Lead"}
+            {editingId ? "Simpan Perubahan" : "Tambah Prospek"}
           </Button>
         </div>
       </Modal>
@@ -540,10 +580,29 @@ export default function CrmLeadsPage() {
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void handleDelete()}
-        title="Delete Lead"
-        message="This lead will be removed from the active CRM list."
-        confirmLabel="Delete"
+        title="Hapus Prospek"
+        message="Prospek ini akan dihapus dari daftar CRM aktif."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
+      />
+
+      <CrmLeadConvertModal
+        isOpen={!!convertingLead}
+        onClose={() => setConvertingLead(null)}
+        lead={
+          convertingLead
+            ? {
+                id: convertingLead.id,
+                company: convertingLead.company,
+                name: convertingLead.name,
+                customerId: convertingLead.customerId,
+              }
+            : null
+        }
+        organizations={options?.organizations ?? []}
+        contacts={options?.contacts ?? []}
+        isSubmitting={convertMutation.isPending}
+        onSubmit={handleConvert}
       />
     </div>
   );

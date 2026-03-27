@@ -10,15 +10,10 @@ import { env } from "@/env";
 import {
   derivePrimaryRole,
   normalizeRoles,
-  ROLE_LABELS,
   type Role,
 } from "@/lib/constants/roles";
 import { type PermissionMap } from "@/lib/auth/permissions";
-import {
-  ensureTenantRoleCatalog,
-  getTenantSystemRoleId,
-  resolveEffectivePermissions,
-} from "@/server/auth/permission-store";
+import { resolveEffectivePermissions } from "@/server/auth/permission-store";
 
 type AuthToken = {
   id?: string;
@@ -27,35 +22,46 @@ type AuthToken = {
   permissions?: PermissionMap;
   employeeId?: string | null;
   departmentId?: string | null;
-  activeTenantId?: string | null;
-  activeCustomRoleId?: string | null;
-  activeRoleLabel?: string | null;
   isRoot?: boolean;
-  memberships?: AuthTenantMembership[];
   email?: string;
   name?: string | null;
   picture?: string | null;
 };
 
-type AuthTenantMembership = {
-  tenantId: string;
-  tenantName: string;
-  tenantSlug: string;
+async function hydrateAuthState(input: {
+  id: string;
   role: Role;
-  customRoleId: string | null;
-  customRoleName: string | null;
-  roleLabel: string;
-  status: "ACTIVE" | "INVITED" | "SUSPENDED";
-  isDefault: boolean;
-  isRootTenant: boolean;
-};
+  employeeId: string | null;
+  departmentId: string | null;
+  email?: string | null;
+  name?: string | null;
+  image?: string | null;
+}) {
+  const roles = normalizeRoles({
+    roles: [input.role],
+    role: input.role,
+    includeDefault: false,
+  });
+  const isRoot = input.role === "ROOT";
+  const permissions = await resolveEffectivePermissions(db, {
+    roles,
+    isRoot,
+  });
 
-/**
- * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
- * object and keep type safety.
- *
- * @see https://next-auth.js.org/getting-started/typescript#module-augmentation
- */
+  return {
+    id: input.id,
+    role: input.role,
+    roles,
+    permissions,
+    employeeId: input.employeeId,
+    departmentId: input.departmentId,
+    isRoot,
+    email: input.email ?? undefined,
+    name: input.name ?? null,
+    image: input.image ?? null,
+  };
+}
+
 declare module "next-auth" {
   interface Session extends DefaultSession {
     user: {
@@ -66,11 +72,7 @@ declare module "next-auth" {
       email: string;
       employeeId: string | null;
       departmentId: string | null;
-      activeTenantId: string | null;
-      activeCustomRoleId: string | null;
-      activeRoleLabel: string | null;
       isRoot: boolean;
-      memberships: AuthTenantMembership[];
     } & DefaultSession["user"];
   }
 
@@ -80,335 +82,14 @@ declare module "next-auth" {
     permissions: PermissionMap;
     employeeId: string | null;
     departmentId: string | null;
-    activeTenantId: string | null;
-    activeCustomRoleId: string | null;
-    activeRoleLabel: string | null;
     isRoot: boolean;
-    memberships: AuthTenantMembership[];
   }
 }
 
-function hasRootMembership(memberships: AuthTenantMembership[]): boolean {
-  return memberships.some(
-    (membership) => membership.role === "ROOT" || membership.isRootTenant,
-  );
-}
-
-function resolveActiveMembership(input: {
-  memberships: AuthTenantMembership[];
-  activeTenantId: string | null;
-  isRoot: boolean;
-}): AuthTenantMembership | null {
-  const activeMemberships = input.memberships.filter(
-    (membership) => membership.status === "ACTIVE",
-  );
-
-  return (
-    activeMemberships.find(
-      (membership) => membership.tenantId === input.activeTenantId,
-    ) ??
-    activeMemberships.find((membership) => membership.isDefault) ??
-    (input.isRoot
-      ? activeMemberships.find((membership) => membership.isRootTenant)
-      : activeMemberships[0]) ??
-    null
-  );
-}
-
-function resolveScopedRoles(input: {
-  memberships: AuthTenantMembership[];
-  activeTenantId: string | null;
-  fallbackRole: Role;
-  isRoot: boolean;
-}): Role[] {
-  const currentMembership = resolveActiveMembership(input);
-
-  if (currentMembership) {
-    return normalizeRoles({
-      roles: [currentMembership.role],
-      role: currentMembership.role,
-      includeDefault: false,
-    });
-  }
-
-  return normalizeRoles({
-    roles: [],
-    role: input.fallbackRole,
-  });
-}
-
-async function resolveScopedPermissions(input: {
-  activeTenantId: string | null;
-  roles: Role[];
-  isRoot: boolean;
-  activeCustomRoleId?: string | null;
-}): Promise<PermissionMap> {
-  return resolveEffectivePermissions(db, {
-    tenantId: input.activeTenantId,
-    roles: input.roles,
-    isRoot: input.isRoot,
-    customRoleId: input.activeCustomRoleId,
-  });
-}
-
-async function getUserMemberships(
-  userId: string,
-): Promise<AuthTenantMembership[]> {
-  try {
-    const memberships = await db.$queryRaw<
-      Array<{
-        tenantId: string;
-        tenantName: string;
-        tenantSlug: string;
-        role: string;
-        customRoleId: string | null;
-        customRoleName: string | null;
-        status: string;
-        isDefault: boolean;
-        isRootTenant: boolean;
-      }>
-    >`
-      SELECT
-        tm."tenantId" as "tenantId",
-        t."name" as "tenantName",
-        t."slug" as "tenantSlug",
-        tm."role"::text as "role",
-        tm."customRoleId" as "customRoleId",
-        cr."displayName" as "customRoleName",
-        tm."status"::text as "status",
-        tm."isDefault" as "isDefault",
-        t."isRoot" as "isRootTenant"
-      FROM "TenantMembership" tm
-      INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
-      LEFT JOIN "TenantCustomRole" cr ON cr."id" = tm."customRoleId"
-      WHERE tm."userId" = ${userId}
-      ORDER BY tm."isDefault" DESC, tm."createdAt" ASC
-    `;
-
-    return memberships.map((membership) => ({
-      tenantId: membership.tenantId,
-      tenantName: membership.tenantName,
-      tenantSlug: membership.tenantSlug,
-      role: membership.role as Role,
-      customRoleId: membership.customRoleId,
-      customRoleName: membership.customRoleName,
-      roleLabel:
-        membership.customRoleName ??
-        ROLE_LABELS[membership.role as Role] ??
-        membership.role,
-      status: membership.status as AuthTenantMembership["status"],
-      isDefault: membership.isDefault,
-      isRootTenant: membership.isRootTenant,
-    }));
-  } catch {
-    try {
-      const memberships = await db.$queryRaw<
-        Array<{
-          tenantId: string;
-          tenantName: string;
-          tenantSlug: string;
-          role: string;
-          status: string;
-          isDefault: boolean;
-          isRootTenant: boolean;
-        }>
-      >`
-        SELECT
-          tm."tenantId" as "tenantId",
-          t."name" as "tenantName",
-          t."slug" as "tenantSlug",
-          tm."role"::text as "role",
-          tm."status"::text as "status",
-          tm."isDefault" as "isDefault",
-          t."isRoot" as "isRootTenant"
-        FROM "TenantMembership" tm
-        INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
-        WHERE tm."userId" = ${userId}
-        ORDER BY tm."isDefault" DESC, tm."createdAt" ASC
-      `;
-
-      return memberships.map((membership) => ({
-        tenantId: membership.tenantId,
-        tenantName: membership.tenantName,
-        tenantSlug: membership.tenantSlug,
-        role: membership.role as Role,
-        customRoleId: null,
-        customRoleName: null,
-        roleLabel: ROLE_LABELS[membership.role as Role] ?? membership.role,
-        status: membership.status as AuthTenantMembership["status"],
-        isDefault: membership.isDefault,
-        isRootTenant: membership.isRootTenant,
-      }));
-    } catch {
-      return [];
-    }
-  }
-}
-
-function resolveActiveTenantId(input: {
-  memberships: AuthTenantMembership[];
-  currentTenantId?: string | null;
-  isRoot: boolean;
-}): string | null {
-  const { memberships, currentTenantId, isRoot } = input;
-  const activeMemberships = memberships.filter((m) => m.status === "ACTIVE");
-
-  if (
-    currentTenantId &&
-    activeMemberships.some(
-      (membership) => membership.tenantId === currentTenantId,
-    )
-  ) {
-    return currentTenantId;
-  }
-
-  const defaultMembership = activeMemberships.find(
-    (membership) => membership.isDefault,
-  );
-  if (defaultMembership) {
-    return defaultMembership.tenantId;
-  }
-
-  if (activeMemberships[0]) {
-    return activeMemberships[0].tenantId;
-  }
-
-  if (isRoot) {
-    const rootMembership = memberships.find(
-      (membership) => membership.isRootTenant,
-    );
-    return rootMembership?.tenantId ?? null;
-  }
-
-  return null;
-}
-
-async function ensureTenantBootstrapRows(): Promise<{
-  defaultTenantId: string | null;
-  rootTenantId: string | null;
-}> {
-  try {
-    await db.$executeRaw`
-      INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
-      VALUES (md5(random()::text || clock_timestamp()::text), 'root', 'Root Tenant', true, NOW(), NOW())
-      ON CONFLICT ("slug") DO UPDATE
-      SET "name" = EXCLUDED."name", "isRoot" = true, "updatedAt" = NOW()
-    `;
-
-    await db.$executeRaw`
-      INSERT INTO "Tenant" ("id", "slug", "name", "isRoot", "createdAt", "updatedAt")
-      VALUES (md5(random()::text || clock_timestamp()::text), 'default', 'Default Tenant', false, NOW(), NOW())
-      ON CONFLICT ("slug") DO UPDATE
-      SET "name" = EXCLUDED."name", "updatedAt" = NOW()
-    `;
-
-    const rows = await db.$queryRaw<
-      Array<{ slug: string; id: string }>
-    >`SELECT "slug", "id" FROM "Tenant" WHERE "slug" IN ('default', 'root')`;
-
-    return {
-      defaultTenantId: rows.find((row) => row.slug === "default")?.id ?? null,
-      rootTenantId: rows.find((row) => row.slug === "root")?.id ?? null,
-    };
-  } catch {
-    return { defaultTenantId: null, rootTenantId: null };
-  }
-}
-
-async function ensureMembershipsForUser(input: {
-  userId: string;
-  role: Role;
-}): Promise<void> {
-  const { defaultTenantId, rootTenantId } = await ensureTenantBootstrapRows();
-
-  if (!defaultTenantId) {
-    return;
-  }
-
-  try {
-    await ensureTenantRoleCatalog(db, defaultTenantId);
-    const defaultRole = input.role === "ROOT" ? "ADMIN" : input.role;
-    const defaultRoleId = await getTenantSystemRoleId(
-      db,
-      defaultTenantId,
-      defaultRole,
-    );
-
-    await db.tenantMembership.upsert({
-      where: {
-        userId_tenantId: {
-          userId: input.userId,
-          tenantId: defaultTenantId,
-        },
-      },
-      update: {
-        role: defaultRole,
-        customRoleId: defaultRoleId,
-        status: "ACTIVE",
-        isDefault: true,
-        activatedAt: new Date(),
-        invitedAt: null,
-        suspendedAt: null,
-        suspendedReason: null,
-      },
-      create: {
-        userId: input.userId,
-        tenantId: defaultTenantId,
-        role: defaultRole,
-        customRoleId: defaultRoleId,
-        status: "ACTIVE",
-        isDefault: true,
-        activatedAt: new Date(),
-      },
-    });
-
-    if (input.role === "ROOT" && rootTenantId) {
-      await ensureTenantRoleCatalog(db, rootTenantId);
-      const rootRoleId = await getTenantSystemRoleId(db, rootTenantId, "ROOT");
-
-      await db.tenantMembership.upsert({
-        where: {
-          userId_tenantId: {
-            userId: input.userId,
-            tenantId: rootTenantId,
-          },
-        },
-        update: {
-          role: "ROOT",
-          customRoleId: rootRoleId,
-          status: "ACTIVE",
-          isDefault: false,
-          activatedAt: new Date(),
-          invitedAt: null,
-          suspendedAt: null,
-          suspendedReason: null,
-        },
-        create: {
-          userId: input.userId,
-          tenantId: rootTenantId,
-          role: "ROOT",
-          customRoleId: rootRoleId,
-          status: "ACTIVE",
-          isDefault: false,
-          activatedAt: new Date(),
-        },
-      });
-    }
-  } catch {
-    // ignore if migration not applied yet
-  }
-}
-
-/**
- * Options for NextAuth.js used to configure adapters, providers, callbacks, etc.
- *
- * @see https://next-auth.js.org/configuration/options
- */
 export const authConfig = {
   secret: process.env.AUTH_SECRET,
   trustHost: true,
   providers: [
-    // Credentials provider (always available)
     CredentialsProvider({
       name: "credentials",
       credentials: {
@@ -418,14 +99,10 @@ export const authConfig = {
       async authorize(credentials) {
         try {
           if (!credentials?.email || typeof credentials.email !== "string") {
-            console.error("[auth] authorize: missing or invalid email");
             return null;
           }
 
-          // Normalize email to lowercase and trim whitespace
           const email = credentials.email.toLowerCase().trim();
-          console.log("[auth] authorize: looking up user:", email);
-
           const user = await db.user.findUnique({
             where: { email },
             select: {
@@ -441,141 +118,56 @@ export const authConfig = {
           });
 
           if (!user) {
-            console.error("[auth] authorize: no user found for email:", email);
             return null;
           }
 
-          console.log(
-            "[auth] authorize: user found, hasPassword:",
-            !!user.password,
-          );
-
-          // In non-production environments, allow passwordless login with a specific bypass key.
           if (
             process.env.NODE_ENV !== "production" &&
             credentials.password === process.env.NEXT_PUBLIC_BYPASS_SECRET
           ) {
-            await ensureMembershipsForUser({
-              userId: user.id,
-              role: user.role as Role,
-            });
-            const memberships = await getUserMemberships(user.id);
-            const isRoot =
-              user.role === "ROOT" || hasRootMembership(memberships);
-            const activeTenantId = resolveActiveTenantId({
-              memberships,
-              isRoot,
-            });
-            const activeMembership = resolveActiveMembership({
-              memberships,
-              activeTenantId,
-              isRoot,
-            });
-            const roles = resolveScopedRoles({
-              memberships,
-              activeTenantId,
-              fallbackRole: user.role as Role,
-              isRoot,
-            });
-            const permissions = await resolveScopedPermissions({
-              activeTenantId,
-              roles,
-              isRoot,
-              activeCustomRoleId: activeMembership?.customRoleId ?? null,
-            });
-            console.log(
-              `[auth] authorize: bypass key accepted for ${user.email}.`,
-            );
-            return {
-              activeTenantId,
-              activeCustomRoleId: activeMembership?.customRoleId ?? null,
-              activeRoleLabel: activeMembership?.roleLabel ?? null,
-              isRoot,
-              memberships,
+            return hydrateAuthState({
               id: user.id,
-              name: user.name,
-              email: user.email,
-              role: user.role,
-              roles,
-              permissions,
+              role: user.role as Role,
               employeeId: user.employeeId,
               departmentId: user.departmentId,
-            };
+              email: user.email,
+              name: user.name,
+              image: user.image,
+            });
           }
 
           if (
             !credentials.password ||
-            typeof credentials.password !== "string"
+            typeof credentials.password !== "string" ||
+            !user.password
           ) {
-            console.error("[auth] authorize: missing or invalid password");
             return null;
           }
 
-          if (!user.password) {
-            console.error("[auth] authorize: user has no password set:", email);
-            return null;
-          }
-
-          // Validate password
           const isPasswordValid = await bcrypt.compare(
             credentials.password,
             String(user.password),
           );
 
-          console.log("[auth] authorize: password valid:", isPasswordValid);
-
           if (!isPasswordValid) {
             return null;
           }
 
-          await ensureMembershipsForUser({
-            userId: user.id,
-            role: user.role as Role,
-          });
-
-          const memberships = await getUserMemberships(user.id);
-          const isRoot = user.role === "ROOT" || hasRootMembership(memberships);
-          const activeTenantId = resolveActiveTenantId({ memberships, isRoot });
-          const activeMembership = resolveActiveMembership({
-            memberships,
-            activeTenantId,
-            isRoot,
-          });
-          const roles = resolveScopedRoles({
-            memberships,
-            activeTenantId,
-            fallbackRole: user.role as Role,
-            isRoot,
-          });
-          const permissions = await resolveScopedPermissions({
-            activeTenantId,
-            roles,
-            isRoot,
-            activeCustomRoleId: activeMembership?.customRoleId ?? null,
-          });
-
-          return {
-            activeTenantId,
-            activeCustomRoleId: activeMembership?.customRoleId ?? null,
-            activeRoleLabel: activeMembership?.roleLabel ?? null,
-            isRoot,
-            memberships,
+          return hydrateAuthState({
             id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            roles,
-            permissions,
+            role: user.role as Role,
             employeeId: user.employeeId,
             departmentId: user.departmentId,
-          };
-        } catch (err) {
-          console.error("[auth] authorize: unexpected error:", err);
+            email: user.email,
+            name: user.name,
+            image: user.image,
+          });
+        } catch (error) {
+          console.error("[auth] authorize failed", error);
           return null;
         }
       },
     }),
-    // Microsoft Entra ID (formerly Azure AD) provider (conditional)
     ...(env.AZURE_AD_CLIENT_ID &&
     env.AZURE_AD_CLIENT_SECRET &&
     env.AZURE_AD_TENANT_ID
@@ -593,7 +185,6 @@ export const authConfig = {
           }),
         ]
       : []),
-    // Google provider (conditional)
     ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
       ? [
           GoogleProvider({
@@ -614,29 +205,26 @@ export const authConfig = {
   callbacks: {
     async signIn({ user, account, profile }) {
       try {
-        // Skip database operations for credentials provider (already handled in authorize)
         if (account?.provider === "credentials") {
           return true;
         }
 
         if (!user.email) {
-          console.error("No email provided from OAuth provider");
           return false;
         }
 
-        // Look up existing user by email (for OAuth providers only)
         const existingUser = await db.user.findUnique({
           where: { email: user.email },
           include: { department: true },
         });
 
         if (!existingUser) {
-          // First-time login: create user with default EMPLOYEE role
           const oauthProfile = profile as
             | { extension_employeeId?: string; employeeId?: string }
             | null
             | undefined;
-          const newUser = await db.user.create({
+
+          await db.user.create({
             data: {
               email: user.email,
               name: user.name,
@@ -649,14 +237,7 @@ export const authConfig = {
                 null,
             },
           });
-
-          console.log(`Created new user: ${newUser.email} with role EMPLOYEE`);
-          await ensureMembershipsForUser({
-            userId: newUser.id,
-            role: newUser.role as Role,
-          });
         } else {
-          // Update existing user profile
           await db.user.update({
             where: { id: existingUser.id },
             data: {
@@ -665,10 +246,6 @@ export const authConfig = {
               emailVerified: existingUser.emailVerified ?? new Date(),
               updatedAt: new Date(),
             },
-          });
-          await ensureMembershipsForUser({
-            userId: existingUser.id,
-            role: existingUser.role as Role,
           });
         }
 
@@ -679,41 +256,25 @@ export const authConfig = {
       }
     },
 
-    async jwt({ token, user, account, trigger, session }) {
+    async jwt({ token, user, account, trigger }) {
       const authToken = token as AuthToken;
-      const sessionUpdate = session as
-        | {
-            activeTenantId?: string | null;
-          }
-        | undefined;
 
-      // Initial sign in
       if (user) {
-        // For credentials provider, user object already has all needed data
         if (account?.provider === "credentials") {
           authToken.id = user.id;
-          authToken.role = user.role;
           authToken.roles = normalizeRoles({
             roles: user.roles,
             role: user.role,
           });
+          authToken.role = derivePrimaryRole(authToken.roles);
           authToken.permissions = user.permissions;
           authToken.employeeId = user.employeeId;
           authToken.departmentId = user.departmentId;
-          authToken.memberships = user.memberships;
           authToken.isRoot = user.isRoot;
-          authToken.activeTenantId = resolveActiveTenantId({
-            memberships: user.memberships,
-            currentTenantId: user.activeTenantId,
-            isRoot: user.isRoot,
-          });
-          authToken.activeCustomRoleId = user.activeCustomRoleId ?? null;
-          authToken.activeRoleLabel = user.activeRoleLabel ?? null;
           authToken.email = user.email ?? undefined;
           authToken.name = user.name;
           authToken.picture = user.image;
         } else {
-          // For OAuth providers, fetch from database
           const dbUser = await db.user.findUnique({
             where: { id: user.id },
             select: {
@@ -728,122 +289,65 @@ export const authConfig = {
           });
 
           if (dbUser) {
-            const memberships = await getUserMemberships(dbUser.id);
-            authToken.id = dbUser.id;
-            authToken.isRoot =
-              dbUser.role === "ROOT" || hasRootMembership(memberships);
-            authToken.activeTenantId = resolveActiveTenantId({
-              memberships,
-              currentTenantId: authToken.activeTenantId,
-              isRoot: authToken.isRoot,
+            const hydrated = await hydrateAuthState({
+              id: dbUser.id,
+              role: dbUser.role as Role,
+              employeeId: dbUser.employeeId,
+              departmentId: dbUser.departmentId,
+              email: dbUser.email,
+              name: dbUser.name,
+              image: dbUser.image,
             });
-            const activeMembership = resolveActiveMembership({
-              memberships,
-              activeTenantId: authToken.activeTenantId,
-              isRoot: authToken.isRoot,
-            });
-            authToken.roles = resolveScopedRoles({
-              memberships,
-              activeTenantId: authToken.activeTenantId,
-              fallbackRole: dbUser.role as Role,
-              isRoot: authToken.isRoot,
-            });
-            authToken.permissions = await resolveScopedPermissions({
-              activeTenantId: authToken.activeTenantId,
-              roles: authToken.roles,
-              isRoot: authToken.isRoot,
-              activeCustomRoleId: activeMembership?.customRoleId ?? null,
-            });
-            authToken.role = derivePrimaryRole(authToken.roles);
-            authToken.employeeId = dbUser.employeeId;
-            authToken.departmentId = dbUser.departmentId;
-            authToken.activeCustomRoleId = activeMembership?.customRoleId ?? null;
-            authToken.activeRoleLabel = activeMembership?.roleLabel ?? null;
-            authToken.memberships = memberships;
-            authToken.email = dbUser.email ?? undefined;
-            authToken.name = dbUser.name;
-            authToken.picture = dbUser.image;
+
+            authToken.id = hydrated.id;
+            authToken.role = hydrated.role;
+            authToken.roles = hydrated.roles;
+            authToken.permissions = hydrated.permissions;
+            authToken.employeeId = hydrated.employeeId;
+            authToken.departmentId = hydrated.departmentId;
+            authToken.isRoot = hydrated.isRoot;
+            authToken.email = hydrated.email;
+            authToken.name = hydrated.name;
+            authToken.picture = hydrated.image ?? undefined;
           }
         }
       }
 
-      // Refresh user data on update trigger
       if (trigger === "update" && authToken.id) {
-        const userSelect = {
-          id: true,
-          role: true,
-          employeeId: true,
-          departmentId: true,
-          email: true,
-          name: true,
-          image: true,
-        } as const;
-
-        let dbUser = await db.user.findUnique({
+        const dbUser = await db.user.findUnique({
           where: { id: authToken.id },
-          select: userSelect,
+          select: {
+            id: true,
+            role: true,
+            employeeId: true,
+            departmentId: true,
+            email: true,
+            name: true,
+            image: true,
+          },
         });
 
-        if (!dbUser && authToken.email) {
-          dbUser = await db.user.findUnique({
-            where: { email: authToken.email },
-            select: userSelect,
-          });
-        }
-
         if (dbUser) {
-          const memberships = await getUserMemberships(dbUser.id);
-          authToken.id = dbUser.id;
-          const requestedTenantId =
-            typeof sessionUpdate?.activeTenantId === "string" ||
-            sessionUpdate?.activeTenantId === null
-              ? sessionUpdate.activeTenantId
-              : undefined;
+          const hydrated = await hydrateAuthState({
+            id: dbUser.id,
+            role: dbUser.role as Role,
+            employeeId: dbUser.employeeId,
+            departmentId: dbUser.departmentId,
+            email: dbUser.email,
+            name: dbUser.name,
+            image: dbUser.image,
+          });
 
-          authToken.isRoot =
-            dbUser.role === "ROOT" || hasRootMembership(memberships);
-          authToken.employeeId = dbUser.employeeId;
-          authToken.departmentId = dbUser.departmentId;
-          authToken.memberships = memberships;
-          if (
-            requestedTenantId !== undefined &&
-            memberships.some(
-              (membership) =>
-                membership.status === "ACTIVE" &&
-                membership.tenantId === requestedTenantId,
-            )
-          ) {
-            authToken.activeTenantId = requestedTenantId;
-          } else {
-            authToken.activeTenantId = resolveActiveTenantId({
-              memberships,
-              currentTenantId: authToken.activeTenantId,
-              isRoot: authToken.isRoot,
-            });
-          }
-          const activeMembership = resolveActiveMembership({
-            memberships,
-            activeTenantId: authToken.activeTenantId ?? null,
-            isRoot: authToken.isRoot,
-          });
-          authToken.roles = resolveScopedRoles({
-            memberships,
-            activeTenantId: authToken.activeTenantId ?? null,
-            fallbackRole: dbUser.role as Role,
-            isRoot: authToken.isRoot,
-          });
-          authToken.permissions = await resolveScopedPermissions({
-            activeTenantId: authToken.activeTenantId ?? null,
-            roles: authToken.roles,
-            isRoot: authToken.isRoot,
-            activeCustomRoleId: activeMembership?.customRoleId ?? null,
-          });
-          authToken.role = derivePrimaryRole(authToken.roles);
-          authToken.activeCustomRoleId = activeMembership?.customRoleId ?? null;
-          authToken.activeRoleLabel = activeMembership?.roleLabel ?? null;
-          authToken.email = dbUser.email ?? undefined;
-          authToken.name = dbUser.name;
-          authToken.picture = dbUser.image;
+          authToken.id = hydrated.id;
+          authToken.role = hydrated.role;
+          authToken.roles = hydrated.roles;
+          authToken.permissions = hydrated.permissions;
+          authToken.employeeId = hydrated.employeeId;
+          authToken.departmentId = hydrated.departmentId;
+          authToken.isRoot = hydrated.isRoot;
+          authToken.email = hydrated.email;
+          authToken.name = hydrated.name;
+          authToken.picture = hydrated.image ?? undefined;
         }
       }
 
@@ -854,21 +358,17 @@ export const authConfig = {
       const authToken = token as AuthToken;
 
       if (token && session.user) {
-        session.user.id = authToken.id as string;
         const roles = normalizeRoles({
           roles: authToken.roles,
           role: authToken.role,
         });
+        session.user.id = authToken.id as string;
         session.user.roles = roles;
         session.user.role = derivePrimaryRole(roles);
         session.user.permissions = authToken.permissions ?? {};
         session.user.employeeId = authToken.employeeId as string | null;
         session.user.departmentId = authToken.departmentId as string | null;
-        session.user.activeTenantId = authToken.activeTenantId ?? null;
-        session.user.activeCustomRoleId = authToken.activeCustomRoleId ?? null;
-        session.user.activeRoleLabel = authToken.activeRoleLabel ?? null;
         session.user.isRoot = authToken.isRoot ?? false;
-        session.user.memberships = authToken.memberships ?? [];
         session.user.email = authToken.email as string;
         session.user.name = authToken.name as string;
         session.user.image = authToken.picture as string;
@@ -878,26 +378,27 @@ export const authConfig = {
     },
   },
   events: {
-    async signIn({ user, account, profile: _profile, isNewUser }) {
-      // Log authentication event for audit
-      if (user.id) {
-        try {
-          await db.auditLog.create({
-            data: {
-              userId: user.id,
-              action: "CREATE",
-              entityType: "Authentication",
-              entityId: user.id,
-              metadata: {
-                provider: account?.provider,
-                isNewUser,
-                timestamp: new Date().toISOString(),
-              },
+    async signIn({ user, account, isNewUser }) {
+      if (!user.id) {
+        return;
+      }
+
+      try {
+        await db.auditLog.create({
+          data: {
+            userId: user.id,
+            action: "CREATE",
+            entityType: "Authentication",
+            entityId: user.id,
+            metadata: {
+              provider: account?.provider,
+              isNewUser,
+              timestamp: new Date().toISOString(),
             },
-          });
-        } catch (error) {
-          console.error("Failed to create audit log:", error);
-        }
+          },
+        });
+      } catch (error) {
+        console.error("Failed to create audit log:", error);
       }
     },
   },

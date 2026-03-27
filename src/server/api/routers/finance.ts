@@ -30,56 +30,16 @@ const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 type DbClient = typeof dbClient;
 type DbTx = Prisma.TransactionClient;
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
-}
-
-function assertSameTenant(ctx: unknown, tenantId: string | null | undefined) {
-  const scope = getTenantScope(ctx);
-  if (scope.isRoot) return;
-  if (!scope.tenantId || scope.tenantId !== tenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Cross-tenant access denied",
-    });
-  }
-}
-
-function assertTenantMatch(
-  expectedTenantId: string | null,
-  actualTenantId: string | null | undefined,
-  entityLabel: string,
-) {
-  if (expectedTenantId !== actualTenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: `${entityLabel} tidak berada dalam tenant yang sama`,
-    });
-  }
 }
 
 async function assertJournalBuildReferences(
   tx: DbTx,
   input: {
-    tenantId: string | null;
     chartOfAccountId: string;
     offsetChartOfAccountId: string;
     balanceAccountId?: string;
@@ -90,28 +50,28 @@ async function assertJournalBuildReferences(
   const [coa, offsetCoa, balanceAccount, claim, bailout] = await Promise.all([
     tx.chartOfAccount.findUnique({
       where: { id: input.chartOfAccountId },
-      select: { tenantId: true, isActive: true },
+      select: { isActive: true },
     }),
     tx.chartOfAccount.findUnique({
       where: { id: input.offsetChartOfAccountId },
-      select: { tenantId: true, isActive: true },
+      select: { isActive: true },
     }),
     input.balanceAccountId
       ? tx.balanceAccount.findUnique({
           where: { id: input.balanceAccountId },
-          select: { tenantId: true, isActive: true, deletedAt: true },
+          select: { isActive: true, deletedAt: true },
         })
       : Promise.resolve(null),
     input.claimId
       ? tx.claim.findUnique({
           where: { id: input.claimId },
-          select: { tenantId: true, deletedAt: true },
+          select: { deletedAt: true },
         })
       : Promise.resolve(null),
     input.bailoutId
       ? tx.bailout.findUnique({
           where: { id: input.bailoutId },
-          select: { tenantId: true, deletedAt: true },
+          select: { deletedAt: true },
         })
       : Promise.resolve(null),
   ]);
@@ -122,37 +82,32 @@ async function assertJournalBuildReferences(
   if (!offsetCoa || !offsetCoa.isActive) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "COA jurnal kredit tidak valid" });
   }
-  assertTenantMatch(input.tenantId, coa.tenantId, "COA jurnal debit");
-  assertTenantMatch(input.tenantId, offsetCoa.tenantId, "COA jurnal kredit");
 
   if (balanceAccount) {
     if (!balanceAccount.isActive || balanceAccount.deletedAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Balance account jurnal tidak valid" });
     }
-    assertTenantMatch(input.tenantId, balanceAccount.tenantId, "Balance account jurnal");
   }
 
   if (claim) {
     if (claim.deletedAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Claim jurnal tidak valid" });
     }
-    assertTenantMatch(input.tenantId, claim.tenantId, "Claim jurnal");
   }
 
   if (bailout) {
     if (bailout.deletedAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Bailout jurnal tidak valid" });
     }
-    assertTenantMatch(input.tenantId, bailout.tenantId, "Bailout jurnal");
   }
 }
 
 /** Generate a sequential journal transaction number, e.g. JRN-2026-00001 */
 async function generateJournalNumber(
   db: DbClient,
-  ctx: unknown,
+  _ctx: unknown,
 ): Promise<string> {
-  return generateJournalTransactionNumber(db, getTenantScope(ctx).tenantId);
+  return generateJournalTransactionNumber(db);
 }
 
 function assertClaimAccountingAccounts(input: {
@@ -277,7 +232,6 @@ function assertBalancedJournalLines(
 async function createPostedJournalWithLines(
   tx: DbTx,
   input: {
-    tenantId: string | null;
     transactionDate: Date;
     description: string;
     sourceType: JournalSourceType;
@@ -304,7 +258,6 @@ async function createPostedJournalWithLines(
     tx.chartOfAccount.findMany({
       where: {
         id: { in: coaIds },
-        tenantId: input.tenantId,
         isActive: true,
       },
       select: { id: true },
@@ -313,7 +266,6 @@ async function createPostedJournalWithLines(
       ? tx.balanceAccount.findMany({
           where: {
             id: { in: balanceIds },
-            tenantId: input.tenantId,
             isActive: true,
             deletedAt: null,
           },
@@ -323,13 +275,13 @@ async function createPostedJournalWithLines(
     input.claimId
       ? tx.claim.findUnique({
           where: { id: input.claimId },
-          select: { id: true, tenantId: true, deletedAt: true },
+          select: { id: true, deletedAt: true },
         })
       : Promise.resolve(null),
     input.bailoutId
       ? tx.bailout.findUnique({
           where: { id: input.bailoutId },
-          select: { id: true, tenantId: true, deletedAt: true },
+          select: { id: true, deletedAt: true },
         })
       : Promise.resolve(null),
   ]);
@@ -337,34 +289,33 @@ async function createPostedJournalWithLines(
   if (coas.length !== coaIds.length) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Ada akun COA settlement yang tidak ditemukan, tidak aktif, atau bukan milik tenant aktif",
+      message: "Ada akun COA settlement yang tidak ditemukan, tidak aktif, atau tidak tersedia dalam cakupan data aktif",
     });
   }
 
   if (balanceAccounts.length !== balanceIds.length) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Ada balance account settlement yang tidak ditemukan, tidak aktif, atau bukan milik tenant aktif",
+      message: "Ada balance account settlement yang tidak ditemukan, tidak aktif, atau tidak tersedia dalam cakupan data aktif",
     });
   }
 
   if (claim) {
-    if (claim.deletedAt || claim.tenantId !== input.tenantId) {
+    if (claim.deletedAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Claim settlement tidak valid" });
     }
   }
 
   if (bailout) {
-    if (bailout.deletedAt || bailout.tenantId !== input.tenantId) {
+    if (bailout.deletedAt) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Bailout settlement tidak valid" });
     }
   }
 
-  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient, input.tenantId);
+  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient);
 
   return tx.journalEntry.create({
     data: {
-      tenantId: input.tenantId,
       journalNumber,
       transactionDate: input.transactionDate,
       description: input.description,
@@ -404,7 +355,6 @@ async function createPostedJournalWithLines(
 async function createPostedDoubleEntryJournal(
   tx: DbTx,
   input: {
-    tenantId: string | null;
     transactionDate: Date;
     description: string;
     sourceType: JournalSourceType;
@@ -421,7 +371,7 @@ async function createPostedDoubleEntryJournal(
 ) {
   await assertJournalBuildReferences(tx, input);
 
-  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient, input.tenantId);
+  const journalNumber = await generateJournalEntryNumber(tx as unknown as DbClient);
 
   const lines: Prisma.JournalEntryLineCreateWithoutJournalEntryInput[] = [
     {
@@ -445,7 +395,6 @@ async function createPostedDoubleEntryJournal(
 
   return tx.journalEntry.create({
     data: {
-      tenantId: input.tenantId,
       journalNumber,
       transactionDate: input.transactionDate,
       description: input.description,
@@ -506,7 +455,7 @@ export const financeRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const isFinance = userHasAnyRole(ctx.session.user, FINANCE_ROLES);
 
-      const where: Prisma.BailoutWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.BailoutWhereInput = applyScope(ctx, {
         deletedAt: null,
       } satisfies Prisma.BailoutWhereInput);
 
@@ -638,8 +587,6 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      assertSameTenant(ctx, bailout.tenantId);
-
       return bailout;
     }),
 
@@ -676,7 +623,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           bailoutNumber: input.bailoutNumber,
           deletedAt: null,
         } satisfies Prisma.BailoutWhereInput),
@@ -688,8 +635,6 @@ export const financeRouter = createTRPCRouter({
           message: "Bailout tidak ditemukan",
         });
       }
-
-      assertSameTenant(ctx, bailout.tenantId);
 
       // File may be attached at any point from APPROVED_DIRECTOR onward (ready for disbursement)
       const attachableStatuses: BailoutStatus[] = [
@@ -722,7 +667,6 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Bailout",
@@ -791,8 +735,6 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      assertSameTenant(ctx, bailout.tenantId);
-
       // Only fully-approved bailouts can be processed (APPROVED_DIRECTOR or DISBURSED)
       const processableStatuses: BailoutStatus[] = [
         BailoutStatus.APPROVED_DIRECTOR,
@@ -808,19 +750,19 @@ export const financeRouter = createTRPCRouter({
       // ── Validate COA & Balance Account ────────────────────────────────────
       const [coa, offsetCoa, balanceAccount] = await Promise.all([
         ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.chartOfAccountId,
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
         }),
         ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.offsetChartOfAccountId ?? input.chartOfAccountId,
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
         }),
         ctx.db.balanceAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.balanceAccountId,
             isActive: true,
             deletedAt: null,
@@ -866,7 +808,6 @@ export const financeRouter = createTRPCRouter({
             description: `Beban bailout: ${bailout.bailoutNumber} — ${bailout.description}`,
             amount: bailout.amount,
             entryType: JournalEntryType.DEBIT,
-            tenantId: bailout.tenantId,
             bailoutId: bailout.id,
             chartOfAccountId: input.chartOfAccountId,
             balanceAccountId: input.balanceAccountId,
@@ -883,7 +824,6 @@ export const financeRouter = createTRPCRouter({
 
         // 2. Create proper double-entry journal
         const journalEntry = await createPostedDoubleEntryJournal(tx, {
-          tenantId: bailout.tenantId,
           transactionDate: txDate,
           description: `Pencairan bailout ${bailout.bailoutNumber}`,
           sourceType: JournalSourceType.BAILOUT,
@@ -922,7 +862,6 @@ export const financeRouter = createTRPCRouter({
       // ── Audit log ─────────────────────────────────────────────────────────
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Bailout",
@@ -995,8 +934,6 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      assertSameTenant(ctx, claim.tenantId);
-
       // Claim must be final (APPROVED or PAID)
       const processableStatuses: ClaimStatus[] = [
         ClaimStatus.APPROVED,
@@ -1012,19 +949,19 @@ export const financeRouter = createTRPCRouter({
       // ── Validate COA & Balance Account ────────────────────────────────────
       const [coa, offsetCoa, balanceAccount] = await Promise.all([
         ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.chartOfAccountId,
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
         }),
         ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.offsetChartOfAccountId ?? input.chartOfAccountId,
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
         }),
         ctx.db.balanceAccount.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: input.balanceAccountId,
             isActive: true,
             deletedAt: null,
@@ -1070,7 +1007,6 @@ export const financeRouter = createTRPCRouter({
             description: `Beban klaim: ${claim.claimNumber} — ${claim.description}`,
             amount: claim.amount,
             entryType: JournalEntryType.DEBIT,
-            tenantId: claim.tenantId,
             claimId: claim.id,
             chartOfAccountId: input.chartOfAccountId,
             balanceAccountId: input.balanceAccountId,
@@ -1087,7 +1023,6 @@ export const financeRouter = createTRPCRouter({
 
         // 2. Create proper double-entry journal
         const journalEntry = await createPostedDoubleEntryJournal(tx, {
-          tenantId: claim.tenantId,
           transactionDate: txDate,
           description: `Pembayaran klaim ${claim.claimNumber}`,
           sourceType: JournalSourceType.CLAIM,
@@ -1125,7 +1060,6 @@ export const financeRouter = createTRPCRouter({
       // ── Audit log ─────────────────────────────────────────────────────────
       await ctx.db.auditLog.create({
         data: {
-          tenantId: claim.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Claim",
@@ -1192,8 +1126,6 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      assertSameTenant(ctx, bailout.tenantId);
-
       if (bailout.status !== BailoutStatus.DISBURSED) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1202,7 +1134,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       const existingSettlement = await ctx.db.journalEntry.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           bailoutId: bailout.id,
           sourceType: JournalSourceType.SETTLEMENT,
           status: JournalStatus.POSTED,
@@ -1247,14 +1179,14 @@ export const financeRouter = createTRPCRouter({
 
       const [coas, refundBalanceAccount] = await Promise.all([
         ctx.db.chartOfAccount.findMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: { in: coaIdsToFetch },
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
         }),
         input.refundBankBalanceAccountId
           ? ctx.db.balanceAccount.findFirst({
-              where: withTenantWhere(ctx, {
+              where: applyScope(ctx, {
                 id: input.refundBankBalanceAccountId,
                 isActive: true,
                 deletedAt: null,
@@ -1417,7 +1349,6 @@ export const financeRouter = createTRPCRouter({
       const txDate = input.transactionDate ?? new Date();
       const journalEntry = await ctx.db.$transaction(async (tx) => {
         const created = await createPostedJournalWithLines(tx, {
-          tenantId: bailout.tenantId,
           transactionDate: txDate,
           description: journalDescription,
           sourceType: JournalSourceType.SETTLEMENT,
@@ -1444,7 +1375,6 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Bailout",
@@ -1514,7 +1444,7 @@ export const financeRouter = createTRPCRouter({
         });
       }
 
-      const where: Prisma.BalanceAccountWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.BalanceAccountWhereInput = applyScope(ctx, {
         deletedAt: null,
       } satisfies Prisma.BalanceAccountWhereInput);
       if (input.isActive !== undefined) where.isActive = input.isActive;
@@ -1572,7 +1502,7 @@ export const financeRouter = createTRPCRouter({
 
       // Ensure code is unique
       const existing = await ctx.db.balanceAccount.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           code: input.code,
           deletedAt: null,
         } satisfies Prisma.BalanceAccountWhereInput),
@@ -1586,7 +1516,6 @@ export const financeRouter = createTRPCRouter({
 
       const balanceAccount = await ctx.db.balanceAccount.create({
         data: {
-          tenantId: getTenantScope(ctx).tenantId,
           code: input.code,
           name: input.name,
           balance: input.balance,
@@ -1597,7 +1526,6 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: getTenantScope(ctx).tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "BalanceAccount",
@@ -1638,7 +1566,7 @@ export const financeRouter = createTRPCRouter({
       }
 
       const existing = await ctx.db.balanceAccount.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
           deletedAt: null,
         } satisfies Prisma.BalanceAccountWhereInput),
@@ -1659,7 +1587,6 @@ export const financeRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "BalanceAccount",
@@ -1735,3 +1662,4 @@ export const financeRouter = createTRPCRouter({
       };
     }),
 });
+

@@ -16,37 +16,11 @@ import { sendWhatsappPoll, sendWhatsappMessage } from "@/lib/utils/whatsapp";
 import { hasPermissionMap } from "@/lib/auth/permissions";
 import { generateBailoutNumber } from "@/lib/utils/numberGenerators";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
-}
-
-function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
-  const scope = getTenantScope(ctx);
-  if (scope.isRoot) return;
-  if (!scope.tenantId || scope.tenantId !== tenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Cross-tenant access denied",
-    });
-  }
 }
 
 export const bailoutRouter = createTRPCRouter({
@@ -71,7 +45,7 @@ export const bailoutRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = withTenantWhere(ctx, {
+      const where: Record<string, unknown> = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -120,7 +94,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.object({ updatedCount: z.number() }))
     .mutation(async ({ ctx }) => {
       const legacyCandidates = await ctx.db.bailout.findMany({
-        where: withTenantWhere(
+        where: applyScope(
           ctx,
           {
             deletedAt: null,
@@ -176,7 +150,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           requester: {
             select: { id: true, name: true, email: true, employeeId: true },
@@ -248,7 +222,7 @@ export const bailoutRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Check if travel request exists
       const travelRequest = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.travelRequestId }),
+        where: applyScope(ctx, { id: input.travelRequestId }),
       });
 
       if (!travelRequest) {
@@ -259,10 +233,7 @@ export const bailoutRouter = createTRPCRouter({
       }
 
       // Generate bailout number
-      const bailoutNumber = await generateBailoutNumber(
-        ctx.db,
-        getTenantScope(ctx).tenantId,
-      );
+      const bailoutNumber = await generateBailoutNumber(ctx.db);
 
       const {
         travelRequestId,
@@ -275,7 +246,6 @@ export const bailoutRouter = createTRPCRouter({
 
       const bailout = await ctx.db.bailout.create({
         data: {
-          tenantId: travelRequest.tenantId,
           bailoutNumber,
           travelRequestId,
           requesterId: ctx.session.user.id,
@@ -296,7 +266,6 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Bailout",
@@ -314,7 +283,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!bailout) {
@@ -362,12 +331,6 @@ export const bailoutRouter = createTRPCRouter({
             role: { in: [Role.SALES_CHIEF, Role.MANAGER] },
             deletedAt: null,
             phoneNumber: { not: null },
-            memberships: {
-              some: {
-                tenantId: bailout.tenantId ?? undefined,
-                status: "ACTIVE",
-              },
-            },
           },
           select: { phoneNumber: true, name: true },
           take: 5,
@@ -408,7 +371,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!bailout) {
@@ -434,7 +397,6 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.APPROVE,
           entityType: "Bailout",
@@ -450,12 +412,6 @@ export const bailoutRouter = createTRPCRouter({
             role: Role.DIRECTOR,
             deletedAt: null,
             phoneNumber: { not: null },
-            memberships: {
-              some: {
-                tenantId: bailout.tenantId ?? undefined,
-                status: "ACTIVE",
-              },
-            },
           },
           select: { phoneNumber: true, name: true },
           take: 5,
@@ -496,7 +452,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -534,7 +490,6 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.APPROVE,
           entityType: "Bailout",
@@ -546,7 +501,7 @@ export const bailoutRouter = createTRPCRouter({
       // Send notification to requester & finance that bailout is fully approved
       void (async () => {
         const fullBailout = await ctx.db.bailout.findFirst({
-          where: withTenantWhere(ctx, { id: input.id }),
+          where: applyScope(ctx, { id: input.id }),
           include: {
             requester: { select: { phoneNumber: true, name: true } },
           },
@@ -624,7 +579,7 @@ export const bailoutRouter = createTRPCRouter({
 
         // Fetch requester name for the message
         const bailoutWithRequester = await ctx.db.bailout.findFirst({
-          where: withTenantWhere(ctx, { id: input.id }),
+          where: applyScope(ctx, { id: input.id }),
           include: {
             requester: { select: { name: true, email: true } },
             travelRequest: {
@@ -653,12 +608,6 @@ export const bailoutRouter = createTRPCRouter({
             role: Role.FINANCE,
             deletedAt: null,
             phoneNumber: { not: null },
-            memberships: {
-              some: {
-                tenantId: bailout.tenantId ?? undefined,
-                status: "ACTIVE",
-              },
-            },
           },
           select: { phoneNumber: true },
           take: 5,
@@ -686,7 +635,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -731,7 +680,6 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.REJECT,
           entityType: "Bailout",
@@ -743,7 +691,7 @@ export const bailoutRouter = createTRPCRouter({
       // Send notification to requester that bailout was rejected
       void (async () => {
         const fullBailout = await ctx.db.bailout.findFirst({
-          where: withTenantWhere(ctx, { id: input.id }),
+          where: applyScope(ctx, { id: input.id }),
           include: {
             requester: { select: { phoneNumber: true, name: true } },
           },
@@ -779,7 +727,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           travelRequest: {
             select: {
@@ -833,7 +781,6 @@ export const bailoutRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: bailout.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CLOSE,
           entityType: "Bailout",
@@ -869,7 +816,7 @@ export const bailoutRouter = createTRPCRouter({
       }
 
       const bailouts = await ctx.db.bailout.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           status: { in: statusFilters },
           deletedAt: null,
         }),
@@ -904,7 +851,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.bailoutId }),
+        where: applyScope(ctx, { id: input.bailoutId }),
         select: { requesterId: true },
       });
 
@@ -940,7 +887,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         select: { requesterId: true },
       });
 
@@ -963,7 +910,7 @@ export const bailoutRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const bailout = await ctx.db.bailout.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         select: { requesterId: true, storageUrl: true },
       });
 
@@ -984,3 +931,4 @@ export const bailoutRouter = createTRPCRouter({
       return { url };
     }),
 });
+

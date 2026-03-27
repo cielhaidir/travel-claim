@@ -10,25 +10,10 @@ import {
 } from "@/server/api/trpc";
 import { userHasAnyRole } from "@/lib/auth/role-check";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -58,7 +43,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.AuditLogWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.AuditLogWhereInput = applyScope(ctx, {});
 
       if (input?.userId) {
         where.userId = input.userId;
@@ -133,7 +118,7 @@ export const auditLogRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const log = await ctx.db.auditLog.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           user: {
             select: {
@@ -199,7 +184,7 @@ export const auditLogRouter = createTRPCRouter({
       }
 
       return ctx.db.auditLog.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           entityType: input.entityType,
           entityId: input.entityId,
         }),
@@ -246,7 +231,7 @@ export const auditLogRouter = createTRPCRouter({
       const where: Prisma.AuditLogWhereInput = {
         userId: ctx.session.user.id,
       };
-      withTenantWhere(ctx, where);
+      applyScope(ctx, where);
 
       if (input?.action) {
         where.action = input.action;
@@ -303,7 +288,7 @@ export const auditLogRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       // Verify access to travel request
       const travelRequest = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.travelRequestId }),
+        where: applyScope(ctx, { id: input.travelRequestId }),
         include: {
           participants: true,
         },
@@ -336,7 +321,7 @@ export const auditLogRouter = createTRPCRouter({
       }
 
       return ctx.db.auditLog.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           entityType: "TravelRequest",
           entityId: input.travelRequestId,
         }),
@@ -363,7 +348,7 @@ export const auditLogRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       // Verify access to claim
       const claim = await ctx.db.claim.findFirst({
-        where: withTenantWhere(ctx, { id: input.claimId }),
+        where: applyScope(ctx, { id: input.claimId }),
         include: {
           travelRequest: {
             include: {
@@ -402,7 +387,7 @@ export const auditLogRouter = createTRPCRouter({
       }
 
       return ctx.db.auditLog.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           entityType: "Claim",
           entityId: input.claimId,
         }),
@@ -432,7 +417,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.AuditLogWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.AuditLogWhereInput = applyScope(ctx, {});
 
       if (input?.entityTypes && input.entityTypes.length > 0) {
         where.entityType = {
@@ -470,7 +455,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.AuditLogWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.AuditLogWhereInput = applyScope(ctx, {});
 
       if (input?.userId) {
         where.userId = input.userId;
@@ -513,7 +498,7 @@ export const auditLogRouter = createTRPCRouter({
       // Get user details for top users
       const userIds = byUser.map((item) => item.userId);
       const users = await ctx.db.user.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: { in: userIds },
         }),
         select: {
@@ -562,7 +547,7 @@ export const auditLogRouter = createTRPCRouter({
       // Search in entity IDs and entity types
       const logs = await ctx.db.auditLog.findMany({
         take: input.limit,
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           OR: [
             {
               entityId: {
@@ -609,7 +594,7 @@ export const auditLogRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.AuditLogWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.AuditLogWhereInput = applyScope(ctx, {});
 
       if (input?.userId) {
         where.userId = input.userId;
@@ -668,3 +653,4 @@ export const auditLogRouter = createTRPCRouter({
       }));
     }),
 });
+

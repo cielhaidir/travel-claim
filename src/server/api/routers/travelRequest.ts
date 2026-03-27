@@ -27,37 +27,11 @@ import {
   generateRequestNumber,
 } from "@/lib/utils/numberGenerators";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
-}
-
-function assertTenant(ctx: unknown, tenantId: string | null | undefined) {
-  const scope = getTenantScope(ctx);
-  if (scope.isRoot) return;
-  if (!scope.tenantId || scope.tenantId !== tenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Cross-tenant access denied",
-    });
-  }
 }
 
 export const travelRequestRouter = createTRPCRouter({
@@ -91,7 +65,7 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.TravelRequestWhereInput = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -251,7 +225,7 @@ export const travelRequestRouter = createTRPCRouter({
           { participants: { some: { userId: targetUser.id } } },
         ],
       };
-      withTenantWhere(ctx, where);
+      applyScope(ctx, where);
 
       if (input?.status) {
         where.status = input.status;
@@ -357,7 +331,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const request = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           requester: {
             include: {
@@ -446,7 +420,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx }) => {
       return ctx.db.travelRequest.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           deletedAt: null,
           approvals: {
             some: {
@@ -582,20 +556,17 @@ export const travelRequestRouter = createTRPCRouter({
 
       // Generate request number
       const year = new Date().getFullYear();
-      const tenantId = getTenantScope(ctx).tenantId;
-      const requestNumber = await generateRequestNumber(ctx.db, tenantId, year);
+      const requestNumber = await generateRequestNumber(ctx.db, year);
 
       // Prepare bailout number counter — use max existing to avoid conflicts
       let bailoutNumberCursor = await generateBailoutNumber(
         ctx.db,
-        tenantId,
         year,
       );
 
       // Create request with nested bailout entries and participants
       const request = await ctx.db.travelRequest.create({
         data: {
-          tenantId,
           requestNumber,
           requesterId: ctx.session.user.id,
           ...requestData,
@@ -603,7 +574,6 @@ export const travelRequestRouter = createTRPCRouter({
             ? {
                 create: participantIds.map((userId) => ({
                   userId,
-                  tenantId,
                 })),
               }
             : undefined,
@@ -625,7 +595,6 @@ export const travelRequestRouter = createTRPCRouter({
                     ) + 1;
                   bailoutNumberCursor = `BLT-${year}-${String(nextSeq).padStart(5, "0")}`;
                   return {
-                    tenantId,
                     bailoutNumber: nextBailoutNumber,
                     requesterId: ctx.session.user.id,
                     category,
@@ -660,7 +629,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "TravelRequest",
@@ -741,7 +709,6 @@ export const travelRequestRouter = createTRPCRouter({
           message: "Travel request not found",
         });
       }
-      assertTenant(ctx, existing.tenantId);
 
       // Only requester can update
       if (existing.requesterId !== ctx.session.user.id) {
@@ -776,14 +743,14 @@ export const travelRequestRouter = createTRPCRouter({
       // Update participants if provided
       if (participantIds) {
         await ctx.db.travelParticipant.deleteMany({
-          where: withTenantWhere(ctx, { travelRequestId: id }),
+          where: applyScope(ctx, { travelRequestId: id }),
         });
       }
 
       // Update bailouts if provided: delete existing DRAFT ones and recreate
       if (bailouts !== undefined) {
         await ctx.db.bailout.deleteMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             travelRequestId: id,
             status: BailoutStatus.DRAFT,
           }),
@@ -794,7 +761,6 @@ export const travelRequestRouter = createTRPCRouter({
       const year = new Date().getFullYear();
       let bailoutNumberCursor = await generateBailoutNumber(
         ctx.db,
-        existing.tenantId,
         year,
       );
 
@@ -806,7 +772,6 @@ export const travelRequestRouter = createTRPCRouter({
             ? {
                 create: participantIds.map((userId) => ({
                   userId,
-                  tenantId: existing.tenantId,
                 })),
               }
             : undefined,
@@ -828,7 +793,6 @@ export const travelRequestRouter = createTRPCRouter({
                     ) + 1;
                   bailoutNumberCursor = `BLT-${year}-${String(nextSeq).padStart(5, "0")}`;
                   return {
-                    tenantId: existing.tenantId,
                     bailoutNumber: nextBailoutNumber,
                     requesterId: ctx.session.user.id,
                     category,
@@ -863,7 +827,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "TravelRequest",
@@ -890,7 +853,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           requester: {
             include: {
@@ -1075,7 +1038,7 @@ export const travelRequestRouter = createTRPCRouter({
       // violation when we try to INSERT new ones whose generated numbers collide.)
       if (request.status === TravelStatus.REVISION) {
         await ctx.db.approval.deleteMany({
-          where: withTenantWhere(ctx, { travelRequestId: input.id }),
+          where: applyScope(ctx, { travelRequestId: input.id }),
         });
       }
 
@@ -1086,7 +1049,6 @@ export const travelRequestRouter = createTRPCRouter({
       const year = new Date().getFullYear();
       const lastApproval = await ctx.db.approval.findFirst({
         where: {
-          tenantId: request.tenantId,
           approvalNumber: { startsWith: `APR-${year}-` },
         },
         orderBy: { approvalNumber: "desc" },
@@ -1101,7 +1063,6 @@ export const travelRequestRouter = createTRPCRouter({
 
       const approvalsWithNumbers = deduped.map((entry, idx) => ({
         ...entry,
-        tenantId: request.tenantId,
         approvalNumber: `APR-${year}-${String(nextSeq + idx).padStart(5, "0")}`,
       }));
 
@@ -1137,7 +1098,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.SUBMIT,
           entityType: "TravelRequest",
@@ -1214,7 +1174,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!request) {
@@ -1242,7 +1202,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.LOCK,
           entityType: "TravelRequest",
@@ -1268,7 +1227,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           claims: {
             where: {
@@ -1313,7 +1272,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CLOSE,
           entityType: "TravelRequest",
@@ -1339,7 +1297,7 @@ export const travelRequestRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.travelRequest.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           claims: true,
         },
@@ -1377,7 +1335,6 @@ export const travelRequestRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: request.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "TravelRequest",
@@ -1408,7 +1365,7 @@ export const travelRequestRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.TravelRequestWhereInput = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -1479,3 +1436,4 @@ export const travelRequestRouter = createTRPCRouter({
       return { requests };
     }),
 });
+

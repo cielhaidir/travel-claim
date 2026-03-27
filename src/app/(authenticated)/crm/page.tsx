@@ -24,23 +24,23 @@ export default function CrmDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Dashboard"
-        description="Overview CRM untuk leads, deals, contacts, organizations, tasks, dan notes."
+        title="Dasbor CRM"
+        description="Ringkasan CRM untuk prospek, peluang, kontak, organisasi, tugas, dan catatan."
         badge={<Badge variant="info">CRM</Badge>}
-        primaryAction={{ label: "Refresh", onClick: () => void refetch() }}
+        primaryAction={{ label: "Muat Ulang", onClick: () => void refetch() }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <CrmMetricCard label="Organizations" value={String(data?.counts.organizations ?? 0)} />
-        <CrmMetricCard label="Contacts" value={String(data?.counts.contacts ?? 0)} />
-        <CrmMetricCard label="Leads" value={String(data?.counts.leads ?? 0)} />
-        <CrmMetricCard label="Deals" value={String(data?.counts.deals ?? 0)} />
-        <CrmMetricCard label="Open Tasks" value={String(data?.counts.openTasks ?? 0)} />
-        <CrmMetricCard label="Notes" value={String(data?.counts.notes ?? 0)} />
+        <CrmMetricCard label="Organisasi" value={String(data?.counts.organizations ?? 0)} />
+        <CrmMetricCard label="Kontak" value={String(data?.counts.contacts ?? 0)} />
+        <CrmMetricCard label="Prospek" value={String(data?.counts.leads ?? 0)} />
+        <CrmMetricCard label="Peluang" value={String(data?.counts.deals ?? 0)} />
+        <CrmMetricCard label="Tugas Terbuka" value={String(data?.counts.openTasks ?? 0)} />
+        <CrmMetricCard label="Catatan" value={String(data?.counts.notes ?? 0)} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <CrmPanel title="Modules" description="CRM workspace routes available in this build.">
+        <CrmPanel title="Modul" description="Rute ruang kerja CRM yang tersedia pada build ini.">
           <div className="grid gap-3 sm:grid-cols-2">
             {CRM_ACTIVE_MODULES.map((module) => (
               <Link
@@ -49,15 +49,15 @@ export default function CrmDashboardPage() {
                 className="rounded-xl border border-gray-200 p-4 transition hover:border-blue-300 hover:bg-blue-50"
               >
                 <p className="font-semibold text-gray-900">{module.label}</p>
-                <p className="mt-1 text-sm text-gray-500">Open {module.label.toLowerCase()}.</p>
+                <p className="mt-1 text-sm text-gray-500">Buka modul {module.label.toLowerCase()}.</p>
               </Link>
             ))}
           </div>
         </CrmPanel>
 
-        <CrmPanel title="Recent Tasks" description="Nearest due dates across leads and deals.">
+        <CrmPanel title="Tugas Terbaru" description="Jatuh tempo terdekat dari seluruh prospek dan peluang.">
           {isLoading ? (
-            <CrmEmptyHint text="Loading tasks..." />
+            <CrmEmptyHint text="Memuat tugas..." />
           ) : data?.recentTasks.length ? (
             data.recentTasks.map((task) => (
               <div key={task.id} className="rounded-lg border border-gray-200 p-4">
@@ -81,19 +81,19 @@ export default function CrmDashboardPage() {
                   <Badge variant="warning">{getCrmLabel(task.status)}</Badge>
                 </div>
                 <p className="mt-3 text-xs text-gray-500">
-                  Due: {task.dueDate ? formatDate(task.dueDate) : "No due date"}
+                  Jatuh tempo: {task.dueDate ? formatDate(task.dueDate) : "Belum ada"}
                 </p>
               </div>
             ))
           ) : (
-            <CrmEmptyHint text="No CRM tasks yet." />
+            <CrmEmptyHint text="Belum ada tugas CRM." />
           )}
         </CrmPanel>
       </div>
 
-      <CrmPanel title="Recent Notes" description="Latest notes captured in the CRM detail tabs.">
+      <CrmPanel title="Catatan Terbaru" description="Catatan terbaru yang tersimpan pada tab detail CRM.">
         {isLoading ? (
-          <CrmEmptyHint text="Loading notes..." />
+          <CrmEmptyHint text="Memuat catatan..." />
         ) : data?.recentNotes.length ? (
           <div className="grid gap-3 xl:grid-cols-2">
             {data.recentNotes.map((note) => (
@@ -102,7 +102,7 @@ export default function CrmDashboardPage() {
                   <div>
                     <p className="font-semibold text-gray-900">{note.title}</p>
                     <p className="mt-1 text-xs uppercase tracking-wide text-gray-400">
-                      {note.writerName ?? "Unknown writer"}
+                      {note.writerName ?? "Penulis tidak diketahui"}
                     </p>
                   </div>
                   <p className="text-xs text-gray-500">{formatDate(note.updatedAt)}</p>
@@ -124,7 +124,7 @@ export default function CrmDashboardPage() {
             ))}
           </div>
         ) : (
-          <CrmEmptyHint text="No CRM notes yet." />
+          <CrmEmptyHint text="Belum ada catatan CRM." />
         )}
       </CrmPanel>
     </div>

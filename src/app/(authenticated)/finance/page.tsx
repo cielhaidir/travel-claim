@@ -1774,7 +1774,7 @@ function BailoutSettlementTab({
             <p className="text-xs text-gray-500">Ringkasan jurnal posted terbaru untuk akun 1132 dan 2110.</p>
           </div>
           {receivablePayableRows.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-gray-500">Belum ada mutasi piutang atau hutang karyawan pada tenant aktif.</div>
+            <div className="px-4 py-6 text-sm text-gray-500">Belum ada mutasi piutang atau hutang karyawan pada data perusahaan.</div>
           ) : (
             <div className="max-h-[420px] overflow-auto">
               <div className="divide-y divide-gray-100">

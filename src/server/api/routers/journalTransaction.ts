@@ -6,25 +6,10 @@ import { userHasAnyRole } from "@/lib/auth/role-check";
 
 const FINANCE_ROLES: Role[] = [Role.FINANCE, Role.ADMIN, Role.ROOT];
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -65,7 +50,7 @@ export const journalTransactionRouter = createTRPCRouter({
 
       // Build where clause
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const where: Record<string, any> = withTenantWhere(ctx, {
+      const where: Record<string, any> = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -154,7 +139,7 @@ export const journalTransactionRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const tx = await ctx.db.journalTransaction.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: applyScope(ctx, { id: input.id, deletedAt: null }),
         include: {
           chartOfAccount: true,
           balanceAccount: true,
@@ -225,7 +210,7 @@ export const journalTransactionRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const where: Record<string, any> = withTenantWhere(ctx, {
+      const where: Record<string, any> = applyScope(ctx, {
         deletedAt: null,
       });
       if (input.isActive !== undefined) where.isActive = input.isActive;
@@ -261,10 +246,10 @@ export const journalTransactionRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const ba = await ctx.db.balanceAccount.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: applyScope(ctx, { id: input.id, deletedAt: null }),
         include: {
           journalTransactions: {
-            where: withTenantWhere(ctx, { deletedAt: null }),
+            where: applyScope(ctx, { deletedAt: null }),
             take: 10,
             orderBy: { transactionDate: "desc" },
             select: {
@@ -289,3 +274,4 @@ export const journalTransactionRouter = createTRPCRouter({
       return ba;
     }),
 });
+

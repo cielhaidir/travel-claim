@@ -61,77 +61,13 @@ async function handleMcpRequest(request: Request) {
       });
 
       if (tokenUser) {
-        const memberships = await db.$queryRaw<
-          Array<{
-            tenantId: string;
-            tenantName: string;
-            tenantSlug: string;
-            role: string;
-            customRoleId: string | null;
-            customRoleName: string | null;
-            status: string;
-            isDefault: boolean;
-            isRootTenant: boolean;
-          }>
-        >`
-          SELECT
-            tm."tenantId" as "tenantId",
-            t."name" as "tenantName",
-            t."slug" as "tenantSlug",
-            tm."role"::text as "role",
-            tm."customRoleId" as "customRoleId",
-            cr."displayName" as "customRoleName",
-            tm."status"::text as "status",
-            tm."isDefault" as "isDefault",
-            t."isRoot" as "isRootTenant"
-          FROM "TenantMembership" tm
-          INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
-          LEFT JOIN "TenantCustomRole" cr ON cr."id" = tm."customRoleId"
-          WHERE tm."userId" = ${tokenUser.id}
-          ORDER BY tm."isDefault" DESC, tm."createdAt" ASC
-        `;
-
-        const normalizedMemberships = memberships.map((membership) => ({
-          tenantId: membership.tenantId,
-          tenantName: membership.tenantName,
-          tenantSlug: membership.tenantSlug,
-          role: membership.role as Role,
-          customRoleId: membership.customRoleId,
-          customRoleName: membership.customRoleName,
-          roleLabel:
-            membership.customRoleName ??
-            ROLE_LABELS[membership.role as Role] ??
-            membership.role,
-          status: membership.status as "ACTIVE" | "INVITED" | "SUSPENDED",
-          isDefault: membership.isDefault,
-          isRootTenant: membership.isRootTenant,
-        }));
-        const activeMemberships = normalizedMemberships.filter(
-          (membership) => membership.status === "ACTIVE",
-        );
-        const activeMembership =
-          activeMemberships.find((membership) => membership.isDefault) ??
-          activeMemberships[0] ??
-          normalizedMemberships.find((membership) => membership.isRootTenant) ??
-          null;
-        const activeTenantId = activeMembership?.tenantId ?? null;
-        const activeRole = activeMembership?.role ?? tokenUser.role;
         const roles = normalizeRoles({
-          roles: activeMembership ? [activeMembership.role] : [],
-          role: activeRole,
-          includeDefault: !activeMembership,
+          role: tokenUser.role,
         });
-        const isRoot =
-          activeRole === "ROOT" ||
-          normalizedMemberships.some(
-            (membership) =>
-              membership.role === "ROOT" || membership.isRootTenant,
-          );
+        const isRoot = tokenUser.role === "ROOT";
         const permissions = await resolveEffectivePermissions(db, {
-          tenantId: activeTenantId,
           roles,
           isRoot,
-          customRoleId: activeMembership?.customRoleId ?? null,
         });
 
         // Build a synthetic session object matching the NextAuth session shape
@@ -145,14 +81,7 @@ async function handleMcpRequest(request: Request) {
             permissions,
             employeeId: tokenUser.employeeId,
             departmentId: tokenUser.departmentId,
-            activeTenantId,
-            activeCustomRoleId: activeMembership?.customRoleId ?? null,
-            activeRoleLabel:
-              activeMembership?.roleLabel ??
-              ROLE_LABELS[activeRole] ??
-              activeRole,
             isRoot,
-            memberships: normalizedMemberships,
             image: tokenUser.image ?? null,
           },
           expires: new Date(Date.now() + 1000 * 60 * 60).toISOString(), // 1h

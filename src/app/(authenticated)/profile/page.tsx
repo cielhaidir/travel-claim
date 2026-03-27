@@ -10,15 +10,6 @@ import { EmptyState } from "@/components/features/EmptyState";
 import { hasPermissionMap } from "@/lib/auth/permissions";
 import { formatDateTime, getInitials } from "@/lib/utils/format";
 
-type SessionMembership = {
-  tenantId: string;
-  tenantName: string;
-  tenantSlug: string;
-  status: string;
-  isDefault: boolean;
-  isRootTenant: boolean;
-};
-
 type ProfileData = {
   id: string;
   name: string | null;
@@ -90,16 +81,8 @@ export default function ProfilePage() {
   });
 
   const profile = profileQuery.data as ProfileData | undefined;
-  const memberships = (session?.user?.memberships ?? []) as SessionMembership[];
-  const activeTenant = memberships.find(
-    (membership) => membership.tenantId === session?.user?.activeTenantId,
-  );
   const scopedRoleLabels = useMemo(() => {
     const labels = new Set<string>();
-
-    if (session?.user?.activeRoleLabel) {
-      labels.add(session.user.activeRoleLabel);
-    }
 
     const roles = ((session?.user?.roles ?? []) as string[]).filter(Boolean);
     for (const role of roles) {
@@ -111,11 +94,7 @@ export default function ProfilePage() {
     }
 
     return [...labels];
-  }, [
-    session?.user?.activeRoleLabel,
-    session?.user?.role,
-    session?.user?.roles,
-  ]);
+  }, [session?.user?.role, session?.user?.roles]);
 
   const [profileForm, setProfileForm] = useState({
     name: "",
@@ -258,7 +237,7 @@ export default function ProfilePage() {
     <div className="space-y-6">
       <PageHeader
         title="Profil"
-        description="Kelola informasi akun, tenant aktif, dan keamanan akun yang sedang login."
+        description="Kelola informasi akun, peran aktif, dan keamanan akun yang sedang login."
         secondaryAction={{
           label: "Muat Ulang",
           onClick: () => void profileQuery.refetch(),
@@ -293,13 +272,13 @@ export default function ProfilePage() {
             </div>
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Tenant Aktif
+                Access Level
               </p>
               <p className="mt-1 font-semibold text-gray-900">
-                {activeTenant?.tenantName ?? "Tidak ada tenant aktif"}
+                {session?.user?.isRoot ? "Root Access" : "Global Role Access"}
               </p>
               <p className="text-xs text-gray-500">
-                {activeTenant?.tenantSlug ?? "-"}
+                {scopedRoleLabels.join(", ") || "-"}
               </p>
             </div>
           </div>
@@ -320,9 +299,9 @@ export default function ProfilePage() {
               value={profile.supervisor?.name ?? profile.supervisor?.email ?? "-"}
             />
             <InfoCard
-              label="Akses Tenant"
-              value={`${memberships.length} tenant`}
-              helper="Jumlah workspace yang bisa Anda akses"
+              label="Role Count"
+              value={String(scopedRoleLabels.length)}
+              helper="Jumlah role yang ada pada sesi aktif"
             />
             <InfoCard
               label="Direct Reports"
@@ -340,28 +319,20 @@ export default function ProfilePage() {
           </div>
 
           <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-sm font-semibold text-gray-900">Workspace Yang Tersedia</p>
+            <p className="text-sm font-semibold text-gray-900">Peran Sesi</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {memberships.length > 0 ? (
-                memberships.map((membership) => (
+              {scopedRoleLabels.length > 0 ? (
+                scopedRoleLabels.map((roleLabel) => (
                   <span
-                    key={membership.tenantId}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                      membership.tenantId === session?.user?.activeTenantId
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-gray-200 bg-white text-gray-600"
-                    }`}
+                    key={roleLabel}
+                    className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700"
                   >
-                    {membership.tenantName}
-                    {membership.isDefault ? " • Default" : ""}
-                    {membership.tenantId === session?.user?.activeTenantId
-                      ? " • Active"
-                      : ""}
+                    {roleLabel}
                   </span>
                 ))
               ) : (
                 <span className="text-sm text-gray-500">
-                  Tidak ada membership tenant yang aktif.
+                  Tidak ada role aktif pada sesi ini.
                 </span>
               )}
             </div>

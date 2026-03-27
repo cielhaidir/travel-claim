@@ -193,15 +193,9 @@ export const PERMISSION_MODULES: Record<string, PermissionModuleMeta> = {
   },
   roles: {
     label: "Manajemen Peran",
-    description: "Kelola izin menu dan fitur per peran di dalam tenant.",
+    description: "Kelola izin menu dan fitur per peran secara global.",
     color: "bg-gray-100 text-gray-800 border-gray-300",
     actions: ["read", "update"],
-  },
-  tenants: {
-    label: "Master Tenant",
-    description: "Kelola workspace tenant dan membership tenant.",
-    color: "bg-neutral-100 text-neutral-800 border-neutral-300",
-    actions: ["read", "create", "update"],
   },
   profile: {
     label: "Profil",
@@ -304,9 +298,7 @@ const FINANCE_PERMISSIONS: PermissionMap = {
 };
 
 const ADMIN_PERMISSIONS = (() => {
-  const full = buildFullAccessPermissionMap();
-  delete full.tenants;
-  return full;
+  return buildFullAccessPermissionMap();
 })();
 
 export const DEFAULT_ROLE_PERMISSION_PRESETS: Record<Role, PermissionMap> = {

@@ -13,25 +13,10 @@ import {
 } from "@/server/api/trpc";
 import { userHasRole } from "@/lib/auth/role-check";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -61,7 +46,7 @@ export const notificationRouter = createTRPCRouter({
       const where: Prisma.NotificationWhereInput = {
         userId: ctx.session.user.id,
       };
-      withTenantWhere(ctx, where);
+      applyScope(ctx, where);
 
       if (input?.status) {
         where.status = input.status;
@@ -112,7 +97,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.number())
     .query(async ({ ctx }) => {
       return ctx.db.notification.count({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           userId: ctx.session.user.id,
           readAt: null,
         }),
@@ -134,7 +119,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const notification = await ctx.db.notification.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           user: {
             select: {
@@ -195,7 +180,7 @@ export const notificationRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Verify user exists
       const user = await ctx.db.user.findFirst({
-        where: withTenantWhere(ctx, { id: input.userId }),
+        where: applyScope(ctx, { id: input.userId }),
       });
 
       if (!user) {
@@ -207,7 +192,6 @@ export const notificationRouter = createTRPCRouter({
 
       const notification = await ctx.db.notification.create({
         data: {
-          tenantId: getTenantScope(ctx).tenantId,
           userId: input.userId,
           title: input.title,
           message: input.message,
@@ -257,14 +241,6 @@ export const notificationRouter = createTRPCRouter({
         where: {
           id: { in: userIds },
           deletedAt: null,
-          memberships: getTenantScope(ctx).isRoot
-            ? undefined
-            : {
-                some: {
-                  tenantId: getTenantScope(ctx).tenantId ?? undefined,
-                  status: "ACTIVE",
-                },
-              },
         },
       });
 
@@ -278,7 +254,6 @@ export const notificationRouter = createTRPCRouter({
       // Create notifications
       const created = await ctx.db.notification.createMany({
         data: userIds.map((userId) => ({
-          tenantId: getTenantScope(ctx).tenantId,
           userId,
           ...notificationData,
         })),
@@ -297,7 +272,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const notification = await ctx.db.notification.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!notification) {
@@ -327,7 +302,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx }) => {
       const updated = await ctx.db.notification.updateMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           userId: ctx.session.user.id,
           readAt: null,
         }),
@@ -352,7 +327,7 @@ export const notificationRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Verify all notifications belong to user
       const notifications = await ctx.db.notification.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: { in: input.ids },
         }),
       });
@@ -369,7 +344,7 @@ export const notificationRouter = createTRPCRouter({
       }
 
       const updated = await ctx.db.notification.updateMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: { in: input.ids },
           userId: ctx.session.user.id,
         }),
@@ -389,7 +364,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const notification = await ctx.db.notification.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!notification) {
@@ -420,7 +395,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.object({ count: z.number() }))
     .mutation(async ({ ctx }) => {
       const deleted = await ctx.db.notification.deleteMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           userId: ctx.session.user.id,
           readAt: { not: null },
         }),
@@ -448,7 +423,7 @@ export const notificationRouter = createTRPCRouter({
       const { id, ...updateData } = input;
 
       const notification = await ctx.db.notification.findFirst({
-        where: withTenantWhere(ctx, { id }),
+        where: applyScope(ctx, { id }),
       });
 
       if (!notification) {
@@ -475,7 +450,7 @@ export const notificationRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.NotificationWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.NotificationWhereInput = applyScope(ctx, {});
 
       if (input?.channel) {
         where.channel = input.channel;
@@ -541,7 +516,7 @@ export const notificationRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const notification = await ctx.db.notification.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!notification) {

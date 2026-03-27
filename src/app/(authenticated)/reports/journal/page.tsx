@@ -113,7 +113,7 @@ export default function JournalReportPage() {
     <div className="space-y-6">
       <PageHeader
         title="Laporan Jurnal"
-        description="Rekap jurnal tenant aktif berdasarkan periode, status, dan sumber transaksi"
+        description="Rekap jurnal berdasarkan periode, status, dan sumber transaksi"
         primaryAction={{
           label: "Muat Ulang",
           onClick: () => void refetch(),
@@ -128,7 +128,7 @@ export default function JournalReportPage() {
         <ReportCard label="Total Jurnal" value={summary.total.toString()} helper="Jumlah jurnal pada periode filter" />
         <ReportCard label="Total Debit" value={formatCurrency(summary.totalDebit)} helper="Akumulasi debit periode filter" tone="blue" />
         <ReportCard label="Total Kredit" value={formatCurrency(summary.totalCredit)} helper="Akumulasi kredit periode filter" tone="green" />
-        <ReportCard label="Tenant Aktif" value={session.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-"} helper="Data mengikuti tenant yang sedang dipilih" tone="amber" />
+        <ReportCard label="Cakupan Data" value="Semua Data" helper="Laporan mencakup seluruh data yang tersedia" tone="amber" />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -221,7 +221,7 @@ export default function JournalReportPage() {
           </div>
         </ReportPanel>
 
-        <ReportPanel title="Rekap per Status" description="Distribusi status jurnal tenant aktif">
+        <ReportPanel title="Rekap per Status" description="Distribusi status jurnal pada filter aktif">
           <div className="space-y-3">
             {summary.byStatus.length === 0 ? (
               <EmptyLine text="Belum ada status jurnal yang bisa ditampilkan." />
@@ -240,7 +240,7 @@ export default function JournalReportPage() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Detail Jurnal</h2>
-          <p className="text-sm text-gray-500">Daftar jurnal tenant aktif sesuai filter laporan</p>
+          <p className="text-sm text-gray-500">Daftar jurnal sesuai filter laporan</p>
         </div>
         {isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat data jurnal...</div>
@@ -248,7 +248,7 @@ export default function JournalReportPage() {
           <EmptyState
             icon="🧾"
             title="Belum ada jurnal"
-            description="Tidak ada jurnal pada tenant aktif untuk filter yang dipilih."
+            description="Tidak ada jurnal untuk filter yang dipilih."
           />
         ) : (
           <div className="overflow-x-auto">

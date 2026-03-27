@@ -15,7 +15,6 @@ import {
   CrmLeadStatus,
   CrmTaskPriority,
   CrmTaskStatus,
-  MembershipStatus,
   type Prisma,
   type PrismaClient,
 } from "../../../../generated/prisma";
@@ -23,6 +22,11 @@ import {
   type PermissionAction,
   type PermissionMap,
 } from "@/lib/auth/permissions";
+import {
+  canConvertLeadStatus,
+  getCrmLabel,
+  getLeadConversionBlockedReason,
+} from "@/lib/constants/crm";
 import { userHasPermission } from "@/lib/auth/role-check";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 
@@ -38,64 +42,23 @@ type CrmContext = {
       roles?: string[] | null;
       isRoot?: boolean | null;
       permissions?: PermissionMap | null;
-      memberships?: Array<{
-        role?: string | null;
-        status?: string | null;
-        isRootTenant?: boolean | null;
-      }> | null;
     };
   };
   isRoot?: boolean;
-  tenantId?: string | null;
 };
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
-
   return where;
 }
 
-function withTenantMembershipFilter(
-  ctx: unknown,
+function applyMembershipScope(
+  _ctx: unknown,
   where: Prisma.UserWhereInput,
 ): Prisma.UserWhereInput {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-
-  if (isRoot || !tenantId) {
-    return where;
-  }
-
-  return {
-    AND: [
-      where,
-      {
-        memberships: {
-          some: {
-            tenantId,
-            status: MembershipStatus.ACTIVE,
-          },
-        },
-      },
-    ],
-  };
+  return where;
 }
 
 function requireCrmAccess(
@@ -108,7 +71,7 @@ function requireCrmAccess(
 
   throw new TRPCError({
     code: "FORBIDDEN",
-    message: "Insufficient permissions for CRM",
+    message: "Anda tidak memiliki izin yang cukup untuk CRM",
   });
 }
 
@@ -129,7 +92,7 @@ function parseOptionalDate(value?: string | null) {
 function buildFullName(
   firstName?: string | null,
   lastName?: string | null,
-  fallback = "Unknown",
+  fallback = "Tidak Diketahui",
 ) {
   const parts = [trimToNull(firstName), trimToNull(lastName)].filter(
     (part): part is string => !!part,
@@ -176,14 +139,14 @@ function ensureSingleSubject(input: { leadId?: string | null; dealId?: string | 
   if (!hasLead && !hasDeal) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "A lead or deal reference is required",
+      message: "Referensi prospek atau peluang wajib diisi",
     });
   }
 
   if (hasLead && hasDeal) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Only one CRM reference can be used at a time",
+      message: "Hanya satu referensi CRM yang dapat digunakan dalam satu waktu",
     });
   }
 }
@@ -196,11 +159,11 @@ async function resolveUserDisplayName(
 ) {
   const trimmedUserId = trimToNull(userId);
   if (!trimmedUserId) {
-    return trimToNull(fallback) ?? ctx.session.user.name ?? ctx.session.user.email ?? "Unknown";
+    return trimToNull(fallback) ?? ctx.session.user.name ?? ctx.session.user.email ?? "Tidak Diketahui";
   }
 
   const user = await db.user.findFirst({
-    where: withTenantMembershipFilter(ctx, {
+    where: applyMembershipScope(ctx, {
       id: trimmedUserId,
       deletedAt: null,
     }),
@@ -214,7 +177,7 @@ async function resolveUserDisplayName(
   if (!user) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Selected user is not available in the active tenant",
+      message: "Pengguna yang dipilih tidak tersedia",
     });
   }
 
@@ -227,7 +190,7 @@ async function getOrganizationOrThrow(
   id: string,
 ) {
   const organization = await db.crmCustomer.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -236,7 +199,7 @@ async function getOrganizationOrThrow(
   if (!organization) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Organization not found",
+      message: "Organisasi tidak ditemukan",
     });
   }
 
@@ -249,7 +212,7 @@ async function getContactOrThrow(
   id: string,
 ) {
   const contact = await db.crmContact.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -261,7 +224,7 @@ async function getContactOrThrow(
   if (!contact) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Contact not found",
+      message: "Kontak tidak ditemukan",
     });
   }
 
@@ -274,7 +237,7 @@ async function getLeadOrThrow(
   id: string,
 ) {
   const lead = await db.crmLead.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -283,7 +246,7 @@ async function getLeadOrThrow(
   if (!lead) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Lead not found",
+      message: "Prospek tidak ditemukan",
     });
   }
 
@@ -296,7 +259,7 @@ async function getDealOrThrow(
   id: string,
 ) {
   const deal = await db.crmDeal.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -305,7 +268,7 @@ async function getDealOrThrow(
   if (!deal) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Deal not found",
+      message: "Peluang tidak ditemukan",
     });
   }
 
@@ -318,7 +281,7 @@ async function getTaskOrThrow(
   id: string,
 ) {
   const task = await db.crmTask.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -327,7 +290,7 @@ async function getTaskOrThrow(
   if (!task) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Task not found",
+      message: "Tugas tidak ditemukan",
     });
   }
 
@@ -340,7 +303,7 @@ async function getNoteOrThrow(
   id: string,
 ) {
   const note = await db.crmNote.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -349,7 +312,7 @@ async function getNoteOrThrow(
   if (!note) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Note not found",
+      message: "Catatan tidak ditemukan",
     });
   }
 
@@ -362,7 +325,7 @@ async function getAttachmentOrThrow(
   id: string,
 ) {
   const attachment = await db.crmRecordAttachment.findFirst({
-    where: withTenantWhere(ctx, {
+    where: applyScope(ctx, {
       id,
       deletedAt: null,
     }),
@@ -371,7 +334,7 @@ async function getAttachmentOrThrow(
   if (!attachment) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Attachment not found",
+      message: "Lampiran tidak ditemukan",
     });
   }
 
@@ -418,7 +381,6 @@ async function touchLinkedRecords(
 async function createActivity(
   db: CrmDbClient,
   input: {
-    tenantId: string | null;
     customerId?: string | null;
     leadId?: string | null;
     dealId?: string | null;
@@ -431,7 +393,6 @@ async function createActivity(
 ) {
   await db.crmActivity.create({
     data: {
-      tenantId: input.tenantId,
       customerId: input.customerId ?? null,
       leadId: input.leadId ?? null,
       dealId: input.dealId ?? null,
@@ -451,7 +412,7 @@ function buildOrganizationWhere(
 ): Prisma.CrmCustomerWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(trimmed
       ? {
@@ -471,7 +432,7 @@ function buildContactWhere(
 ): Prisma.CrmContactWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(trimmed
       ? {
@@ -500,7 +461,7 @@ function buildLeadWhere(
 ): Prisma.CrmLeadWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(status ? { status } : {}),
     ...(trimmed
@@ -526,7 +487,7 @@ function buildDealWhere(
 ): Prisma.CrmDealWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(status ? { status } : {}),
     ...(trimmed
@@ -561,7 +522,7 @@ function buildTaskWhere(
 ): Prisma.CrmTaskWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(status ? { status } : {}),
     ...(trimmed
@@ -597,7 +558,7 @@ function buildNoteWhere(
 ): Prisma.CrmNoteWhereInput {
   const trimmed = trimToNull(search);
 
-  return withTenantWhere(ctx, {
+  return applyScope(ctx, {
     deletedAt: null,
     ...(trimmed
       ? {
@@ -696,6 +657,20 @@ const dealInputSchema = z.object({
   notes: z.string().trim().optional().nullable(),
 });
 
+const convertLeadToDealInputSchema = z.object({
+  id: z.string(),
+  existingOrganization: z.boolean().default(false),
+  customerId: z.string().optional().nullable(),
+  existingContact: z.boolean().default(false),
+  contactId: z.string().optional().nullable(),
+});
+
+const updateDealStatusInputSchema = z.object({
+  id: z.string(),
+  status: z.nativeEnum(CrmDealStatus),
+  lostReason: z.string().trim().optional().nullable(),
+});
+
 const taskInputSchema = z.object({
   leadId: z.string().optional().nullable(),
   dealId: z.string().optional().nullable(),
@@ -790,33 +765,11 @@ async function resolveDealPartyData(
   let primaryMobileNo = trimToNull(input.primaryMobileNo);
   let gender = input.gender ?? null;
 
-  if (input.existingOrganization) {
-    if (!customerId) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "An organization must be selected",
-      });
-    }
-
-    const organization = await getOrganizationOrThrow(db, ctx, customerId);
-    organizationName = organization.company;
-    website = website ?? organization.website;
-    employeeCount = employeeCount ?? organization.employeeCount ?? null;
-    annualRevenue =
-      annualRevenue ?? (organization.annualRevenue ? Number(organization.annualRevenue) : null);
-    industry = industry ?? organization.industry ?? null;
-  } else if (!organizationName) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Organization details are required",
-    });
-  }
-
   if (input.existingContact) {
     if (!contactId) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "A contact must be selected",
+        message: "Kontak wajib dipilih",
       });
     }
 
@@ -827,27 +780,42 @@ async function resolveDealPartyData(
     primaryMobileNo = trimToNull(contact.phone) ?? primaryMobileNo;
     gender = contact.gender ?? gender;
 
-    if (!customerId) {
-      customerId = contact.customerId;
-      const organization = await getOrganizationOrThrow(db, ctx, contact.customerId);
-      organizationName = organizationName ?? organization.company;
-      website = website ?? organization.website;
-      employeeCount = employeeCount ?? organization.employeeCount ?? null;
-      annualRevenue =
-        annualRevenue ?? (organization.annualRevenue ? Number(organization.annualRevenue) : null);
-      industry = industry ?? organization.industry ?? null;
-    }
-
     if (customerId && contact.customerId !== customerId) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Selected contact does not belong to the selected organization",
+        message: "Kontak yang dipilih tidak termasuk dalam organisasi yang dipilih",
       });
+    }
+
+    if (!input.existingOrganization) {
+      customerId = contact.customerId;
     }
   } else if (!firstName || !lastName) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Contact details are required",
+      message: "Detail kontak wajib diisi",
+    });
+  }
+
+  if (input.existingOrganization || input.existingContact) {
+    if (!customerId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Organisasi wajib dipilih",
+      });
+    }
+
+    const organization = await getOrganizationOrThrow(db, ctx, customerId);
+    organizationName = organization.company;
+    website = organization.website ?? website;
+    employeeCount = organization.employeeCount ?? employeeCount ?? null;
+    annualRevenue =
+      organization.annualRevenue ? Number(organization.annualRevenue) : annualRevenue;
+    industry = organization.industry ?? industry ?? null;
+  } else if (!organizationName) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Detail organisasi wajib diisi",
     });
   }
 
@@ -865,6 +833,75 @@ async function resolveDealPartyData(
     primaryMobileNo,
     gender,
   };
+}
+
+function getDealProbability(status: CrmDealStatus) {
+  switch (status) {
+    case CrmDealStatus.READY_TO_CLOSE:
+      return 90;
+    case CrmDealStatus.NEGOTIATION:
+      return 65;
+    case CrmDealStatus.WON:
+      return 100;
+    case CrmDealStatus.LOST:
+      return 0;
+    case CrmDealStatus.PROPOSAL_QUOTATION:
+      return 55;
+    case CrmDealStatus.DEMO_MAKING:
+      return 45;
+    case CrmDealStatus.QUALIFICATION:
+    default:
+      return 35;
+  }
+}
+
+function assertLeadStatusCanBeSetOnCreate(status: CrmLeadStatus) {
+  if (status === CrmLeadStatus.CONVERTED) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Status Dikonversi hanya dapat diatur lewat aksi konversi prospek.",
+    });
+  }
+}
+
+function assertLeadStatusCanBeSetOnUpdate(
+  existingStatus: CrmLeadStatus,
+  nextStatus: CrmLeadStatus,
+) {
+  if (existingStatus === CrmLeadStatus.CONVERTED && nextStatus !== CrmLeadStatus.CONVERTED) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Prospek yang sudah dikonversi tidak dapat dikembalikan ke status lain.",
+    });
+  }
+
+  if (existingStatus !== CrmLeadStatus.CONVERTED && nextStatus === CrmLeadStatus.CONVERTED) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Gunakan aksi konversi untuk mengubah prospek menjadi peluang.",
+    });
+  }
+}
+
+function assertLeadCanBeConverted(lead: {
+  status: CrmLeadStatus;
+  convertedToDealAt?: Date | null;
+}) {
+  if (lead.status === CrmLeadStatus.CONVERTED || lead.convertedToDealAt) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Prospek ini sudah pernah dikonversi menjadi peluang.",
+    });
+  }
+
+  if (!canConvertLeadStatus(lead.status)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        getLeadConversionBlockedReason(lead.status) ??
+        "Prospek hanya dapat dikonversi saat statusnya Terkualifikasi.",
+    });
+  }
 }
 
 export const crmRouter = createTRPCRouter({
@@ -933,7 +970,7 @@ export const crmRouter = createTRPCRouter({
 
     const [users, organizations, contacts, leads, deals] = await Promise.all([
       ctx.db.user.findMany({
-        where: withTenantMembershipFilter(ctx, {
+        where: applyMembershipScope(ctx, {
           deletedAt: null,
         }),
         select: {
@@ -945,7 +982,7 @@ export const crmRouter = createTRPCRouter({
         take: 200,
       }),
       ctx.db.crmCustomer.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           deletedAt: null,
         }),
         select: {
@@ -956,7 +993,7 @@ export const crmRouter = createTRPCRouter({
         take: 200,
       }),
       ctx.db.crmContact.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           deletedAt: null,
         }),
         select: {
@@ -973,7 +1010,7 @@ export const crmRouter = createTRPCRouter({
         take: 200,
       }),
       ctx.db.crmLead.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           deletedAt: null,
         }),
         select: {
@@ -985,7 +1022,7 @@ export const crmRouter = createTRPCRouter({
         take: 200,
       }),
       ctx.db.crmDeal.findMany({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           deletedAt: null,
         }),
         select: {
@@ -1034,7 +1071,7 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "read");
 
       const organization = await ctx.db.crmCustomer.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
           deletedAt: null,
         }),
@@ -1062,12 +1099,12 @@ export const crmRouter = createTRPCRouter({
         },
       });
 
-      if (!organization) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Organization not found",
-        });
-      }
+        if (!organization) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Organisasi tidak ditemukan",
+          });
+        }
 
       return organization;
     }),
@@ -1079,7 +1116,6 @@ export const crmRouter = createTRPCRouter({
 
       return ctx.db.crmCustomer.create({
         data: {
-          tenantId: getTenantScope(ctx).tenantId,
           name: input.company,
           company: input.company,
           email: null,
@@ -1164,7 +1200,7 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "read");
 
       const contact = await ctx.db.crmContact.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
           deletedAt: null,
         }),
@@ -1177,12 +1213,12 @@ export const crmRouter = createTRPCRouter({
         },
       });
 
-      if (!contact) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Contact not found",
-        });
-      }
+        if (!contact) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Kontak tidak ditemukan",
+          });
+        }
 
       return contact;
     }),
@@ -1199,7 +1235,7 @@ export const crmRouter = createTRPCRouter({
       return ctx.db.$transaction(async (tx) => {
         if (input.isPrimary) {
           await tx.crmContact.updateMany({
-            where: withTenantWhere(ctx, {
+            where: applyScope(ctx, {
               customerId: input.customerId,
               deletedAt: null,
             }),
@@ -1211,7 +1247,6 @@ export const crmRouter = createTRPCRouter({
 
         return tx.crmContact.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             customerId: input.customerId,
             name,
             title: trimToNull(input.designation),
@@ -1244,7 +1279,7 @@ export const crmRouter = createTRPCRouter({
       return ctx.db.$transaction(async (tx) => {
         if (input.isPrimary) {
           await tx.crmContact.updateMany({
-            where: withTenantWhere(ctx, {
+            where: applyScope(ctx, {
               customerId: input.customerId,
               deletedAt: null,
               NOT: { id: input.id },
@@ -1284,7 +1319,7 @@ export const crmRouter = createTRPCRouter({
 
       return ctx.db.$transaction(async (tx) => {
         await tx.crmDeal.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             contactId: input.id,
             deletedAt: null,
           }),
@@ -1343,7 +1378,7 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "read");
 
       const lead = await ctx.db.crmLead.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
           deletedAt: null,
         }),
@@ -1380,12 +1415,12 @@ export const crmRouter = createTRPCRouter({
         },
       });
 
-      if (!lead) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Lead not found",
-        });
-      }
+        if (!lead) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Prospek tidak ditemukan",
+          });
+        }
 
       return lead;
     }),
@@ -1394,13 +1429,14 @@ export const crmRouter = createTRPCRouter({
     .input(leadInputSchema)
     .mutation(async ({ ctx, input }) => {
       requireCrmAccess(ctx, "create");
+      assertLeadStatusCanBeSetOnCreate(input.status);
 
       const ownerName = await resolveUserDisplayName(ctx.db, ctx, input.ownerId);
       const organizationData = await resolveLeadOrganizationData(ctx.db, ctx, input);
       if (!organizationData.organizationName) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Organization name is required",
+          message: "Nama organisasi wajib diisi",
         });
       }
 
@@ -1411,7 +1447,6 @@ export const crmRouter = createTRPCRouter({
       return ctx.db.$transaction(async (tx) => {
         const lead = await tx.crmLead.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             customerId: organizationData.customerId,
             name: fullName,
             company: organizationName,
@@ -1450,12 +1485,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: lead.tenantId,
           customerId: lead.customerId,
           leadId: lead.id,
           ownerName,
-          title: "Lead created",
-          description: `${lead.company} has been added to CRM.`,
+          title: "Prospek ditambahkan",
+          description: `${lead.company} berhasil ditambahkan ke CRM.`,
           type: CrmActivityType.SYSTEM,
           happenedAt: touchedAt,
         });
@@ -1470,6 +1504,7 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "update");
 
       const existing = await getLeadOrThrow(ctx.db, ctx, input.id);
+      assertLeadStatusCanBeSetOnUpdate(existing.status, input.status);
       const ownerName = await resolveUserDisplayName(
         ctx.db,
         ctx,
@@ -1480,7 +1515,7 @@ export const crmRouter = createTRPCRouter({
       if (!organizationData.organizationName) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Organization name is required",
+          message: "Nama organisasi wajib diisi",
         });
       }
 
@@ -1529,12 +1564,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: lead.tenantId,
           customerId: lead.customerId,
           leadId: lead.id,
           ownerName,
-          title: "Lead updated",
-          description: `${lead.company} lead data has been updated.`,
+          title: "Prospek diperbarui",
+          description: `Data prospek ${lead.company} berhasil diperbarui.`,
           type:
             existing.status !== lead.status
               ? CrmActivityType.STAGE_CHANGE
@@ -1557,7 +1591,7 @@ export const crmRouter = createTRPCRouter({
         const deletedAt = new Date();
 
         await tx.crmTask.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             leadId: input.id,
             deletedAt: null,
           }),
@@ -1567,7 +1601,7 @@ export const crmRouter = createTRPCRouter({
         });
 
         await tx.crmNote.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             leadId: input.id,
             deletedAt: null,
           }),
@@ -1577,7 +1611,7 @@ export const crmRouter = createTRPCRouter({
         });
 
         await tx.crmRecordAttachment.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             leadId: input.id,
             deletedAt: null,
           }),
@@ -1596,47 +1630,160 @@ export const crmRouter = createTRPCRouter({
     }),
 
   createDealFromLead: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(convertLeadToDealInputSchema)
     .mutation(async ({ ctx, input }) => {
       requireCrmAccess(ctx, "update");
 
       const lead = await getLeadOrThrow(ctx.db, ctx, input.id);
+      assertLeadCanBeConverted(lead);
       const touchedAt = new Date();
 
       return ctx.db.$transaction(async (tx) => {
         const existingDeal = await tx.crmDeal.findFirst({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             leadId: lead.id,
             deletedAt: null,
           }),
         });
 
         if (existingDeal) {
-          return existingDeal;
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Prospek ini sudah terhubung ke peluang aktif.",
+          });
+        }
+
+        const party = await resolveDealPartyData(tx, ctx, {
+          leadId: lead.id,
+          existingOrganization: input.existingOrganization,
+          customerId: input.existingOrganization ? trimToNull(input.customerId) : null,
+          organizationName:
+            !input.existingOrganization && !input.existingContact ? lead.company : null,
+          website: lead.website,
+          employeeCount: lead.employeeCount,
+          annualRevenue: lead.annualRevenue ? Number(lead.annualRevenue) : null,
+          industry: lead.industry,
+          existingContact: input.existingContact,
+          contactId: input.existingContact ? trimToNull(input.contactId) : null,
+          firstName: input.existingContact ? null : trimToNull(lead.firstName),
+          lastName: input.existingContact ? null : trimToNull(lead.lastName),
+          primaryEmail: input.existingContact ? null : lead.email,
+          primaryMobileNo: input.existingContact ? null : trimToNull(lead.mobileNo),
+          gender: input.existingContact ? null : lead.gender,
+          title: null,
+          status: CrmDealStatus.QUALIFICATION,
+          ownerId: lead.ownerId,
+          expectedCloseDate: lead.expectedCloseDate?.toISOString() ?? null,
+          lostReason: null,
+          notes: lead.notes,
+        });
+
+        let customerId = party.customerId;
+        let organizationName = party.organizationName ?? lead.company;
+        let website = party.website ?? lead.website;
+        let employeeCount = party.employeeCount ?? lead.employeeCount;
+        let annualRevenue =
+          party.annualRevenue ?? (lead.annualRevenue ? Number(lead.annualRevenue) : null);
+        let industry = party.industry ?? lead.industry;
+
+        let contactId = party.contactId;
+        let firstName = party.firstName ?? trimToNull(lead.firstName);
+        let lastName = party.lastName ?? trimToNull(lead.lastName);
+        let primaryEmail = party.primaryEmail ?? lead.email;
+        let primaryMobileNo = party.primaryMobileNo ?? trimToNull(lead.mobileNo);
+        let gender = party.gender ?? lead.gender;
+
+        if (!input.existingOrganization && !input.existingContact) {
+          const customer = await tx.crmCustomer.create({
+            data: {
+              name: lead.company,
+              company: lead.company,
+              email: lead.email,
+              phone: trimToNull(lead.mobileNo) ?? trimToNull(lead.phone),
+              ownerName: lead.ownerName,
+              website: lead.website,
+              annualRevenue: lead.annualRevenue,
+              employeeCount: lead.employeeCount,
+              industry: lead.industry,
+              notes: trimToNull(lead.notes),
+              lastContactAt: touchedAt,
+            },
+          });
+
+          customerId = customer.id;
+          organizationName = customer.company;
+          website = customer.website;
+          employeeCount = customer.employeeCount;
+          annualRevenue = customer.annualRevenue ? Number(customer.annualRevenue) : null;
+          industry = customer.industry;
+        }
+
+        if (!input.existingContact) {
+          if (!customerId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Kontak baru membutuhkan organisasi tujuan",
+            });
+          }
+
+          const hasPrimaryContact =
+            (await tx.crmContact.count({
+              where: applyScope(ctx, {
+                customerId,
+                deletedAt: null,
+                isPrimary: true,
+              }),
+            })) > 0;
+
+          const contact = await tx.crmContact.create({
+            data: {
+              customerId,
+              name: buildFullName(lead.firstName, lead.lastName, lead.email),
+              title: null,
+              email: lead.email,
+              phone: trimToNull(lead.mobileNo) ?? trimToNull(lead.phone),
+              department: null,
+              firstName: trimToNull(lead.firstName),
+              lastName: trimToNull(lead.lastName),
+              gender: lead.gender,
+              designation: null,
+              address: null,
+              isPrimary: !hasPrimaryContact,
+              isActive: true,
+              notes: trimToNull(lead.notes),
+            },
+          });
+
+          contactId = contact.id;
+          firstName = trimToNull(contact.firstName) ?? firstName;
+          lastName = trimToNull(contact.lastName) ?? lastName;
+          primaryEmail = trimToNull(contact.email) ?? primaryEmail;
+          primaryMobileNo = trimToNull(contact.phone) ?? primaryMobileNo;
+          gender = contact.gender ?? gender;
         }
 
         const deal = await tx.crmDeal.create({
           data: {
-            tenantId: lead.tenantId,
-            customerId: lead.customerId,
+            customerId,
+            contactId,
             leadId: lead.id,
-            title: `${lead.company} - ${lead.name}`,
-            company: lead.company,
+            title: `${organizationName} - ${buildFullName(firstName, lastName, lead.name)}`,
+            company: organizationName,
             ownerName: lead.ownerName,
             ownerId: lead.ownerId,
             status: CrmDealStatus.QUALIFICATION,
-            website: lead.website,
-            employeeCount: lead.employeeCount,
-            annualRevenue: lead.annualRevenue,
-            industry: lead.industry,
-            firstName: lead.firstName,
-            lastName: lead.lastName,
-            primaryEmail: lead.email,
-            primaryMobileNo: lead.mobileNo,
-            gender: lead.gender,
+            website,
+            employeeCount,
+            annualRevenue,
+            industry,
+            firstName,
+            lastName,
+            primaryEmail,
+            primaryMobileNo,
+            gender,
             stage: mapDealStatusToLegacyStage(CrmDealStatus.QUALIFICATION),
             value: 0,
-            probability: 35,
+            probability: getDealProbability(CrmDealStatus.QUALIFICATION),
             source: lead.source,
             expectedCloseDate: lead.expectedCloseDate,
             notes: lead.notes,
@@ -1647,6 +1794,7 @@ export const crmRouter = createTRPCRouter({
         await tx.crmLead.update({
           where: { id: lead.id },
           data: {
+            customerId,
             status: CrmLeadStatus.CONVERTED,
             stage: CrmLeadStage.QUALIFIED,
             convertedToDealAt: touchedAt,
@@ -1657,29 +1805,27 @@ export const crmRouter = createTRPCRouter({
         await touchLinkedRecords(
           tx,
           {
-            customerId: lead.customerId,
+            customerId,
             leadId: lead.id,
             dealId: deal.id,
           },
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: lead.tenantId,
-          customerId: lead.customerId,
+          customerId,
           leadId: lead.id,
           ownerName: lead.ownerName,
-          title: "Lead converted",
-          description: `${lead.company} was converted into a deal.`,
+          title: "Prospek dikonversi",
+          description: `${lead.company} berhasil dikonversi menjadi peluang baru.`,
           type: CrmActivityType.STAGE_CHANGE,
           happenedAt: touchedAt,
         });
         await createActivity(tx, {
-          tenantId: deal.tenantId,
           customerId: deal.customerId,
           dealId: deal.id,
           ownerName: deal.ownerName,
-          title: "Deal created from lead",
-          description: `${deal.company} deal has been created from a lead.`,
+          title: "Peluang dibuat dari prospek",
+          description: `Peluang ${deal.company} berhasil dibuat dari prospek.`,
           type: CrmActivityType.SYSTEM,
           happenedAt: touchedAt,
         });
@@ -1737,7 +1883,7 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "read");
 
       const deal = await ctx.db.crmDeal.findFirst({
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
           deletedAt: null,
         }),
@@ -1764,12 +1910,12 @@ export const crmRouter = createTRPCRouter({
         },
       });
 
-      if (!deal) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Deal not found",
-        });
-      }
+        if (!deal) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Peluang tidak ditemukan",
+          });
+        }
 
       return deal;
     }),
@@ -1785,23 +1931,38 @@ export const crmRouter = createTRPCRouter({
       if (!party.organizationName) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Organization details are required",
+          message: "Detail organisasi wajib diisi",
         });
       }
 
       const title =
         trimToNull(input.title) ??
-        `${party.organizationName} - ${buildFullName(party.firstName, party.lastName, "Deal")}`;
+        `${party.organizationName} - ${buildFullName(party.firstName, party.lastName, "Peluang")}`;
       const touchedAt = new Date();
 
       return ctx.db.$transaction(async (tx) => {
+        let sourceLead: Awaited<ReturnType<typeof getLeadOrThrow>> | null = null;
         if (leadId) {
-          await getLeadOrThrow(tx, ctx, leadId);
+          sourceLead = await getLeadOrThrow(tx, ctx, leadId);
+          assertLeadCanBeConverted(sourceLead);
+
+          const existingDeal = await tx.crmDeal.findFirst({
+            where: applyScope(ctx, {
+              leadId,
+              deletedAt: null,
+            }),
+          });
+
+          if (existingDeal) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Prospek ini sudah terhubung ke peluang aktif.",
+            });
+          }
         }
 
         const deal = await tx.crmDeal.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             customerId: party.customerId,
             contactId: party.contactId,
             leadId,
@@ -1821,12 +1982,7 @@ export const crmRouter = createTRPCRouter({
             gender: party.gender,
             stage: mapDealStatusToLegacyStage(input.status),
             value: 0,
-            probability:
-              input.status === CrmDealStatus.READY_TO_CLOSE
-                ? 90
-                : input.status === CrmDealStatus.NEGOTIATION
-                  ? 65
-                  : 35,
+            probability: getDealProbability(input.status),
             source: leadId ? CrmLeadSource.REFERRAL : CrmLeadSource.WEBSITE,
             expectedCloseDate: parseOptionalDate(input.expectedCloseDate),
             closedAt:
@@ -1847,6 +2003,7 @@ export const crmRouter = createTRPCRouter({
           await tx.crmLead.update({
             where: { id: leadId },
             data: {
+              customerId: deal.customerId,
               status: CrmLeadStatus.CONVERTED,
               stage: CrmLeadStage.QUALIFIED,
               convertedToDealAt: touchedAt,
@@ -1855,12 +2012,11 @@ export const crmRouter = createTRPCRouter({
           });
 
           await createActivity(tx, {
-            tenantId: deal.tenantId,
             customerId: deal.customerId,
             leadId,
             ownerName,
-            title: "Lead converted",
-            description: `${deal.company} was converted into a deal.`,
+            title: "Prospek dikonversi",
+            description: `${sourceLead?.company ?? deal.company} berhasil dikonversi menjadi peluang.`,
             type: CrmActivityType.STAGE_CHANGE,
             happenedAt: touchedAt,
           });
@@ -1876,12 +2032,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: deal.tenantId,
           customerId: deal.customerId,
           dealId: deal.id,
           ownerName,
-          title: "Deal created",
-          description: `${deal.company} deal has been added to CRM.`,
+          title: "Peluang ditambahkan",
+          description: `Peluang ${deal.company} berhasil ditambahkan ke CRM.`,
           type: CrmActivityType.SYSTEM,
           happenedAt: touchedAt,
         });
@@ -1906,19 +2061,41 @@ export const crmRouter = createTRPCRouter({
       if (!party.organizationName) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Organization details are required",
+          message: "Detail organisasi wajib diisi",
         });
       }
 
       const leadId = trimToNull(input.leadId);
       const title =
         trimToNull(input.title) ??
-        `${party.organizationName} - ${buildFullName(party.firstName, party.lastName, "Deal")}`;
+        `${party.organizationName} - ${buildFullName(party.firstName, party.lastName, "Peluang")}`;
       const touchedAt = new Date();
 
       return ctx.db.$transaction(async (tx) => {
+        let sourceLead: Awaited<ReturnType<typeof getLeadOrThrow>> | null = null;
         if (leadId) {
-          await getLeadOrThrow(tx, ctx, leadId);
+          sourceLead = await getLeadOrThrow(tx, ctx, leadId);
+
+          if (leadId !== existing.leadId) {
+            assertLeadCanBeConverted(sourceLead);
+
+            const conflictingDeal = await tx.crmDeal.findFirst({
+              where: applyScope(ctx, {
+                leadId,
+                deletedAt: null,
+                id: {
+                  not: input.id,
+                },
+              }),
+            });
+
+            if (conflictingDeal) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Prospek ini sudah terhubung ke peluang aktif.",
+              });
+            }
+          }
         }
 
         const deal = await tx.crmDeal.update({
@@ -1942,12 +2119,7 @@ export const crmRouter = createTRPCRouter({
             primaryMobileNo: party.primaryMobileNo,
             gender: party.gender,
             stage: mapDealStatusToLegacyStage(input.status),
-            probability:
-              input.status === CrmDealStatus.READY_TO_CLOSE
-                ? 90
-                : input.status === CrmDealStatus.NEGOTIATION
-                  ? 65
-                  : 35,
+            probability: getDealProbability(input.status),
             expectedCloseDate: parseOptionalDate(input.expectedCloseDate),
             closedAt:
               input.status === CrmDealStatus.WON ||
@@ -1967,12 +2139,25 @@ export const crmRouter = createTRPCRouter({
           await tx.crmLead.update({
             where: { id: leadId },
             data: {
+              customerId: deal.customerId,
               status: CrmLeadStatus.CONVERTED,
               stage: CrmLeadStage.QUALIFIED,
               convertedToDealAt: touchedAt,
               lastActivityAt: touchedAt,
             },
           });
+
+          if (leadId !== existing.leadId) {
+            await createActivity(tx, {
+              customerId: deal.customerId,
+              leadId,
+              ownerName,
+              title: "Prospek dikonversi",
+              description: `${sourceLead?.company ?? deal.company} berhasil dikonversi menjadi peluang.`,
+              type: CrmActivityType.STAGE_CHANGE,
+              happenedAt: touchedAt,
+            });
+          }
         }
 
         await touchLinkedRecords(
@@ -1985,16 +2170,66 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: deal.tenantId,
           customerId: deal.customerId,
           dealId: deal.id,
           ownerName,
-          title: "Deal updated",
-          description: `${deal.company} deal data has been updated.`,
+          title: "Peluang diperbarui",
+          description: `Data peluang ${deal.company} berhasil diperbarui.`,
           type:
             existing.status !== deal.status
               ? CrmActivityType.STAGE_CHANGE
               : CrmActivityType.SYSTEM,
+          happenedAt: touchedAt,
+        });
+
+        return deal;
+      });
+    }),
+
+  updateDealStatus: protectedProcedure
+    .input(updateDealStatusInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      requireCrmAccess(ctx, "update");
+
+      const existing = await getDealOrThrow(ctx.db, ctx, input.id);
+      const touchedAt = new Date();
+
+      return ctx.db.$transaction(async (tx) => {
+        const deal = await tx.crmDeal.update({
+          where: { id: input.id },
+          data: {
+            status: input.status,
+            stage: mapDealStatusToLegacyStage(input.status),
+            probability: getDealProbability(input.status),
+            closedAt:
+              input.status === CrmDealStatus.WON ||
+              input.status === CrmDealStatus.LOST
+                ? existing.closedAt ?? touchedAt
+                : null,
+            lostReason:
+              input.status === CrmDealStatus.LOST
+                ? trimToNull(input.lostReason)
+                : null,
+            lastActivityAt: touchedAt,
+          },
+        });
+
+        await touchLinkedRecords(
+          tx,
+          {
+            customerId: deal.customerId,
+            dealId: deal.id,
+            leadId: deal.leadId,
+          },
+          touchedAt,
+        );
+        await createActivity(tx, {
+          customerId: deal.customerId,
+          dealId: deal.id,
+          ownerName: deal.ownerName,
+          title: "Status peluang diperbarui",
+          description: `Status peluang berubah menjadi ${getCrmLabel(input.status)}.`,
+          type: CrmActivityType.STAGE_CHANGE,
           happenedAt: touchedAt,
         });
 
@@ -2013,7 +2248,7 @@ export const crmRouter = createTRPCRouter({
         const deletedAt = new Date();
 
         await tx.crmTask.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             dealId: input.id,
             deletedAt: null,
           }),
@@ -2023,7 +2258,7 @@ export const crmRouter = createTRPCRouter({
         });
 
         await tx.crmNote.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             dealId: input.id,
             deletedAt: null,
           }),
@@ -2033,7 +2268,7 @@ export const crmRouter = createTRPCRouter({
         });
 
         await tx.crmRecordAttachment.updateMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             dealId: input.id,
             deletedAt: null,
           }),
@@ -2095,7 +2330,6 @@ export const crmRouter = createTRPCRouter({
 
         const task = await tx.crmTask.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             leadId,
             dealId,
             title: input.title.trim(),
@@ -2118,12 +2352,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: task.tenantId,
           customerId: lead?.customerId ?? deal?.customerId ?? null,
           leadId,
           dealId,
           ownerName: assigneeName,
-          title: "Task created",
+          title: "Tugas ditambahkan",
           description: task.title,
           type: CrmActivityType.TASK,
           happenedAt: touchedAt,
@@ -2179,12 +2412,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: task.tenantId,
           customerId: lead?.customerId ?? deal?.customerId ?? null,
           leadId,
           dealId,
           ownerName: assigneeName,
-          title: "Task updated",
+          title: "Tugas diperbarui",
           description: task.title,
           type: CrmActivityType.TASK,
           happenedAt: touchedAt,
@@ -2230,12 +2462,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: task.tenantId,
           customerId,
           leadId: task.leadId,
           dealId: task.dealId,
-          ownerName: task.assigneeName ?? ctx.session.user.name ?? "Unknown",
-          title: "Task removed",
+          ownerName: task.assigneeName ?? ctx.session.user.name ?? "Tidak Diketahui",
+          title: "Tugas dihapus",
           description: task.title,
           type: CrmActivityType.TASK,
           happenedAt: touchedAt,
@@ -2294,7 +2525,6 @@ export const crmRouter = createTRPCRouter({
 
         const note = await tx.crmNote.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             leadId,
             dealId,
             title: input.title.trim(),
@@ -2314,12 +2544,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: note.tenantId,
           customerId: lead?.customerId ?? deal?.customerId ?? null,
           leadId,
           dealId,
           ownerName: writerName,
-          title: "Note added",
+          title: "Catatan ditambahkan",
           description: note.title,
           type: CrmActivityType.NOTE,
           happenedAt: touchedAt,
@@ -2372,12 +2601,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: note.tenantId,
           customerId: lead?.customerId ?? deal?.customerId ?? null,
           leadId,
           dealId,
           ownerName: writerName,
-          title: "Note updated",
+          title: "Catatan diperbarui",
           description: note.title,
           type: CrmActivityType.NOTE,
           happenedAt: touchedAt,
@@ -2423,12 +2651,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: note.tenantId,
           customerId,
           leadId: note.leadId,
           dealId: note.dealId,
-          ownerName: note.writerName ?? ctx.session.user.name ?? "Unknown",
-          title: "Note removed",
+          ownerName: note.writerName ?? ctx.session.user.name ?? "Tidak Diketahui",
+          title: "Catatan dihapus",
           description: note.title,
           type: CrmActivityType.NOTE,
           happenedAt: touchedAt,
@@ -2454,7 +2681,6 @@ export const crmRouter = createTRPCRouter({
 
         const attachment = await tx.crmRecordAttachment.create({
           data: {
-            tenantId: getTenantScope(ctx).tenantId,
             leadId,
             dealId,
             filename: sanitizeFilename(input.originalName),
@@ -2476,12 +2702,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: attachment.tenantId,
           customerId: lead?.customerId ?? deal?.customerId ?? null,
           leadId,
           dealId,
-          ownerName: ctx.session.user.name ?? ctx.session.user.email ?? "Unknown",
-          title: "Attachment added",
+          ownerName: ctx.session.user.name ?? ctx.session.user.email ?? "Tidak Diketahui",
+          title: "Lampiran ditambahkan",
           description: attachment.originalName,
           type: CrmActivityType.ATTACHMENT,
           happenedAt: touchedAt,
@@ -2527,12 +2752,11 @@ export const crmRouter = createTRPCRouter({
           touchedAt,
         );
         await createActivity(tx, {
-          tenantId: attachment.tenantId,
           customerId,
           leadId: attachment.leadId,
           dealId: attachment.dealId,
-          ownerName: ctx.session.user.name ?? ctx.session.user.email ?? "Unknown",
-          title: "Attachment removed",
+          ownerName: ctx.session.user.name ?? ctx.session.user.email ?? "Tidak Diketahui",
+          title: "Lampiran dihapus",
           description: attachment.originalName,
           type: CrmActivityType.ATTACHMENT,
           happenedAt: touchedAt,
@@ -2542,3 +2766,4 @@ export const crmRouter = createTRPCRouter({
       });
     }),
 });
+

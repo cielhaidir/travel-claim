@@ -132,20 +132,19 @@ export default function TrialBalancePage() {
 
   if (!session || !isAllowed) return null;
 
-  const activeTenantName =
-    session.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const reportScopeLabel = "Semua Data";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Trial Balance"
-        description="Neraca saldo tenant aktif berdasarkan jurnal pada periode yang dipilih"
+        description="Neraca saldo berdasarkan jurnal pada periode yang dipilih"
         primaryAction={{ label: "Muat Ulang", onClick: () => void refetch() }}
         secondaryAction={{ label: "Laporan Jurnal", href: "/reports/journal" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant yang dipilih" />
+        <SummaryCard label="Cakupan Data" value={reportScopeLabel} helper="Laporan mencakup seluruh data yang tersedia" />
         <SummaryCard label="Total Debit" value={formatCurrency(totals.debit)} helper="Akumulasi debit semua akun" tone="blue" />
         <SummaryCard label="Total Kredit" value={formatCurrency(totals.credit)} helper="Akumulasi kredit semua akun" tone="green" />
         <SummaryCard label="Selisih" value={formatCurrency(totals.balance)} helper="Idealnya 0 untuk trial balance seimbang" tone={Math.abs(totals.balance) < 0.001 ? "emerald" : "amber"} />
@@ -232,7 +231,7 @@ export default function TrialBalancePage() {
         {isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat data trial balance...</div>
         ) : rows.length === 0 ? (
-          <EmptyState icon="📗" title="Belum ada data trial balance" description="Tidak ada baris akun untuk tenant aktif pada filter yang dipilih." />
+          <EmptyState icon="📗" title="Belum ada data trial balance" description="Tidak ada baris akun untuk filter yang dipilih." />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">

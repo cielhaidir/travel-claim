@@ -12,25 +12,10 @@ import {
   permissionProcedure,
 } from "@/server/api/trpc";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -60,7 +45,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {});
+      const where: Prisma.ChartOfAccountWhereInput = applyScope(ctx, {});
 
       if (input?.accountType) {
         where.accountType = input.accountType;
@@ -152,7 +137,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const account = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           parent: {
             select: {
@@ -231,7 +216,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.ChartOfAccountWhereInput = applyScope(ctx, {
         parentId: null,
       });
 
@@ -298,7 +283,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.ChartOfAccountWhereInput = applyScope(ctx, {
         isActive: true,
       });
 
@@ -340,7 +325,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ChartOfAccountWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.ChartOfAccountWhereInput = applyScope(ctx, {
         accountType: input.accountType,
       });
 
@@ -405,7 +390,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Check if code already exists
       const existing = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, { code: input.code }),
+        where: applyScope(ctx, { code: input.code }),
       });
 
       if (existing) {
@@ -418,7 +403,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Validate parent exists if provided
       if (input.parentId) {
         const parent = await ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, { id: input.parentId }),
+          where: applyScope(ctx, { id: input.parentId }),
         });
 
         if (!parent) {
@@ -440,7 +425,6 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create the account
       const account = await ctx.db.chartOfAccount.create({
         data: {
-          tenantId: getTenantScope(ctx).tenantId,
           code: input.code,
           name: input.name,
           accountType: input.accountType,
@@ -474,7 +458,6 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "ChartOfAccount",
@@ -527,7 +510,7 @@ export const chartOfAccountRouter = createTRPCRouter({
 
       // Check if account exists
       const existing = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, { id }),
+        where: applyScope(ctx, { id }),
         include: {
           children: true,
           _count: {
@@ -548,7 +531,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // If updating code, check for conflicts
       if (input.code && input.code !== existing.code) {
         const codeExists = await ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, { code: input.code }),
+          where: applyScope(ctx, { code: input.code }),
         });
 
         if (codeExists) {
@@ -571,7 +554,7 @@ export const chartOfAccountRouter = createTRPCRouter({
         if (input.parentId) {
           // Check if the new parent exists
           const parent = await ctx.db.chartOfAccount.findFirst({
-            where: withTenantWhere(ctx, { id: input.parentId }),
+            where: applyScope(ctx, { id: input.parentId }),
           });
 
           if (!parent) {
@@ -651,7 +634,6 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: existing.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "ChartOfAccount",
@@ -689,7 +671,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       // Check if account exists
       const account = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
         include: {
           children: true,
           _count: {
@@ -731,7 +713,6 @@ export const chartOfAccountRouter = createTRPCRouter({
           // Create audit log
           await ctx.db.auditLog.create({
             data: {
-              tenantId: account.tenantId,
               userId: ctx.session.user.id,
               action: AuditAction.DELETE,
               entityType: "ChartOfAccount",
@@ -767,7 +748,6 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.DELETE,
           entityType: "ChartOfAccount",
@@ -801,7 +781,7 @@ export const chartOfAccountRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const account = await ctx.db.chartOfAccount.findFirst({
-        where: withTenantWhere(ctx, { id: input.id }),
+        where: applyScope(ctx, { id: input.id }),
       });
 
       if (!account) {
@@ -816,7 +796,7 @@ export const chartOfAccountRouter = createTRPCRouter({
       // If activating, check parent is also active
       if (newActiveStatus && account.parentId) {
         const parent = await ctx.db.chartOfAccount.findFirst({
-          where: withTenantWhere(ctx, { id: account.parentId }),
+          where: applyScope(ctx, { id: account.parentId }),
         });
 
         if (parent && !parent.isActive) {
@@ -830,13 +810,13 @@ export const chartOfAccountRouter = createTRPCRouter({
       // If deactivating, deactivate all children too
       if (!newActiveStatus) {
         const childrenCount = await ctx.db.chartOfAccount.count({
-          where: withTenantWhere(ctx, { parentId: input.id, isActive: true }),
+          where: applyScope(ctx, { parentId: input.id, isActive: true }),
         });
 
         if (childrenCount > 0) {
           // Deactivate all active children
           await ctx.db.chartOfAccount.updateMany({
-            where: withTenantWhere(ctx, { parentId: input.id, isActive: true }),
+            where: applyScope(ctx, { parentId: input.id, isActive: true }),
             data: {
               isActive: false,
               updatedById: ctx.session.user.id,
@@ -867,7 +847,6 @@ export const chartOfAccountRouter = createTRPCRouter({
       // Create audit log
       await ctx.db.auditLog.create({
         data: {
-          tenantId: account.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "ChartOfAccount",
@@ -906,3 +885,4 @@ async function checkIsDescendant(
 
   return checkIsDescendant(db, ancestorId, descendant.parentId);
 }
+
