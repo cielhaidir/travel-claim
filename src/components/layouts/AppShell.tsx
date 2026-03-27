@@ -29,7 +29,7 @@ export function AppShell({ children, session }: AppShellProps) {
 
   return (
     <ToastProvider>
-      <div className="flex h-screen overflow-hidden bg-[#f7f7f8]">
+      <div className="flex h-screen overflow-hidden bg-[#FBFBFB]">
         {/* Mobile sidebar backdrop */}
         {sidebarOpen && (
           <div
@@ -40,7 +40,7 @@ export function AppShell({ children, session }: AppShellProps) {
 
         {/* Sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-[250px] transform border-r border-gray-200 bg-white transition-transform duration-300 ease-in-out lg:transition-[width,opacity] lg:duration-300 lg:ease-in-out ${
+          className={`fixed inset-y-0 left-0 z-50 w-[250px] transform border-r border-[#B4B4B4] bg-white transition-transform duration-300 ease-in-out lg:transition-[width,opacity] lg:duration-300 lg:ease-in-out ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           } ${
             desktopSidebarVisible
@@ -50,7 +50,7 @@ export function AppShell({ children, session }: AppShellProps) {
         >
           <div className="flex h-full flex-col">
             {/* Logo */}
-            <div className="flex h-[72px] items-center justify-between border-b border-gray-200 px-5">
+            <div className="flex h-[72px] items-center justify-between border-b border-[#B4B4B4] px-5">
               <Link href="/" className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 items-center justify-center text-blue-700">
                   <img
@@ -73,31 +73,31 @@ export function AppShell({ children, session }: AppShellProps) {
               </button>
             </div>
 
-            {/* Navigation */}
-            <SidebarNav
-              session={session}
-              currentPath={pathname}
-              onNavigate={() => setSidebarOpen(false)}
-            />
-          </div>
-        </aside>
-
-        {/* Main content */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Top header */}
-          <TopHeader
-            session={session}
-            onMenuClick={handleMenuClick}
-          />
-
-          {/* Page content */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="px-4 py-6 lg:px-8">
-              {/* <Breadcrumbs currentPath={pathname} /> */}
-              <div>{children}</div>
+              {/* Navigation */}
+              <SidebarNav
+                session={session}
+                currentPath={pathname}
+                onNavigate={() => setSidebarOpen(false)}
+              />
             </div>
-          </main>
-        </div>
+          </aside>
+
+          {/* Main content */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Top header */}
+            <TopHeader
+              session={session}
+              onMenuClick={handleMenuClick}
+            />
+
+            {/* Page content */}
+            <main className="flex-1 overflow-y-auto">
+              <div className="px-4 py-6 lg:px-8">
+                {/* <Breadcrumbs currentPath={pathname} /> */}
+                <div>{children}</div>
+              </div>
+            </main>
+          </div>
       </div>
     </ToastProvider>
   );

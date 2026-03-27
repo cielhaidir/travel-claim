@@ -56,7 +56,7 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
   }, []);
 
   return (
-    <header className="flex h-[72px] items-center border-b border-gray-200 bg-white px-4 lg:px-6">
+    <header className="flex h-[72px] items-center border-b border-[#B4B4B4] bg-white px-4 lg:px-6">
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onMenuClick}
