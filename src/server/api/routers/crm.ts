@@ -76,6 +76,22 @@ function requireCrmAccess(
   });
 }
 
+function requireOrganizationReadAccess(ctx: CrmContext) {
+  if (
+    ctx.isRoot ||
+    userHasPermission(ctx.session.user, "crm", "read") ||
+    userHasPermission(ctx.session.user, "purchases", "read") ||
+    userHasPermission(ctx.session.user, "sales", "read")
+  ) {
+    return;
+  }
+
+  throw new TRPCError({
+    code: "FORBIDDEN",
+    message: "Insufficient permissions for organization master data",
+  });
+}
+
 function trimToNull(value?: string | null) {
   if (value === undefined || value === null) {
     return null;
@@ -410,11 +426,14 @@ async function createActivity(
 function buildOrganizationWhere(
   ctx: CrmContext,
   search?: string,
+  usage?: "vendor" | "customer",
 ): Prisma.CrmCustomerWhereInput {
   const trimmed = trimToNull(search);
 
   return applyScope(ctx, {
     deletedAt: null,
+    ...(usage === "vendor" ? { isVendor: true } : {}),
+    ...(usage === "customer" ? { isCustomer: true } : {}),
     ...(trimmed
       ? {
           OR: [
@@ -660,6 +679,7 @@ function buildProductWhere(
 
 const baseListInput = z.object({
   search: z.string().optional(),
+  usage: z.enum(["vendor", "customer"]).optional(),
 });
 
 const dashboardInputSchema = baseListInput;
@@ -670,6 +690,8 @@ const organizationInputSchema = z.object({
   annualRevenue: z.number().nonnegative().optional().nullable(),
   employeeCount: z.nativeEnum(CrmEmployeeRange).optional().nullable(),
   industry: z.nativeEnum(CrmIndustry).optional().nullable(),
+  isVendor: z.boolean().optional().default(false),
+  isCustomer: z.boolean().optional().default(true),
   notes: z.string().trim().optional().nullable(),
 });
 
@@ -838,7 +860,7 @@ async function resolveDealPartyData(
   let annualRevenue = input.annualRevenue ?? null;
   let industry = input.industry ?? null;
 
-  let contactId = trimToNull(input.contactId);
+  const contactId = trimToNull(input.contactId);
   let firstName = trimToNull(input.firstName);
   let lastName = trimToNull(input.lastName);
   let primaryEmail = trimToNull(input.primaryEmail);
@@ -1287,10 +1309,10 @@ export const crmRouter = createTRPCRouter({
   listOrganizations: protectedProcedure
     .input(baseListInput)
     .query(async ({ ctx, input }) => {
-      requireCrmAccess(ctx, "read");
+      requireOrganizationReadAccess(ctx);
 
       return ctx.db.crmCustomer.findMany({
-        where: buildOrganizationWhere(ctx, input.search),
+        where: buildOrganizationWhere(ctx, input.search, input.usage),
         include: {
           contacts: {
             where: { deletedAt: null },
@@ -1364,6 +1386,8 @@ export const crmRouter = createTRPCRouter({
           city: null,
           ownerName: null,
           status: CrmCustomerStatus.ACTIVE,
+          isVendor: input.isVendor ?? false,
+          isCustomer: input.isCustomer ?? true,
           totalValue: 0,
           website: trimToNull(input.website),
           annualRevenue: input.annualRevenue ?? null,
@@ -1389,6 +1413,8 @@ export const crmRouter = createTRPCRouter({
           company: input.company,
           website: trimToNull(input.website),
           annualRevenue: input.annualRevenue ?? null,
+          isVendor: input.isVendor ?? false,
+          isCustomer: input.isCustomer ?? true,
           employeeCount: input.employeeCount ?? null,
           industry: input.industry ?? null,
           notes: trimToNull(input.notes),

@@ -276,7 +276,7 @@ export default function IncomeStatementPage() {
         <EmptyState
           icon="📘"
           title="Belum ada data laba rugi"
-          description="Tidak ditemukan mutasi akun pendapatan atau beban pada tenant aktif untuk filter yang dipilih."
+          description="Tidak ditemukan mutasi akun pendapatan atau beban untuk filter yang dipilih."
         />
       ) : null}
     </div>

@@ -86,7 +86,6 @@ Kalau sebagian route sudah sempat ada di codebase, target akhirnya tetap harus k
 Minimum fields:
 
 - `id`
-- `tenantId`
 - `name`
 - `company`
 - `email`
@@ -104,7 +103,6 @@ Minimum fields:
 Minimum fields:
 
 - `id`
-- `tenantId`
 - `customerId`
 - `name`
 - `title`
@@ -119,7 +117,6 @@ Minimum fields:
 Minimum fields:
 
 - `id`
-- `tenantId`
 - `customerId`
 - `name`
 - `company`
@@ -140,7 +137,6 @@ Minimum fields:
 Minimum fields:
 
 - `id`
-- `tenantId`
 - `customerId`
 - `leadId`
 - `title`
@@ -162,7 +158,6 @@ Untuk follow up sederhana di detail deal.
 Minimum fields:
 
 - `id`
-- `tenantId`
 - `dealId`
 - `type`
 - `body`
@@ -400,7 +395,7 @@ Implementasi dianggap siap bila:
 - card kanban bisa dikustomisasi dari component internal
 - follow up ada di detail deal, bukan chat module
 - schema CRM tidak memuat banyak entity yang belum dipakai
-- permission dan tenant scoping tetap aman
+- permission dan scoping data tetap aman
 
 ## Urutan Kerja Yang Direkomendasikan
 

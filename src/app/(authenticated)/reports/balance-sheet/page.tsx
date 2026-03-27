@@ -266,7 +266,7 @@ export default function BalanceSheetPage() {
         <EmptyState
           icon="📗"
           title="Belum ada data neraca"
-          description="Tidak ditemukan saldo akun aset, kewajiban, atau ekuitas pada tenant aktif untuk tanggal laporan yang dipilih."
+          description="Tidak ditemukan saldo akun aset, kewajiban, atau ekuitas untuk tanggal laporan yang dipilih."
         />
       ) : null}
     </div>

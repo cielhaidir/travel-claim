@@ -341,6 +341,38 @@ enum InventoryReservationStatus {
   CANCELED
 }
 
+enum InventoryTrackingMode {
+  QUANTITY
+  SERIAL
+  BOTH
+}
+
+enum InventoryUsageType {
+  SALE
+  OPERATIONAL
+  BOTH
+}
+
+enum InventoryUnitStatus {
+  IN_STOCK
+  RESERVED
+  ISSUED
+  ASSIGNED
+  IN_TRANSIT
+  DAMAGED
+  LOST
+  RETIRED
+}
+
+enum InventoryUnitCondition {
+  NEW
+  GOOD
+  FAIR
+  DAMAGED
+  REPAIR
+  SCRAP
+}
+
 enum CrmFulfillmentStatus {
   DRAFT
   RESERVED
@@ -437,6 +469,7 @@ model User {
   journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
   journalEntriesPosted  JournalEntry[] @relation("JournalEntryPostedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
   inventoryLedgerEntriesCreated InventoryLedgerEntry[]
+  assignedInventoryUnits     InventoryItemUnit[]    @relation("InventoryUnitAssignedTo")
 
   @@index([employeeId])
   @@index([email])
@@ -585,6 +618,8 @@ model CrmCustomer {
   city          String?            @db.VarChar(100)
   ownerName     String?            @db.VarChar(150)
   status        CrmCustomerStatus  @default(ACTIVE)
+  isVendor      Boolean            @default(false)
+  isCustomer    Boolean            @default(true)
   totalValue    Decimal            @default(0) @db.Decimal(15, 2)
   website       String?            @db.VarChar(255)
   annualRevenue Decimal?           @db.Decimal(15, 2)
@@ -941,6 +976,7 @@ model CrmFulfillmentRequestLine {
   leadLine           CrmLeadLine?          @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
   inventoryItem      InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
   warehouse          Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  reservedUnits      InventoryReservationUnit[]
 
   @@index([fulfillmentRequestId])
   @@index([leadLineId])
@@ -949,23 +985,30 @@ model CrmFulfillmentRequestLine {
 }
 
 model InventoryItem {
-  id                   String    @id @default(cuid())
-  sku                  String    @unique @db.VarChar(50)
-  name                 String    @db.VarChar(200)
-  description          String?   @db.Text
-  unitOfMeasure        String    @db.VarChar(30)
-  category             String?   @db.VarChar(100)
-  isStockTracked       Boolean   @default(true)
-  minStock             Decimal   @default(0) @db.Decimal(15, 2)
-  reorderPoint         Decimal   @default(0) @db.Decimal(15, 2)
-  standardCost         Decimal?  @db.Decimal(15, 2)
+  id                   String               @id @default(cuid())
+  sku                  String               @unique @db.VarChar(50)
+  name                 String               @db.VarChar(200)
+  description          String?              @db.Text
+  unitOfMeasure        String               @db.VarChar(30)
+  category             String?              @db.VarChar(100)
+  brand                String?               @db.VarChar(100)
+  model                String?               @db.VarChar(150)
+  manufacturerPartNumber String?             @db.VarChar(100)
+  barcode              String?               @db.VarChar(100)
+  technicalSpecs       String?               @db.Text
+  trackingMode         InventoryTrackingMode @default(QUANTITY)
+  usageType            InventoryUsageType   @default(BOTH)
+  isStockTracked       Boolean              @default(true)
+  minStock             Decimal              @default(0) @db.Decimal(15, 2)
+  reorderPoint         Decimal              @default(0) @db.Decimal(15, 2)
+  standardCost         Decimal?             @db.Decimal(15, 2)
   inventoryCoaId       String?
   temporaryAssetCoaId  String?
   cogsCoaId            String?
-  isActive             Boolean   @default(true)
+  isActive             Boolean              @default(true)
   deletedAt            DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
   inventoryCoa      ChartOfAccount?             @relation("InventoryItemStockCOA", fields: [inventoryCoaId], references: [id])
   temporaryAssetCoa ChartOfAccount?             @relation("InventoryItemTempAssetCOA", fields: [temporaryAssetCoaId], references: [id])
@@ -976,6 +1019,8 @@ model InventoryItem {
   balances          InventoryBalance[]
   ledgerEntries     InventoryLedgerEntry[]
   reservations      InventoryReservation[]
+  units             InventoryItemUnit[]
+  receiptBatches    InventoryReceiptBatch[]
 
   @@index([isActive])
   @@index([inventoryCoaId])
@@ -999,9 +1044,95 @@ model Warehouse {
   reservations        InventoryReservation[]
   leadLinePreferences CrmLeadLine[]
   fulfillmentLines    CrmFulfillmentRequestLine[]
+  receiptBatches      InventoryReceiptBatch[]
+  units               InventoryItemUnit[]
 
   @@index([isActive])
   @@index([deletedAt])
+}
+
+model InventoryItemUnit {
+  id                String                 @id @default(cuid())
+  inventoryItemId   String
+  warehouseId       String?
+  receiptBatchId    String?
+  bucketType        InventoryBucketType    @default(SALE_STOCK)
+  serialNumber      String?                @db.VarChar(150)
+  assetTag          String?                @db.VarChar(150)
+  batchNumber       String?                @db.VarChar(100)
+  status            InventoryUnitStatus    @default(IN_STOCK)
+  condition         InventoryUnitCondition @default(NEW)
+  receivedDate      DateTime?
+  purchaseDate      DateTime?
+  warrantyExpiry    DateTime?
+  assignedToUserId  String?
+  assignedAt        DateTime?
+  notes             String?                @db.Text
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  inventoryItem    InventoryItem          @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  warehouse        Warehouse?             @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  receiptBatch     InventoryReceiptBatch? @relation(fields: [receiptBatchId], references: [id], onDelete: SetNull)
+  assignedToUser   User?                  @relation("InventoryUnitAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reservationUnits InventoryReservationUnit[]
+
+  @@unique([serialNumber])
+  @@unique([assetTag])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+  @@index([receiptBatchId])
+  @@index([status])
+  @@index([condition])
+  @@index([bucketType])
+  @@index([assignedToUserId])
+}
+
+model InventoryReceiptBatch {
+  id              String              @id @default(cuid())
+  inventoryItemId String
+  warehouseId     String
+  bucketType      InventoryBucketType @default(SALE_STOCK)
+  vendorName      String?             @db.VarChar(150)
+  vendorReference String?             @db.VarChar(100)
+  batchNumber     String?             @db.VarChar(100)
+  unitCost        Decimal?            @db.Decimal(15, 2)
+  receivedQty     Decimal             @default(0) @db.Decimal(15, 2)
+  remainingQty    Decimal             @default(0) @db.Decimal(15, 2)
+  receivedDate    DateTime            @default(now())
+  referenceType   String?             @db.VarChar(50)
+  referenceId     String?             @db.VarChar(100)
+  notes           String?             @db.Text
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  warehouse     Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  units         InventoryItemUnit[]
+
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+  @@index([bucketType])
+  @@index([batchNumber])
+  @@index([vendorName])
+  @@index([receivedDate])
+}
+
+model InventoryReservationUnit {
+  id                      String                    @id @default(cuid())
+  reservationId           String
+  inventoryItemUnitId     String
+  fulfillmentRequestLineId String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+
+  reservation           InventoryReservation       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  inventoryItemUnit     InventoryItemUnit          @relation(fields: [inventoryItemUnitId], references: [id], onDelete: Cascade)
+  fulfillmentRequestLine CrmFulfillmentRequestLine? @relation(fields: [fulfillmentRequestLineId], references: [id], onDelete: SetNull)
+
+  @@unique([reservationId, inventoryItemUnitId])
+  @@index([inventoryItemUnitId])
+  @@index([fulfillmentRequestLineId])
 }
 
 model InventoryBalance {
@@ -1067,9 +1198,10 @@ model InventoryReservation {
   createdAt    DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
 
-  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  warehouse Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  leadLine  CrmLeadLine?  @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
+  item             InventoryItem             @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse        Warehouse?                @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  leadLine         CrmLeadLine?              @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
+  reservationUnits InventoryReservationUnit[]
 
   @@index([itemId])
   @@index([warehouseId])

@@ -114,7 +114,7 @@ async function main() {
   };
   assert(created.id, "User creation did not return an id.");
   assert(created.role === Role.EMPLOYEE, "User creation returned the wrong role.");
-  pass("user.create creates a global user without tenant context");
+  pass("user.create creates a global user without extra workspace context");
 
   const fetched = (await caller.user.getById({
     id: created.id,

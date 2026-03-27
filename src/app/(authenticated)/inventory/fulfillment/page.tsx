@@ -220,7 +220,22 @@ export default function InventoryFulfillmentPage() {
                     <tbody className="divide-y divide-gray-100 bg-white">
                       {request.lines.map((line: any) => (
                         <tr key={line.id}>
-                          <td className="px-4 py-3 text-gray-700">{line.inventoryItem.sku} · {line.inventoryItem.name}</td>
+                          <td className="px-4 py-3 text-gray-700">
+                            <div>
+                              <p>{line.inventoryItem.sku} · {line.inventoryItem.name}</p>
+                              <p className="text-xs text-gray-500">Tracking: {line.inventoryItem.trackingMode ?? "QUANTITY"}</p>
+                              {(line.reservedUnits ?? []).length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {line.reservedUnits.map((entry: any) => (
+                                    <span key={entry.id} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                                      {entry.inventoryItemUnit.serialNumber ?? entry.inventoryItemUnit.assetTag ?? entry.inventoryItemUnit.id}
+                                      <span className="ml-1 text-slate-500">({entry.inventoryItemUnit.status})</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-gray-600">{line.warehouse?.name ?? "-"}</td>
                           <td className="px-4 py-3 text-right text-gray-700">{Number(line.qtyRequested ?? 0)}</td>
                           <td className="px-4 py-3 text-right text-gray-700">{Number(line.qtyReserved ?? 0)}</td>

@@ -27,7 +27,7 @@ Dokumen ini menjadi acuan produk dan backlog tingkat tinggi. Detail teknis imple
 - Follow up dicatat langsung di dalam detail deal sebagai note / timeline item sederhana.
 - `Leads` dan `Deals` tetap memakai `kanban`.
 - Modul lain tampil `list` atau `detail section` bila memang dibutuhkan.
-- Semua data tetap `tenant-aware`, `permission-aware`, dan tercatat di audit log.
+- Semua data tetap `permission-aware`, konsisten lintas modul, dan tercatat di audit log.
 
 ## Scope Yang Dikeluarkan Dari V1
 
@@ -293,7 +293,7 @@ CRM V1 dianggap selesai bila:
 - customer, lead, dan deal punya detail page yang jelas
 - follow up sederhana ada di detail deal, bukan chat
 - tidak ada placeholder CRM yang tersisa untuk modul di luar scope
-- tenant scoping dan permission check tetap aman
+- scoping data dan permission check tetap aman
 
 ## Catatan Penting
 

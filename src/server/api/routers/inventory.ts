@@ -7,6 +7,10 @@ import {
   InventoryBucketType,
   InventoryMovementType,
   InventoryReservationStatus,
+  InventoryTrackingMode,
+  InventoryUnitCondition,
+  InventoryUnitStatus,
+  InventoryUsageType,
   JournalSourceType,
   JournalStatus,
   type Prisma,
@@ -17,14 +21,15 @@ import {
   generateJournalEntryNumber,
 } from "@/lib/utils/numberGenerators";
 
-function withTenantWhere<T extends Record<string, unknown>>(
-  _ctx: unknown,
-  where: T,
-): T {
+function withInventoryWhere<T extends Record<string, unknown>>(where: T): T {
   return where;
 }
 
 const decimalNumber = z.coerce.number().finite();
+
+function isSerializedTrackingMode(mode: InventoryTrackingMode) {
+  return mode === InventoryTrackingMode.SERIAL || mode === InventoryTrackingMode.BOTH;
+}
 
 async function ensureInventoryBalance(
   tx: Prisma.TransactionClient,
@@ -71,7 +76,7 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where = withTenantWhere(ctx, {
+      const where = withInventoryWhere({
         deletedAt: null,
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         ...(input.isStockTracked !== undefined
@@ -82,6 +87,8 @@ export const inventoryRouter = createTRPCRouter({
               OR: [
                 { sku: { contains: input.search, mode: "insensitive" as const } },
                 { name: { contains: input.search, mode: "insensitive" as const } },
+                { brand: { contains: input.search, mode: "insensitive" as const } },
+                { model: { contains: input.search, mode: "insensitive" as const } },
                 {
                   category: {
                     contains: input.search,
@@ -110,6 +117,9 @@ export const inventoryRouter = createTRPCRouter({
             where: { deletedAt: null },
             select: { id: true, code: true, name: true, type: true },
           },
+          units: {
+            select: { id: true },
+          },
           inventoryCoa: {
             select: { id: true, code: true, name: true, accountType: true },
           },
@@ -130,7 +140,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
         include: {
           balances: {
             include: {
@@ -150,6 +160,36 @@ export const inventoryRouter = createTRPCRouter({
               isActive: true,
             },
             orderBy: [{ name: "asc" }],
+          },
+          units: {
+            orderBy: [{ createdAt: "desc" }],
+            take: 50,
+            select: {
+              id: true,
+              serialNumber: true,
+              assetTag: true,
+              batchNumber: true,
+              status: true,
+              condition: true,
+              bucketType: true,
+              receivedDate: true,
+              purchaseDate: true,
+              warrantyExpiry: true,
+              assignedAt: true,
+              notes: true,
+              warehouse: { select: { id: true, code: true, name: true } },
+              receiptBatch: {
+                select: {
+                  id: true,
+                  vendorName: true,
+                  vendorReference: true,
+                  batchNumber: true,
+                  unitCost: true,
+                  receivedDate: true,
+                },
+              },
+              assignedToUser: { select: { id: true, name: true, email: true } },
+            },
           },
           ledgerEntries: {
             orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
@@ -188,6 +228,24 @@ export const inventoryRouter = createTRPCRouter({
               },
             },
           },
+          receiptBatches: {
+            orderBy: [{ receivedDate: "desc" }, { createdAt: "desc" }],
+            take: 20,
+            select: {
+              id: true,
+              bucketType: true,
+              vendorName: true,
+              vendorReference: true,
+              batchNumber: true,
+              unitCost: true,
+              receivedQty: true,
+              remainingQty: true,
+              receivedDate: true,
+              referenceType: true,
+              referenceId: true,
+              notes: true,
+            },
+          },
         },
       });
 
@@ -206,7 +264,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const relatedJournals = journalSourceIds.length
         ? await ctx.db.journalEntry.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceId: { in: journalSourceIds },
               status: JournalStatus.POSTED,
             }),
@@ -240,6 +298,13 @@ export const inventoryRouter = createTRPCRouter({
         description: z.string().optional(),
         unitOfMeasure: z.string().min(1).max(30),
         category: z.string().max(100).optional(),
+        brand: z.string().max(100).optional(),
+        model: z.string().max(150).optional(),
+        manufacturerPartNumber: z.string().max(100).optional(),
+        barcode: z.string().max(100).optional(),
+        technicalSpecs: z.string().optional(),
+        trackingMode: z.nativeEnum(InventoryTrackingMode).default(InventoryTrackingMode.QUANTITY),
+        usageType: z.nativeEnum(InventoryUsageType).default(InventoryUsageType.BOTH),
         isStockTracked: z.boolean().default(true),
         minStock: decimalNumber.default(0),
         reorderPoint: decimalNumber.default(0),
@@ -253,7 +318,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { sku: input.sku }),
+        where: withInventoryWhere({ sku: input.sku }),
       });
 
       if (existing) {
@@ -270,6 +335,13 @@ export const inventoryRouter = createTRPCRouter({
           description: input.description,
           unitOfMeasure: input.unitOfMeasure,
           category: input.category,
+          brand: input.brand,
+          model: input.model,
+          manufacturerPartNumber: input.manufacturerPartNumber,
+          barcode: input.barcode,
+          technicalSpecs: input.technicalSpecs,
+          trackingMode: input.trackingMode,
+          usageType: input.usageType,
           isStockTracked: input.isStockTracked,
           minStock: input.minStock,
           reorderPoint: input.reorderPoint,
@@ -291,6 +363,10 @@ export const inventoryRouter = createTRPCRouter({
             after: {
               sku: item.sku,
               name: item.name,
+              brand: item.brand,
+              model: item.model,
+              trackingMode: item.trackingMode,
+              usageType: item.usageType,
               unitOfMeasure: item.unitOfMeasure,
               category: item.category,
               inventoryCoaId: item.inventoryCoaId,
@@ -312,6 +388,13 @@ export const inventoryRouter = createTRPCRouter({
         description: z.string().nullable().optional(),
         unitOfMeasure: z.string().min(1).max(30).optional(),
         category: z.string().max(100).nullable().optional(),
+        brand: z.string().max(100).nullable().optional(),
+        model: z.string().max(150).nullable().optional(),
+        manufacturerPartNumber: z.string().max(100).nullable().optional(),
+        barcode: z.string().max(100).nullable().optional(),
+        technicalSpecs: z.string().nullable().optional(),
+        trackingMode: z.nativeEnum(InventoryTrackingMode).optional(),
+        usageType: z.nativeEnum(InventoryUsageType).optional(),
         isStockTracked: z.boolean().optional(),
         minStock: decimalNumber.optional(),
         reorderPoint: decimalNumber.optional(),
@@ -325,11 +408,59 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
       });
 
       if (!current) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
+      }
+
+      if (input.isActive === false && current.isActive) {
+        const activeReservation = await ctx.db.inventoryReservation.findFirst({
+          where: withInventoryWhere({
+            itemId: current.id,
+            status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
+          }),
+          select: { id: true, sourceId: true, sourceType: true },
+        });
+
+        if (activeReservation) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Item tidak bisa dinonaktifkan karena masih memiliki reservasi aktif/parsial.",
+          });
+        }
+
+        const activeFulfillmentLine = await ctx.db.crmFulfillmentRequestLine.findFirst({
+          where: {
+            inventoryItemId: current.id,
+            fulfillmentRequest: {
+              is: withInventoryWhere({
+                status: {
+                  in: [
+                    CrmFulfillmentStatus.DRAFT,
+                    CrmFulfillmentStatus.RESERVED,
+                    CrmFulfillmentStatus.PARTIAL,
+                    CrmFulfillmentStatus.READY,
+                  ],
+                },
+              }),
+            },
+          },
+          include: {
+            fulfillmentRequest: {
+              select: { requestNumber: true, status: true },
+            },
+          },
+        });
+
+        if (activeFulfillmentLine) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Item tidak bisa dinonaktifkan karena masih dipakai oleh fulfillment aktif ${activeFulfillmentLine.fulfillmentRequest.requestNumber} (${activeFulfillmentLine.fulfillmentRequest.status}).`,
+          });
+        }
       }
 
       const updated = await ctx.db.inventoryItem.update({
@@ -339,6 +470,15 @@ export const inventoryRouter = createTRPCRouter({
           description: input.description === undefined ? undefined : input.description,
           unitOfMeasure: input.unitOfMeasure,
           category: input.category === undefined ? undefined : input.category,
+          brand: input.brand === undefined ? undefined : input.brand,
+          model: input.model === undefined ? undefined : input.model,
+          manufacturerPartNumber:
+            input.manufacturerPartNumber === undefined ? undefined : input.manufacturerPartNumber,
+          barcode: input.barcode === undefined ? undefined : input.barcode,
+          technicalSpecs:
+            input.technicalSpecs === undefined ? undefined : input.technicalSpecs,
+          trackingMode: input.trackingMode,
+          usageType: input.usageType,
           isStockTracked: input.isStockTracked,
           minStock: input.minStock,
           reorderPoint: input.reorderPoint,
@@ -378,7 +518,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const warehouses = await ctx.db.warehouse.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           deletedAt: null,
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
           ...(input.search
@@ -416,7 +556,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const accounts = await ctx.db.chartOfAccount.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           isActive: true,
           ...(input.accountType ? { accountType: input.accountType } : {}),
         }),
@@ -434,6 +574,31 @@ export const inventoryRouter = createTRPCRouter({
       return { accounts };
     }),
 
+  listAssignableUsers: permissionProcedure("inventory", "read")
+    .input(z.object({ search: z.string().optional() }).optional())
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const users = await ctx.db.user.findMany({
+        where: {
+          deletedAt: null,
+          ...(input?.search
+            ? {
+                OR: [
+                  { name: { contains: input.search, mode: "insensitive" } },
+                  { email: { contains: input.search, mode: "insensitive" } },
+                  { employeeId: { contains: input.search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, name: true, email: true, employeeId: true },
+        orderBy: [{ name: "asc" }],
+        take: 100,
+      });
+
+      return { users };
+    }),
+
   createWarehouse: permissionProcedure("inventory", "create")
     .input(
       z.object({
@@ -446,7 +611,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { code: input.code }),
+        where: withInventoryWhere({ code: input.code }),
       });
 
       if (existing) {
@@ -478,6 +643,98 @@ export const inventoryRouter = createTRPCRouter({
       return warehouse;
     }),
 
+  updateWarehouse: permissionProcedure("inventory", "update")
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1).max(150).optional(),
+        description: z.string().nullable().optional(),
+        isActive: z.boolean().optional(),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const current = await ctx.db.warehouse.findFirst({
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
+      });
+
+      if (!current) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
+      }
+
+      if (input.isActive === false && current.isActive) {
+        const activeReservation = await ctx.db.inventoryReservation.findFirst({
+          where: withInventoryWhere({
+            warehouseId: current.id,
+            status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
+          }),
+          select: { id: true, sourceId: true, sourceType: true },
+        });
+
+        if (activeReservation) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Gudang tidak bisa dinonaktifkan karena masih memiliki reservasi aktif/parsial.",
+          });
+        }
+
+        const activeFulfillmentLine = await ctx.db.crmFulfillmentRequestLine.findFirst({
+          where: {
+            warehouseId: current.id,
+            fulfillmentRequest: {
+              is: withInventoryWhere({
+                status: {
+                  in: [
+                    CrmFulfillmentStatus.DRAFT,
+                    CrmFulfillmentStatus.RESERVED,
+                    CrmFulfillmentStatus.PARTIAL,
+                    CrmFulfillmentStatus.READY,
+                  ],
+                },
+              }),
+            },
+          },
+          include: {
+            fulfillmentRequest: {
+              select: { requestNumber: true, status: true },
+            },
+          },
+        });
+
+        if (activeFulfillmentLine) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Gudang tidak bisa dinonaktifkan karena masih dipakai oleh fulfillment aktif ${activeFulfillmentLine.fulfillmentRequest.requestNumber} (${activeFulfillmentLine.fulfillmentRequest.status}).`,
+          });
+        }
+      }
+
+      const updated = await ctx.db.warehouse.update({
+        where: { id: current.id },
+        data: {
+          name: input.name,
+          description: input.description === undefined ? undefined : input.description,
+          isActive: input.isActive,
+        },
+      });
+
+      await ctx.db.auditLog.create({
+        data: {
+          userId: ctx.session.user.id,
+          action: AuditAction.UPDATE,
+          entityType: "Warehouse",
+          entityId: updated.id,
+          changes: {
+            before: current,
+            after: updated,
+          },
+        },
+      });
+
+      return updated;
+    }),
+
   stockOverview: permissionProcedure("inventory", "read")
     .input(
       z.object({
@@ -489,7 +746,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const balances = await ctx.db.inventoryBalance.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           ...(input.warehouseId ? { warehouseId: input.warehouseId } : {}),
           ...(input.itemId ? { itemId: input.itemId } : {}),
         }),
@@ -500,6 +757,10 @@ export const inventoryRouter = createTRPCRouter({
               sku: true,
               name: true,
               unitOfMeasure: true,
+              trackingMode: true,
+              usageType: true,
+              brand: true,
+              model: true,
               minStock: true,
               reorderPoint: true,
               isActive: true,
@@ -525,7 +786,94 @@ export const inventoryRouter = createTRPCRouter({
         ? balances.filter((balance) => Number(balance.qtyOnHand) <= Number(balance.item.reorderPoint ?? 0))
         : balances;
 
-      return { balances: rows };
+      const serializedCandidates = rows.filter((balance) =>
+        isSerializedTrackingMode(balance.item.trackingMode),
+      );
+
+      const serializedUnits = serializedCandidates.length
+        ? await ctx.db.inventoryItemUnit.findMany({
+            where: withInventoryWhere({
+              inventoryItemId: { in: [...new Set(serializedCandidates.map((balance) => balance.itemId))] },
+              warehouseId: { in: [...new Set(serializedCandidates.map((balance) => balance.warehouseId))] },
+            }),
+            select: {
+              id: true,
+              inventoryItemId: true,
+              warehouseId: true,
+              bucketType: true,
+              serialNumber: true,
+              assetTag: true,
+              status: true,
+              condition: true,
+              assignedToUser: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: [{ createdAt: "asc" }],
+          })
+        : [];
+
+      const receiptBatches = rows.length
+        ? await ctx.db.inventoryReceiptBatch.findMany({
+            where: withInventoryWhere({
+              inventoryItemId: { in: [...new Set(rows.map((balance) => balance.itemId))] },
+              warehouseId: { in: [...new Set(rows.map((balance) => balance.warehouseId))] },
+              bucketType: { in: [...new Set(rows.map((balance) => balance.bucketType))] },
+            }),
+            select: {
+              id: true,
+              inventoryItemId: true,
+              warehouseId: true,
+              bucketType: true,
+              vendorName: true,
+              vendorReference: true,
+              batchNumber: true,
+              unitCost: true,
+              receivedQty: true,
+              remainingQty: true,
+              receivedDate: true,
+              referenceType: true,
+              referenceId: true,
+            },
+            orderBy: [{ receivedDate: "desc" }, { createdAt: "desc" }],
+          })
+        : [];
+
+      const serializedUnitMap = new Map<string, (typeof serializedUnits)>();
+      for (const unit of serializedUnits) {
+        const key = `${unit.inventoryItemId}:${unit.warehouseId}:${unit.bucketType}`;
+        serializedUnitMap.set(key, [...(serializedUnitMap.get(key) ?? []), unit]);
+      }
+
+      const receiptBatchMap = new Map<string, (typeof receiptBatches)>();
+      for (const batch of receiptBatches) {
+        const key = `${batch.inventoryItemId}:${batch.warehouseId}:${batch.bucketType}`;
+        receiptBatchMap.set(key, [...(receiptBatchMap.get(key) ?? []), batch]);
+      }
+
+      return {
+        balances: rows.map((balance) => {
+          const key = `${balance.itemId}:${balance.warehouseId}:${balance.bucketType}`;
+          const relatedUnits = serializedUnitMap.get(key) ?? [];
+          const relatedBatches = receiptBatchMap.get(key) ?? [];
+          return {
+            ...balance,
+            serializedSummary: isSerializedTrackingMode(balance.item.trackingMode)
+              ? {
+                  totalUnits: relatedUnits.length,
+                  inStockUnits: relatedUnits.filter((unit) => unit.status === InventoryUnitStatus.IN_STOCK).length,
+                  reservedUnits: relatedUnits.filter((unit) => unit.status === InventoryUnitStatus.RESERVED).length,
+                  assignedUnits: relatedUnits.filter((unit) => unit.status === InventoryUnitStatus.ASSIGNED).length,
+                }
+              : null,
+            serializedUnits: relatedUnits,
+            batchSummary: {
+              totalBatches: relatedBatches.length,
+              latestVendorName: relatedBatches[0]?.vendorName ?? null,
+              latestUnitCost: relatedBatches[0]?.unitCost ?? null,
+            },
+            receiptBatches: relatedBatches,
+          };
+        }),
+      };
     }),
 
   reclassifyTemporaryAssetToSaleStock: permissionProcedure("inventory", "update")
@@ -543,14 +891,14 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.itemId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.itemId, deletedAt: null }),
       });
       if (!item) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
       }
 
       const warehouse = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { id: input.warehouseId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.warehouseId, deletedAt: null }),
       });
       if (!warehouse) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
@@ -676,6 +1024,194 @@ export const inventoryRouter = createTRPCRouter({
       return result;
     }),
 
+  reclassifySerializedUnits: permissionProcedure("inventory", "update")
+    .input(
+      z.object({
+        unitIds: z.array(z.string()).min(1),
+        toBucketType: z.nativeEnum(InventoryBucketType),
+        referenceType: z.string().max(50).optional(),
+        referenceId: z.string().max(100).optional(),
+        notes: z.string().optional(),
+      }),
+    )
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const units = await ctx.db.inventoryItemUnit.findMany({
+        where: withInventoryWhere({ id: { in: input.unitIds } }),
+        include: { inventoryItem: true, warehouse: true },
+      });
+
+      if (units.length !== input.unitIds.length) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sebagian serialized unit tidak ditemukan" });
+      }
+      if (units.length === 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Pilih minimal satu serialized unit" });
+      }
+
+      const first = units[0]!;
+      if (!first.warehouseId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Serialized unit harus masih terikat ke warehouse untuk bisa direklasifikasi" });
+      }
+
+      if (units.some((unit) => unit.inventoryItemId !== first.inventoryItemId || unit.warehouseId !== first.warehouseId || unit.bucketType !== first.bucketType)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Semua serialized unit harus berasal dari item, warehouse, dan bucket yang sama" });
+      }
+
+      if (first.bucketType === input.toBucketType) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Bucket tujuan harus berbeda dari bucket asal" });
+      }
+
+      if (units.some((unit) => unit.status !== InventoryUnitStatus.IN_STOCK)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Hanya unit dengan status IN_STOCK yang boleh direklasifikasi" });
+      }
+
+      const quantity = units.length;
+      const item = first.inventoryItem;
+      const warehouseId = first.warehouseId;
+
+      return ctx.db.$transaction(async (tx) => {
+        const fromBalance = await ensureInventoryBalance(tx, {
+          itemId: item.id,
+          warehouseId,
+          bucketType: first.bucketType,
+        });
+        const toBalance = await ensureInventoryBalance(tx, {
+          itemId: item.id,
+          warehouseId,
+          bucketType: input.toBucketType,
+        });
+
+        const available = Number(fromBalance.qtyOnHand ?? 0) - Number(fromBalance.qtyReserved ?? 0);
+        if (available < quantity) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Saldo bucket asal tidak cukup untuk reklasifikasi serialized unit" });
+        }
+
+        const fromAfter = Number(fromBalance.qtyOnHand ?? 0) - quantity;
+        const toAfter = Number(toBalance.qtyOnHand ?? 0) + quantity;
+
+        await tx.inventoryBalance.update({ where: { id: fromBalance.id }, data: { qtyOnHand: fromAfter } });
+        await tx.inventoryBalance.update({ where: { id: toBalance.id }, data: { qtyOnHand: toAfter } });
+        await tx.inventoryItemUnit.updateMany({ where: { id: { in: input.unitIds } }, data: { bucketType: input.toBucketType } });
+
+        const referenceType = input.referenceType ?? "InventorySerializedReclassification";
+        const referenceId = input.referenceId ?? `${item.id}:${warehouseId}:${Date.now()}`;
+
+        await tx.inventoryLedgerEntry.create({ data: {
+          itemId: item.id,
+          warehouseId,
+          bucketType: first.bucketType,
+          movementType: InventoryMovementType.TRANSFER_OUT,
+          referenceType,
+          referenceId,
+          chartOfAccountId: first.bucketType === InventoryBucketType.TEMP_ASSET ? item.temporaryAssetCoaId ?? undefined : item.inventoryCoaId ?? undefined,
+          quantityBefore: Number(fromBalance.qtyOnHand ?? 0),
+          quantityChange: -quantity,
+          quantityAfter: fromAfter,
+          unitCost: item.standardCost ?? undefined,
+          totalCost: item.standardCost ? Number(item.standardCost) * quantity : undefined,
+          notes: input.notes ?? `Serialized reclassification of ${quantity} unit(s)`,
+          createdById: ctx.session.user.id,
+        } });
+        await tx.inventoryLedgerEntry.create({ data: {
+          itemId: item.id,
+          warehouseId,
+          bucketType: input.toBucketType,
+          movementType: InventoryMovementType.TRANSFER_IN,
+          referenceType,
+          referenceId,
+          chartOfAccountId: input.toBucketType === InventoryBucketType.TEMP_ASSET ? item.temporaryAssetCoaId ?? undefined : item.inventoryCoaId ?? undefined,
+          quantityBefore: Number(toBalance.qtyOnHand ?? 0),
+          quantityChange: quantity,
+          quantityAfter: toAfter,
+          unitCost: item.standardCost ?? undefined,
+          totalCost: item.standardCost ? Number(item.standardCost) * quantity : undefined,
+          notes: input.notes ?? `Serialized reclassification of ${quantity} unit(s)`,
+          createdById: ctx.session.user.id,
+        } });
+
+        return { success: true, quantity, fromBucketType: first.bucketType, toBucketType: input.toBucketType };
+      });
+    }),
+
+  assignInventoryUnit: permissionProcedure("inventory", "update")
+    .input(z.object({ unitId: z.string(), userId: z.string(), notes: z.string().optional() }))
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const unit = await ctx.db.inventoryItemUnit.findFirst({
+        where: withInventoryWhere({ id: input.unitId }),
+        include: { inventoryItem: true },
+      });
+      if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory unit not found" });
+      if (unit.status !== InventoryUnitStatus.IN_STOCK && unit.status !== InventoryUnitStatus.ASSIGNED) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Hanya unit IN_STOCK atau ASSIGNED yang bisa di-assign" });
+      }
+      if (unit.inventoryItem.usageType === InventoryUsageType.SALE) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Unit untuk item usage SALE tidak bisa di-assign ke user" });
+      }
+
+      const assignee = await ctx.db.user.findFirst({ where: { id: input.userId, deletedAt: null } });
+      if (!assignee) throw new TRPCError({ code: "NOT_FOUND", message: "User tujuan tidak ditemukan" });
+
+      const updated = await ctx.db.inventoryItemUnit.update({
+        where: { id: unit.id },
+        data: {
+          assignedToUserId: assignee.id,
+          assignedAt: new Date(),
+          status: InventoryUnitStatus.ASSIGNED,
+          notes: input.notes ?? unit.notes,
+        },
+        include: {
+          warehouse: { select: { id: true, code: true, name: true } },
+          assignedToUser: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      await ctx.db.auditLog.create({ data: {
+        userId: ctx.session.user.id,
+        action: AuditAction.UPDATE,
+        entityType: "InventoryUnitAssignment",
+        entityId: unit.id,
+        changes: { after: { assignedToUserId: assignee.id, status: InventoryUnitStatus.ASSIGNED } },
+      } });
+
+      return updated;
+    }),
+
+  unassignInventoryUnit: permissionProcedure("inventory", "update")
+    .input(z.object({ unitId: z.string(), notes: z.string().optional() }))
+    .output(z.any())
+    .mutation(async ({ ctx, input }) => {
+      const unit = await ctx.db.inventoryItemUnit.findFirst({ where: withInventoryWhere({ id: input.unitId }) });
+      if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory unit not found" });
+      if (unit.status !== InventoryUnitStatus.ASSIGNED) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Hanya unit ASSIGNED yang bisa di-unassign" });
+      }
+
+      const updated = await ctx.db.inventoryItemUnit.update({
+        where: { id: unit.id },
+        data: {
+          assignedToUserId: null,
+          assignedAt: null,
+          status: InventoryUnitStatus.IN_STOCK,
+          notes: input.notes ?? unit.notes,
+        },
+        include: {
+          warehouse: { select: { id: true, code: true, name: true } },
+          assignedToUser: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      await ctx.db.auditLog.create({ data: {
+        userId: ctx.session.user.id,
+        action: AuditAction.UPDATE,
+        entityType: "InventoryUnitAssignment",
+        entityId: unit.id,
+        changes: { after: { assignedToUserId: null, status: InventoryUnitStatus.IN_STOCK } },
+      } });
+
+      return updated;
+    }),
+
   fulfillmentSummary: permissionProcedure("inventory", "read")
     .input(z.object({}).optional())
     .output(z.any())
@@ -683,12 +1219,12 @@ export const inventoryRouter = createTRPCRouter({
       const [requests, reservationCounts] = await Promise.all([
         ctx.db.crmFulfillmentRequest.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {}),
+          where: withInventoryWhere({}),
           _count: { _all: true },
         }),
         ctx.db.inventoryReservation.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {}),
+          where: withInventoryWhere({}),
           _count: { _all: true },
         }),
       ]);
@@ -733,7 +1269,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const requests = await ctx.db.crmFulfillmentRequest.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           ...(input.status ? { status: input.status } : {}),
           ...(input.search
             ? {
@@ -753,10 +1289,27 @@ export const inventoryRouter = createTRPCRouter({
           lines: {
             include: {
               inventoryItem: {
-                select: { id: true, sku: true, name: true, unitOfMeasure: true },
+                select: { id: true, sku: true, name: true, unitOfMeasure: true, trackingMode: true },
               },
               warehouse: {
                 select: { id: true, code: true, name: true },
+              },
+              reservedUnits: {
+                include: {
+                  inventoryItemUnit: {
+                    select: {
+                      id: true,
+                      serialNumber: true,
+                      assetTag: true,
+                      bucketType: true,
+                      status: true,
+                      assignedToUser: { select: { id: true, name: true, email: true } },
+                    },
+                  },
+                  reservation: {
+                    select: { id: true, status: true, warehouseId: true },
+                  },
+                },
               },
             },
           },
@@ -765,7 +1318,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const cogsJournals = requests.length
         ? await ctx.db.journalEntry.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceId: { in: requests.map((request) => request.id) },
               referenceNumber: { in: requests.map((request) => request.requestNumber) },
               status: JournalStatus.POSTED,
@@ -817,6 +1370,24 @@ export const inventoryRouter = createTRPCRouter({
         warehouseId: z.string(),
         saleQuantity: decimalNumber.min(0).default(0),
         temporaryAssetQuantity: decimalNumber.min(0).default(0),
+        serializedUnits: z
+          .array(
+            z.object({
+              bucketType: z.nativeEnum(InventoryBucketType),
+              serialNumber: z.string().max(150).optional(),
+              assetTag: z.string().max(150).optional(),
+              batchNumber: z.string().max(100).optional(),
+              condition: z.nativeEnum(InventoryUnitCondition).default(InventoryUnitCondition.NEW),
+              receivedDate: z.coerce.date().optional(),
+              purchaseDate: z.coerce.date().optional(),
+              warrantyExpiry: z.coerce.date().optional(),
+              notes: z.string().optional(),
+            }),
+          )
+          .default([]),
+        vendorName: z.string().max(150).optional(),
+        vendorReference: z.string().max(100).optional(),
+        batchNumber: z.string().max(100).optional(),
         unitCost: decimalNumber.min(0).optional(),
         movementDate: z.coerce.date().optional(),
         referenceType: z.string().max(50).optional(),
@@ -827,14 +1398,14 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.itemId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.itemId, deletedAt: null }),
       });
       if (!item) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
       }
 
       const warehouse = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { id: input.warehouseId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.warehouseId, deletedAt: null }),
       });
       if (!warehouse) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
@@ -843,11 +1414,95 @@ export const inventoryRouter = createTRPCRouter({
       const saleQuantity = Number(input.saleQuantity ?? 0);
       const temporaryAssetQuantity = Number(input.temporaryAssetQuantity ?? 0);
       const totalQuantity = saleQuantity + temporaryAssetQuantity;
+      const normalizedBatchNumber = input.batchNumber?.trim() || undefined;
+      const normalizedVendorName = input.vendorName?.trim() || undefined;
+      const normalizedVendorReference = input.vendorReference?.trim() || undefined;
+      const normalizedSerializedUnits = (input.serializedUnits ?? []).map((unit, index) => ({
+        index,
+        bucketType: unit.bucketType,
+        serialNumber: unit.serialNumber?.trim() || undefined,
+        assetTag: unit.assetTag?.trim() || undefined,
+        batchNumber: unit.batchNumber?.trim() || undefined,
+        condition: unit.condition,
+        receivedDate: unit.receivedDate,
+        purchaseDate: unit.purchaseDate,
+        warrantyExpiry: unit.warrantyExpiry,
+        notes: unit.notes?.trim() || undefined,
+      }));
 
       if (totalQuantity <= 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Minimal salah satu alokasi quantity harus lebih dari 0",
+        });
+      }
+
+      const isSerializedTracking =
+        item.trackingMode === InventoryTrackingMode.SERIAL ||
+        item.trackingMode === InventoryTrackingMode.BOTH;
+
+      if (isSerializedTracking) {
+        if (!Number.isInteger(saleQuantity) || !Number.isInteger(temporaryAssetQuantity)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Item serialized hanya boleh menerima quantity bilangan bulat",
+          });
+        }
+
+        if (normalizedSerializedUnits.length !== totalQuantity) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Jumlah unit serial harus sama dengan total quantity receipt",
+          });
+        }
+
+        for (const unit of normalizedSerializedUnits) {
+          if (!unit.serialNumber && !unit.assetTag) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Unit ke-${unit.index + 1} wajib memiliki serial number atau asset tag`,
+            });
+          }
+        }
+
+        const saleUnitCount = normalizedSerializedUnits.filter(
+          (unit) => unit.bucketType === InventoryBucketType.SALE_STOCK,
+        ).length;
+        const tempAssetUnitCount = normalizedSerializedUnits.filter(
+          (unit) => unit.bucketType === InventoryBucketType.TEMP_ASSET,
+        ).length;
+
+        if (saleUnitCount !== saleQuantity || tempAssetUnitCount !== temporaryAssetQuantity) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Alokasi bucket serialized unit harus sama dengan quantity sale stock dan temporary asset",
+          });
+        }
+
+        const serialNumbers = normalizedSerializedUnits
+          .map((unit) => unit.serialNumber)
+          .filter((value): value is string => Boolean(value));
+        const assetTags = normalizedSerializedUnits
+          .map((unit) => unit.assetTag)
+          .filter((value): value is string => Boolean(value));
+
+        if (new Set(serialNumbers).size !== serialNumbers.length) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Serial number tidak boleh duplikat dalam satu receipt",
+          });
+        }
+
+        if (new Set(assetTags).size !== assetTags.length) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Asset tag tidak boleh duplikat dalam satu receipt",
+          });
+        }
+      } else if (normalizedSerializedUnits.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Serialized units hanya boleh diisi untuk item dengan tracking mode SERIAL atau BOTH",
         });
       }
 
@@ -869,6 +1524,9 @@ export const inventoryRouter = createTRPCRouter({
 
         const balances = [] as Array<unknown>;
         const ledgers = [] as Array<unknown>;
+        const createdUnits = [] as Array<unknown>;
+        const createdBatches = [] as Array<unknown>;
+        const batchByBucket = new Map<InventoryBucketType, { id: string; batchNumber: string | null }>();
 
         for (const allocation of allocations) {
           const balance = await ensureInventoryBalance(tx, {
@@ -912,8 +1570,81 @@ export const inventoryRouter = createTRPCRouter({
             },
           });
 
+          const createdBatch = await tx.inventoryReceiptBatch.create({
+            data: {
+              inventoryItemId: item.id,
+              warehouseId: warehouse.id,
+              bucketType: allocation.bucketType,
+              vendorName: normalizedVendorName,
+              vendorReference: normalizedVendorReference,
+              batchNumber: normalizedBatchNumber,
+              unitCost: input.unitCost,
+              receivedQty: allocation.quantity,
+              remainingQty: allocation.quantity,
+              receivedDate: input.movementDate ?? new Date(),
+              referenceType: input.referenceType,
+              referenceId: input.referenceId,
+              notes: input.notes,
+            },
+            select: { id: true, batchNumber: true },
+          });
+
+          batchByBucket.set(allocation.bucketType, createdBatch);
           balances.push(updatedBalance);
           ledgers.push(ledger);
+          createdBatches.push(createdBatch);
+        }
+
+        if (normalizedSerializedUnits.length > 0) {
+          for (const unit of normalizedSerializedUnits) {
+            if (unit.serialNumber) {
+              const existingSerial = await tx.inventoryItemUnit.findFirst({
+                where: withInventoryWhere({ serialNumber: unit.serialNumber }),
+                select: { id: true },
+              });
+              if (existingSerial) {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: `Serial number ${unit.serialNumber} sudah terdaftar`,
+                });
+              }
+            }
+
+            if (unit.assetTag) {
+              const existingAssetTag = await tx.inventoryItemUnit.findFirst({
+                where: withInventoryWhere({ assetTag: unit.assetTag }),
+                select: { id: true },
+              });
+              if (existingAssetTag) {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: `Asset tag ${unit.assetTag} sudah terdaftar`,
+                });
+              }
+            }
+
+            const receiptBatch = batchByBucket.get(unit.bucketType);
+
+            const createdUnit = await tx.inventoryItemUnit.create({
+              data: {
+                inventoryItemId: item.id,
+                warehouseId: warehouse.id,
+                receiptBatchId: receiptBatch?.id,
+                bucketType: unit.bucketType,
+                serialNumber: unit.serialNumber,
+                assetTag: unit.assetTag,
+                batchNumber: unit.batchNumber ?? receiptBatch?.batchNumber ?? normalizedBatchNumber,
+                status: InventoryUnitStatus.IN_STOCK,
+                condition: unit.condition,
+                receivedDate: unit.receivedDate ?? input.movementDate ?? new Date(),
+                purchaseDate: unit.purchaseDate,
+                warrantyExpiry: unit.warrantyExpiry,
+                notes: unit.notes ?? input.notes,
+              },
+            });
+
+            createdUnits.push(createdUnit);
+          }
         }
 
         if (input.unitCost !== undefined) {
@@ -936,12 +1667,24 @@ export const inventoryRouter = createTRPCRouter({
                 saleQuantity,
                 temporaryAssetQuantity,
                 totalQuantity,
+                trackingMode: item.trackingMode,
+                vendorName: normalizedVendorName,
+                vendorReference: normalizedVendorReference,
+                batchNumber: normalizedBatchNumber,
+                serializedUnitCount: normalizedSerializedUnits.length,
+                serializedUnits: normalizedSerializedUnits.map((unit) => ({
+                  bucketType: unit.bucketType,
+                  serialNumber: unit.serialNumber,
+                  assetTag: unit.assetTag,
+                  batchNumber: unit.batchNumber ?? normalizedBatchNumber,
+                  condition: unit.condition,
+                })),
               },
             },
           },
         });
 
-        return { balances, ledgers };
+        return { balances, ledgers, units: createdUnits, receiptBatches: createdBatches };
       });
 
       return result;
@@ -959,7 +1702,7 @@ export const inventoryRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.$transaction(async (tx) => {
         const request = await tx.crmFulfillmentRequest.findFirst({
-          where: withTenantWhere(ctx, { id: input.fulfillmentRequestId }),
+          where: withInventoryWhere({ id: input.fulfillmentRequestId }),
           include: {
             lines: true,
             lead: { select: { id: true } },
@@ -986,7 +1729,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of request.lines) {
           const reservations = await tx.inventoryReservation.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceType: "FULFILLMENT_REQUEST",
               sourceId: request.id,
               itemId: line.inventoryItemId,
@@ -994,6 +1737,13 @@ export const inventoryRouter = createTRPCRouter({
               status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
             }),
             orderBy: [{ createdAt: "asc" }],
+            include: {
+              reservationUnits: {
+                include: {
+                  inventoryItemUnit: { select: { id: true, status: true } },
+                },
+              },
+            },
           });
 
           let qtyToDeliver = Number(line.qtyReserved ?? 0);
@@ -1002,11 +1752,13 @@ export const inventoryRouter = createTRPCRouter({
           }
 
           const item = await tx.inventoryItem.findFirst({
-            where: withTenantWhere(ctx, { id: line.inventoryItemId, deletedAt: null }),
+            where: withInventoryWhere({ id: line.inventoryItemId, deletedAt: null }),
           });
           if (!item) {
             throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found for fulfillment delivery" });
           }
+
+          let deliveredForLine = 0;
 
           for (const reservation of reservations) {
             if (qtyToDeliver <= 0) break;
@@ -1021,7 +1773,19 @@ export const inventoryRouter = createTRPCRouter({
             const remainingReserved = Number(reservation.qtyReserved ?? 0) - Number(reservation.qtyFulfilled ?? 0) - Number(reservation.qtyReleased ?? 0);
             if (remainingReserved <= 0) continue;
 
-            const issueQty = Math.min(remainingReserved, qtyToDeliver);
+            let issueQty = Math.min(remainingReserved, qtyToDeliver);
+            const reservedUnitIds = reservation.reservationUnits
+              .filter((entry) => entry.inventoryItemUnit.status === InventoryUnitStatus.RESERVED)
+              .slice(0, issueQty)
+              .map((entry) => entry.inventoryItemUnit.id);
+
+            if (isSerializedTrackingMode(item.trackingMode)) {
+              issueQty = Math.min(issueQty, reservedUnitIds.length);
+              if (issueQty <= 0) {
+                continue;
+              }
+            }
+
             const beforeQty = Number(balance.qtyOnHand ?? 0);
             const beforeReserved = Number(balance.qtyReserved ?? 0);
 
@@ -1053,6 +1817,70 @@ export const inventoryRouter = createTRPCRouter({
                     : InventoryReservationStatus.PARTIAL,
               },
             });
+
+            if (reservedUnitIds.length > 0) {
+              const issuedUnits = await tx.inventoryItemUnit.findMany({
+                where: { id: { in: reservedUnitIds.slice(0, issueQty) } },
+                select: { id: true, receiptBatchId: true },
+              });
+
+              await tx.inventoryItemUnit.updateMany({
+                where: { id: { in: issuedUnits.map((unit) => unit.id) } },
+                data: {
+                  status: InventoryUnitStatus.ISSUED,
+                  warehouseId: null,
+                },
+              });
+
+              const batchIssuedMap = new Map<string, number>();
+              for (const unit of issuedUnits) {
+                if (!unit.receiptBatchId) continue;
+                batchIssuedMap.set(unit.receiptBatchId, (batchIssuedMap.get(unit.receiptBatchId) ?? 0) + 1);
+              }
+
+              for (const [receiptBatchId, qtyIssuedFromBatch] of batchIssuedMap.entries()) {
+                const batch = await tx.inventoryReceiptBatch.findFirst({
+                  where: { id: receiptBatchId },
+                  select: { id: true, remainingQty: true },
+                });
+                if (!batch) continue;
+
+                await tx.inventoryReceiptBatch.update({
+                  where: { id: batch.id },
+                  data: {
+                    remainingQty: Math.max(Number(batch.remainingQty ?? 0) - qtyIssuedFromBatch, 0),
+                  },
+                });
+              }
+            } else {
+              let qtyToConsumeFromBatches = issueQty;
+              const fifoBatches = await tx.inventoryReceiptBatch.findMany({
+                where: withInventoryWhere({
+                  inventoryItemId: reservation.itemId,
+                  warehouseId: reservation.warehouseId,
+                  bucketType: InventoryBucketType.SALE_STOCK,
+                  remainingQty: { gt: 0 },
+                }),
+                orderBy: [{ receivedDate: "asc" }, { createdAt: "asc" }],
+                select: { id: true, remainingQty: true },
+              });
+
+              for (const batch of fifoBatches) {
+                if (qtyToConsumeFromBatches <= 0) break;
+                const batchRemaining = Number(batch.remainingQty ?? 0);
+                if (batchRemaining <= 0) continue;
+                const consumeQty = Math.min(batchRemaining, qtyToConsumeFromBatches);
+
+                await tx.inventoryReceiptBatch.update({
+                  where: { id: batch.id },
+                  data: {
+                    remainingQty: batchRemaining - consumeQty,
+                  },
+                });
+
+                qtyToConsumeFromBatches -= consumeQty;
+              }
+            }
 
             const issueTotalCost = item.standardCost
               ? Number(item.standardCost) * issueQty
@@ -1094,15 +1922,18 @@ export const inventoryRouter = createTRPCRouter({
               });
             }
 
+            qtyToDeliver -= issueQty;
+            deliveredForLine += issueQty;
+          }
+
+          if (deliveredForLine > 0) {
             await tx.crmFulfillmentRequestLine.update({
               where: { id: line.id },
               data: {
-                qtyDelivered: Number(line.qtyDelivered ?? 0) + issueQty,
-                qtyReserved: Math.max(Number(line.qtyReserved ?? 0) - issueQty, 0),
+                qtyDelivered: Number(line.qtyDelivered ?? 0) + deliveredForLine,
+                qtyReserved: Math.max(Number(line.qtyReserved ?? 0) - deliveredForLine, 0),
               },
             });
-
-            qtyToDeliver -= issueQty;
           }
         }
 
@@ -1251,7 +2082,7 @@ export const inventoryRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.$transaction(async (tx) => {
         const request = await tx.crmFulfillmentRequest.findFirst({
-          where: withTenantWhere(ctx, { id: input.fulfillmentRequestId }),
+          where: withInventoryWhere({ id: input.fulfillmentRequestId }),
           include: {
             lines: true,
             lead: { select: { id: true } },
@@ -1278,7 +2109,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of request.lines) {
           const reservations = await tx.inventoryReservation.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceType: "FULFILLMENT_REQUEST",
               sourceId: request.id,
               itemId: line.inventoryItemId,
@@ -1286,6 +2117,13 @@ export const inventoryRouter = createTRPCRouter({
               status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
             }),
             orderBy: [{ createdAt: "asc" }],
+            include: {
+              reservationUnits: {
+                include: {
+                  inventoryItemUnit: { select: { id: true, status: true } },
+                },
+              },
+            },
           });
 
           let releasedForLine = 0;
@@ -1319,8 +2157,19 @@ export const inventoryRouter = createTRPCRouter({
               },
             });
 
+            const reservedUnitIds = reservation.reservationUnits
+              .filter((entry) => entry.inventoryItemUnit.status === InventoryUnitStatus.RESERVED)
+              .map((entry) => entry.inventoryItemUnit.id);
+
+            if (reservedUnitIds.length > 0) {
+              await tx.inventoryItemUnit.updateMany({
+                where: { id: { in: reservedUnitIds } },
+                data: { status: InventoryUnitStatus.IN_STOCK },
+              });
+            }
+
             const item = await tx.inventoryItem.findFirst({
-              where: withTenantWhere(ctx, { id: reservation.itemId, deletedAt: null }),
+              where: withInventoryWhere({ id: reservation.itemId, deletedAt: null }),
             });
 
             await tx.inventoryLedgerEntry.create({
@@ -1414,7 +2263,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const lead = await ctx.db.crmLead.findFirst({
-        where: withTenantWhere(ctx, { id: input.leadId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.leadId, deletedAt: null }),
         include: { customer: { select: { id: true } } },
       });
 
@@ -1426,7 +2275,7 @@ export const inventoryRouter = createTRPCRouter({
         input.requestNumber ?? await generateFulfillmentRequestNumber(ctx.db);
 
       const existing = await ctx.db.crmFulfillmentRequest.findFirst({
-        where: withTenantWhere(ctx, { requestNumber }),
+        where: withInventoryWhere({ requestNumber }),
       });
       if (existing) {
         throw new TRPCError({
@@ -1443,7 +2292,7 @@ export const inventoryRouter = createTRPCRouter({
       ];
 
       const activeRequest = await ctx.db.crmFulfillmentRequest.findFirst({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           leadId: lead.id,
           status: { in: activeStatuses },
         }),
@@ -1466,7 +2315,7 @@ export const inventoryRouter = createTRPCRouter({
           where: {
             leadLineId: { in: incomingLeadLineIds },
             fulfillmentRequest: {
-              is: withTenantWhere(ctx, {
+              is: withInventoryWhere({
                 status: { in: activeStatuses },
               }),
             },
@@ -1516,7 +2365,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of createdRequest.lines) {
           const item = await tx.inventoryItem.findFirst({
-            where: withTenantWhere(ctx, { id: line.inventoryItemId, deletedAt: null }),
+            where: withInventoryWhere({ id: line.inventoryItemId, deletedAt: null }),
           });
           if (!item) {
             throw new TRPCError({
@@ -1526,7 +2375,7 @@ export const inventoryRouter = createTRPCRouter({
           }
 
           const candidateBalances = await tx.inventoryBalance.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               itemId: line.inventoryItemId,
               bucketType: InventoryBucketType.SALE_STOCK,
               ...(line.warehouseId ? { warehouseId: line.warehouseId } : {}),
@@ -1538,8 +2387,16 @@ export const inventoryRouter = createTRPCRouter({
           });
 
           const requestedQty = Number(line.qtyRequested ?? 0);
+          if (isSerializedTrackingMode(item.trackingMode) && !Number.isInteger(requestedQty)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Serialized item ${item.sku} hanya bisa di-fulfill dengan quantity bilangan bulat`,
+            });
+          }
+
           let qtyToReserve = requestedQty;
           let reservedForLine = 0;
+          let chosenWarehouseId = line.warehouseId;
 
           for (const balance of candidateBalances) {
             if (qtyToReserve <= 0) break;
@@ -1547,7 +2404,29 @@ export const inventoryRouter = createTRPCRouter({
             const available = Number(balance.qtyOnHand ?? 0) - Number(balance.qtyReserved ?? 0);
             if (available <= 0) continue;
 
-            const reserveQty = Math.min(available, qtyToReserve);
+            let reserveQty = Math.min(available, qtyToReserve);
+            let reservedUnitIds: string[] = [];
+
+            if (isSerializedTrackingMode(item.trackingMode)) {
+              const availableUnits = await tx.inventoryItemUnit.findMany({
+                where: withInventoryWhere({
+                  inventoryItemId: line.inventoryItemId,
+                  warehouseId: balance.warehouseId,
+                  bucketType: InventoryBucketType.SALE_STOCK,
+                  status: InventoryUnitStatus.IN_STOCK,
+                }),
+                orderBy: [{ receivedDate: "asc" }, { createdAt: "asc" }],
+                take: qtyToReserve,
+                select: { id: true },
+              });
+
+              reserveQty = Math.min(reserveQty, availableUnits.length);
+              reservedUnitIds = availableUnits.slice(0, reserveQty).map((unit) => unit.id);
+              if (reserveQty <= 0) {
+                continue;
+              }
+            }
+
             const nextReserved = Number(balance.qtyReserved ?? 0) + reserveQty;
 
             await tx.inventoryBalance.update({
@@ -1555,7 +2434,7 @@ export const inventoryRouter = createTRPCRouter({
               data: { qtyReserved: nextReserved },
             });
 
-            await tx.inventoryReservation.create({
+            const reservation = await tx.inventoryReservation.create({
               data: {
                 itemId: line.inventoryItemId,
                 warehouseId: balance.warehouseId,
@@ -1571,6 +2450,21 @@ export const inventoryRouter = createTRPCRouter({
                     : InventoryReservationStatus.PARTIAL,
               },
             });
+
+            if (reservedUnitIds.length > 0) {
+              await tx.inventoryItemUnit.updateMany({
+                where: { id: { in: reservedUnitIds } },
+                data: { status: InventoryUnitStatus.RESERVED },
+              });
+
+              await tx.inventoryReservationUnit.createMany({
+                data: reservedUnitIds.map((unitId) => ({
+                  reservationId: reservation.id,
+                  inventoryItemUnitId: unitId,
+                  fulfillmentRequestLineId: line.id,
+                })),
+              });
+            }
 
             await tx.inventoryLedgerEntry.create({
               data: {
@@ -1593,14 +2487,14 @@ export const inventoryRouter = createTRPCRouter({
             reservedForLine += reserveQty;
             qtyToReserve -= reserveQty;
             hasAnyReservation = true;
+            chosenWarehouseId = chosenWarehouseId ?? balance.warehouseId;
           }
 
           await tx.crmFulfillmentRequestLine.update({
             where: { id: line.id },
             data: {
               qtyReserved: reservedForLine,
-              warehouseId:
-                line.warehouseId ?? candidateBalances.find((b) => Number(b.qtyOnHand ?? 0) - Number(b.qtyReserved ?? 0) >= 0)?.warehouseId ?? line.warehouseId,
+              warehouseId: chosenWarehouseId,
             },
           });
 

@@ -264,12 +264,12 @@ export default function AccountingPage() {
         <ModuleLinkCard
           href="/reports/income-statement"
           title="Laba Rugi"
-          description="Laporan pendapatan, beban, dan laba rugi bersih tenant aktif"
+          description="Laporan pendapatan, beban, dan laba rugi bersih perusahaan saat ini"
         />
         <ModuleLinkCard
           href="/reports/balance-sheet"
           title="Neraca"
-          description="Posisi aset, kewajiban, dan ekuitas tenant aktif sampai tanggal laporan"
+          description="Posisi aset, kewajiban, dan ekuitas perusahaan sampai tanggal laporan"
         />
         <ModuleLinkCard
           href="/reports/expense-summary"
