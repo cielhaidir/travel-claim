@@ -13,6 +13,17 @@ export const metadata: Metadata = {
   },
 };
 
+function getFallbackRoute(user: Parameters<typeof userHasPermission>[0]) {
+  if (userHasPermission(user, "travel", "read")) return "/travel";
+  if (userHasPermission(user, "claims", "read")) return "/claims";
+  if (userHasPermission(user, "approvals", "read")) return "/approvals";
+  if (userHasPermission(user, "bailout", "read")) return "/bailout";
+  if (userHasPermission(user, "accounting", "read")) return "/accounting";
+  if (userHasPermission(user, "journals", "read")) return "/journal";
+  if (userHasPermission(user, "profile", "read")) return "/profile";
+  return "/login";
+}
+
 export default async function DashboardPage() {
   const session = await auth();
 
@@ -21,7 +32,7 @@ export default async function DashboardPage() {
   }
 
   if (!userHasPermission(session.user, "dashboard", "read")) {
-    redirect("/");
+    redirect(getFallbackRoute(session.user));
   }
 
   return <MainDashboard />;

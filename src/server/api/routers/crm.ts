@@ -13,6 +13,7 @@ import {
   CrmLeadSource,
   CrmLeadStage,
   CrmLeadStatus,
+  CrmProductType,
   CrmTaskPriority,
   CrmTaskStatus,
   type Prisma,
@@ -587,6 +588,76 @@ function buildNoteWhere(
   });
 }
 
+function buildActivityWhere(
+  ctx: CrmContext,
+  search?: string,
+): Prisma.CrmActivityWhereInput {
+  const trimmed = trimToNull(search);
+
+  return applyScope(ctx, {
+    deletedAt: null,
+    ...(trimmed
+      ? {
+          OR: [
+            { title: { contains: trimmed, mode: "insensitive" } },
+            { description: { contains: trimmed, mode: "insensitive" } },
+            { ownerName: { contains: trimmed, mode: "insensitive" } },
+            {
+              customer: {
+                company: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+            {
+              lead: {
+                company: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+            {
+              deal: {
+                title: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+            {
+              deal: {
+                company: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+          ],
+        }
+      : {}),
+  });
+}
+
+function buildProductWhere(
+  ctx: CrmContext,
+  search?: string,
+): Prisma.CrmProductWhereInput {
+  const trimmed = trimToNull(search);
+
+  return applyScope(ctx, {
+    deletedAt: null,
+    ...(trimmed
+      ? {
+          OR: [
+            { code: { contains: trimmed, mode: "insensitive" } },
+            { name: { contains: trimmed, mode: "insensitive" } },
+            { description: { contains: trimmed, mode: "insensitive" } },
+            {
+              inventoryItem: {
+                sku: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+            {
+              inventoryItem: {
+                name: { contains: trimmed, mode: "insensitive" },
+              },
+            },
+          ],
+        }
+      : {}),
+  });
+}
+
 const baseListInput = z.object({
   search: z.string().optional(),
 });
@@ -697,6 +768,15 @@ const attachmentInputSchema = z.object({
   mimeType: z.string().trim().min(1).max(100),
   fileSize: z.number().int().positive().max(5 * 1024 * 1024),
   storageUrl: z.string().min(1),
+});
+
+const productInputSchema = z.object({
+  code: z.string().trim().min(1).max(50),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().optional().nullable(),
+  type: z.nativeEnum(CrmProductType),
+  inventoryItemId: z.string().optional().nullable(),
+  isActive: z.boolean().default(true),
 });
 
 const leadListInputSchema = baseListInput.extend({
@@ -911,7 +991,19 @@ export const crmRouter = createTRPCRouter({
       requireCrmAccess(ctx, "read");
 
       const search = trimToNull(input.search);
-      const [organizations, contacts, leads, deals, openTasks, notes, recentTasks, recentNotes] =
+      const [
+        organizations,
+        contacts,
+        leads,
+        deals,
+        openTasks,
+        notes,
+        recentTasks,
+        recentNotes,
+        organizationRecords,
+        leadRecords,
+        activities,
+      ] =
         await Promise.all([
           ctx.db.crmCustomer.count({
             where: buildOrganizationWhere(ctx, search ?? undefined),
@@ -949,6 +1041,61 @@ export const crmRouter = createTRPCRouter({
             orderBy: [{ updatedAt: "desc" }],
             take: 5,
           }),
+          ctx.db.crmCustomer.findMany({
+            where: buildOrganizationWhere(ctx, search ?? undefined),
+            select: {
+              id: true,
+              company: true,
+              ownerName: true,
+              status: true,
+              totalValue: true,
+              lastContactAt: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+            orderBy: [{ company: "asc" }],
+            take: 200,
+          }),
+          ctx.db.crmLead.findMany({
+            where: buildLeadWhere(ctx, search ?? undefined, null),
+            select: {
+              id: true,
+              company: true,
+              ownerName: true,
+              stage: true,
+              status: true,
+              source: true,
+              value: true,
+              probability: true,
+              expectedCloseDate: true,
+              updatedAt: true,
+            },
+            orderBy: [{ updatedAt: "desc" }],
+            take: 200,
+          }),
+          ctx.db.crmActivity.findMany({
+            where: buildActivityWhere(ctx, search ?? undefined),
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              type: true,
+              ownerName: true,
+              scheduledAt: true,
+              completedAt: true,
+              customer: {
+                select: { id: true, company: true },
+              },
+              lead: {
+                select: { id: true, company: true },
+              },
+              deal: {
+                select: { id: true, title: true, company: true },
+              },
+            },
+            orderBy: [{ scheduledAt: "desc" }, { updatedAt: "desc" }],
+            take: 200,
+          }),
         ]);
 
       return {
@@ -960,9 +1107,102 @@ export const crmRouter = createTRPCRouter({
           openTasks,
           notes,
         },
+        organizations: organizationRecords,
+        customers: organizationRecords,
+        leads: leadRecords,
+        activities,
         recentTasks,
         recentNotes,
       };
+    }),
+
+  listProducts: protectedProcedure
+    .input(baseListInput.optional())
+    .query(async ({ ctx, input }) => {
+      requireCrmAccess(ctx, "read");
+
+      const search = trimToNull(input?.search);
+      const products = await ctx.db.crmProduct.findMany({
+        where: buildProductWhere(ctx, search ?? undefined),
+        include: {
+          inventoryItem: {
+            select: {
+              id: true,
+              sku: true,
+              name: true,
+              unitOfMeasure: true,
+              isActive: true,
+            },
+          },
+        },
+        orderBy: [{ name: "asc" }],
+        take: 200,
+      });
+
+      return { products };
+    }),
+
+  createProduct: protectedProcedure
+    .input(productInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      requireCrmAccess(ctx, "create");
+
+      const existing = await ctx.db.crmProduct.findFirst({
+        where: applyScope(ctx, {
+          code: input.code,
+          deletedAt: null,
+        }),
+        select: { id: true },
+      });
+
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Produk/Jasa dengan kode "${input.code}" sudah ada`,
+        });
+      }
+
+      const inventoryItemId = trimToNull(input.inventoryItemId);
+      if (inventoryItemId) {
+        const inventoryItem = await ctx.db.inventoryItem.findFirst({
+          where: {
+            id: inventoryItemId,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+
+        if (!inventoryItem) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Item inventory yang dipilih tidak ditemukan",
+          });
+        }
+      }
+
+      const product = await ctx.db.crmProduct.create({
+        data: {
+          code: input.code,
+          name: input.name,
+          description: trimToNull(input.description),
+          type: input.type,
+          inventoryItemId,
+          isActive: input.isActive,
+        },
+        include: {
+          inventoryItem: {
+            select: {
+              id: true,
+              sku: true,
+              name: true,
+              unitOfMeasure: true,
+              isActive: true,
+            },
+          },
+        },
+      });
+
+      return product;
     }),
 
   formOptions: protectedProcedure.query(async ({ ctx }) => {

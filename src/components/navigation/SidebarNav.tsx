@@ -11,6 +11,7 @@ import {
   FolderKanban,
   HandCoins,
   LayoutDashboard,
+  Package,
   PlaneTakeoff,
   ReceiptText,
   ShieldCheck,
@@ -28,6 +29,7 @@ import {
   type Role,
 } from "@/lib/constants/roles";
 import { CRM_ACTIVE_MODULES } from "@/lib/constants/crm";
+import { api } from "@/trpc/react";
 
 type NavAccessContext = {
   isRoot: boolean;
@@ -45,6 +47,7 @@ interface NavLinkItem {
   roles?: Role[];
   children?: NavLinkItem[];
   comingSoon?: boolean;
+  badgeKey?: "inventoryFulfillment";
   visibleWhen?: (context: NavAccessContext) => boolean;
 }
 
@@ -60,6 +63,20 @@ const crmChildren: NavLinkItem[] = CRM_ACTIVE_MODULES.map((item) => ({
   label: item.label,
   href: item.href,
 }));
+
+const inventoryChildren: NavLinkItem[] = [
+  {
+    label: "Overview",
+    href: "/inventory",
+    moduleKey: "inventory",
+  },
+  {
+    label: "Fulfillment",
+    href: "/inventory/fulfillment",
+    moduleKey: "inventory",
+    badgeKey: "inventoryFulfillment",
+  },
+];
 
 function canAccessFinanceDashboard(
   permissions: Session["user"]["permissions"] | null | undefined,
@@ -186,6 +203,14 @@ const navigationItems: NavItem[] = [
     children: crmChildren,
   },
   {
+    label: "Inventory",
+    href: "/inventory",
+    icon: Package,
+    moduleKey: "inventory",
+    badgeKey: "inventoryFulfillment",
+    children: inventoryChildren,
+  },
+  {
     label: "Akuntansi & Keuangan",
     href: "/accounting",
     icon: Wallet,
@@ -286,6 +311,17 @@ export function SidebarNav({
     }),
   };
 
+  const canReadInventory =
+    context.isRoot || hasPermissionMap(context.permissions, "inventory", "read");
+  const { data: inventorySummary } = api.inventory.fulfillmentSummary.useQuery(
+    {},
+    { enabled: canReadInventory, refetchOnWindowFocus: false },
+  );
+  const inventoryFulfillmentCount =
+    (inventorySummary?.requests?.reserved ?? 0) +
+    (inventorySummary?.requests?.partial ?? 0) +
+    (inventorySummary?.requests?.ready ?? 0);
+
   const allowedItems: ResolvedNavItem[] = navigationItems.reduce<
     ResolvedNavItem[]
   >((items, item) => {
@@ -323,6 +359,11 @@ export function SidebarNav({
             : "text-[#3e3e42] hover:bg-gray-100"
         }`;
 
+        const itemBadge =
+          item.badgeKey === "inventoryFulfillment"
+            ? inventoryFulfillmentCount
+            : undefined;
+
         return (
           <div key={item.href} className="mb-1">
             <div className={itemClassName}>
@@ -347,6 +388,15 @@ export function SidebarNav({
                 <span className="truncate text-sm font-medium">
                   {item.label}
                 </span>
+                {itemBadge !== undefined && itemBadge > 0 ? (
+                  <span
+                    className={`ml-auto inline-flex min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      isActive ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"
+                    }`}
+                  >
+                    {itemBadge}
+                  </span>
+                ) : null}
               </Link>
 
               {hasChildren ? (
@@ -379,19 +429,28 @@ export function SidebarNav({
               <div className="ml-7 mt-1 border-l border-gray-200 pl-3">
                 {item.children.map((child) => {
                   const childIsActive = matchesPath(currentPath, child.href);
+                  const childBadge =
+                    child.badgeKey === "inventoryFulfillment"
+                      ? inventoryFulfillmentCount
+                      : undefined;
 
                   return (
                     <Link
                       key={child.href}
                       href={child.href}
                       onClick={onNavigate}
-                      className={`mb-1 flex rounded-md px-3 py-2 text-sm transition-colors ${
+                      className={`mb-1 flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors ${
                         childIsActive
                           ? "bg-[#e7eefc] font-medium text-[#2f5ec7]"
                           : "text-[#5a5a5f] hover:bg-gray-100 hover:text-[#2f5ec7]"
                       }`}
                     >
-                      {child.label}
+                      <span>{child.label}</span>
+                      {childBadge !== undefined && childBadge > 0 ? (
+                        <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                          {childBadge}
+                        </span>
+                      ) : null}
                     </Link>
                   );
                 })}

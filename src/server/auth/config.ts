@@ -365,7 +365,9 @@ export const authConfig = {
         session.user.id = authToken.id as string;
         session.user.roles = roles;
         session.user.role = derivePrimaryRole(roles);
-        session.user.permissions = authToken.permissions ?? {};
+
+        const resolvedPermissions = authToken.permissions ?? {};
+        session.user.permissions = resolvedPermissions;
         session.user.employeeId = authToken.employeeId as string | null;
         session.user.departmentId = authToken.departmentId as string | null;
         session.user.isRoot = authToken.isRoot ?? false;

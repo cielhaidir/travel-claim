@@ -173,6 +173,12 @@ export const PERMISSION_MODULES: Record<string, PermissionModuleMeta> = {
     color: "bg-pink-50 text-pink-700 border-pink-200",
     actions: ["read", "export"],
   },
+  inventory: {
+    label: "Inventory",
+    description: "Master item, gudang, stok, reservasi, dan fulfillment CRM.",
+    color: "bg-yellow-50 text-yellow-800 border-yellow-200",
+    actions: ["read", "create", "update", "delete", "export"],
+  },
   notifications: {
     label: "Notifications",
     description: "In-app or outgoing notifications.",
@@ -272,6 +278,10 @@ const SUPERVISOR_PERMISSIONS: PermissionMap = mergePermissionMaps(
   },
 );
 
+const INVENTORY_PERMISSIONS: PermissionMap = {
+  inventory: ["read", "create", "update", "delete", "export"],
+};
+
 const MANAGER_PERMISSIONS: PermissionMap = mergePermissionMaps(
   SUPERVISOR_PERMISSIONS,
   {
@@ -292,6 +302,7 @@ const FINANCE_PERMISSIONS: PermissionMap = {
   "balance-accounts": ["read", "create", "update", "delete"],
   journals: ["read", "create", "update", "post", "void", "export"],
   reports: ["read", "export"],
+  inventory: ["read", "export"],
   audit: ["read"],
   notifications: ["read", "create"],
   profile: ["read", "update"],
@@ -308,15 +319,19 @@ export const DEFAULT_ROLE_PERMISSION_PRESETS: Record<Role, PermissionMap> = {
   [ROLES.DIRECTOR]: mergePermissionMaps(MANAGER_PERMISSIONS, {
     audit: ["read"],
   }),
-  [ROLES.MANAGER]: MANAGER_PERMISSIONS,
+  [ROLES.MANAGER]: mergePermissionMaps(MANAGER_PERMISSIONS, {
+    inventory: ["read", "export"],
+  }),
   [ROLES.SALES_CHIEF]: mergePermissionMaps(SUPERVISOR_PERMISSIONS, {
     ...CRM_FULL_PERMISSIONS,
     projects: ["read", "create", "update"],
+    inventory: ["read", "create", "update", "export"],
   }),
   [ROLES.SUPERVISOR]: SUPERVISOR_PERMISSIONS,
   [ROLES.SALES_EMPLOYEE]: mergePermissionMaps(EMPLOYEE_PERMISSIONS, {
     ...CRM_FULL_PERMISSIONS,
     projects: ["read"],
+    inventory: ["read"],
   }),
   [ROLES.EMPLOYEE]: EMPLOYEE_PERMISSIONS,
 };

@@ -10,6 +10,7 @@ import {
   Smartphone,
   WalletCards,
 } from "lucide-react";
+import { userHasPermission } from "@/lib/auth/role-check";
 import { auth } from "@/server/auth";
 
 export const metadata: Metadata = {
@@ -23,11 +24,26 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function LandingPage() {
+function getAuthenticatedHome(user: Parameters<typeof userHasPermission>[0]) {
+  if (userHasPermission(user, "dashboard", "read")) return "/dashboard";
+  if (userHasPermission(user, "travel", "read")) return "/travel";
+  if (userHasPermission(user, "claims", "read")) return "/claims";
+  if (userHasPermission(user, "approvals", "read")) return "/approvals";
+  if (userHasPermission(user, "bailout", "read")) return "/bailout";
+  if (userHasPermission(user, "accounting", "read")) return "/accounting";
+  if (userHasPermission(user, "journals", "read")) return "/journal";
+  if (userHasPermission(user, "profile", "read")) return "/profile";
+  return null;
+}
+
+export default async function HomePage() {
   const session = await auth();
 
   if (session?.user) {
-    redirect("/dashboard");
+    const destination = getAuthenticatedHome(session.user);
+    if (destination) {
+      redirect(destination);
+    }
   }
 
   return (

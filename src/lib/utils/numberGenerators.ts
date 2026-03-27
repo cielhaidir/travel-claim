@@ -188,3 +188,23 @@ export async function generateJournalEntryNumber(
     parseSuffix(last?.journalNumber ?? "") + 1,
   );
 }
+
+export async function generateFulfillmentRequestNumber(
+  db: PrismaClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("FUL", year)}-`;
+  const last = await db.crmFulfillmentRequest.findFirst({
+    where: {
+      requestNumber: { startsWith: prefix },
+    },
+    orderBy: { requestNumber: "desc" },
+    select: { requestNumber: true },
+  });
+
+  return toBusinessNumber(
+    "FUL",
+    year,
+    parseSuffix(last?.requestNumber ?? "") + 1,
+  );
+}

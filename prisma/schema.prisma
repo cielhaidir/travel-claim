@@ -312,6 +312,44 @@ enum CrmTaskPriority {
   HIGH
 }
 
+enum CrmProductType {
+  PRODUCT
+  SERVICE
+}
+
+enum InventoryMovementType {
+  RECEIPT
+  ISSUE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  RESERVATION
+  RELEASE
+}
+
+enum InventoryBucketType {
+  SALE_STOCK
+  TEMP_ASSET
+}
+
+enum InventoryReservationStatus {
+  ACTIVE
+  PARTIAL
+  FULFILLED
+  RELEASED
+  CANCELED
+}
+
+enum CrmFulfillmentStatus {
+  DRAFT
+  RESERVED
+  PARTIAL
+  READY
+  DELIVERED
+  CANCELED
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
@@ -398,6 +436,7 @@ model User {
 
   journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
   journalEntriesPosted  JournalEntry[] @relation("JournalEntryPostedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
+  inventoryLedgerEntriesCreated InventoryLedgerEntry[]
 
   @@index([employeeId])
   @@index([email])
@@ -496,6 +535,10 @@ model ChartOfAccount {
   journalTransactions       JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan akun COA ini.
   journalEntryLines         JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan akun COA ini.
   defaultForBalanceAccounts BalanceAccount[]     @relation("BalanceAccountDefaultCOA") // -- Daftar akun saldo yang terkait dengan akun COA ini.
+  inventoryItemsAsStockCoa  InventoryItem[]      @relation("InventoryItemStockCOA")
+  inventoryItemsAsTempAssetCoa InventoryItem[]   @relation("InventoryItemTempAssetCOA")
+  inventoryItemsAsCogsCoa   InventoryItem[]      @relation("InventoryItemCogsCOA")
+  inventoryLedgerEntries    InventoryLedgerEntry[] @relation("InventoryLedgerChartOfAccount")
 
   @@unique([code])
   @@index([code])
@@ -558,6 +601,7 @@ model CrmCustomer {
   deals         CrmDeal[]
   activities    CrmActivity[]
   conversations CrmConversation[]
+  fulfillmentRequests CrmFulfillmentRequest[]
   @@index([deletedAt])
 }
 
@@ -620,11 +664,13 @@ model CrmLead {
 
   customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
   deals         CrmDeal[] // -- Daftar deal CRM yang berasal dari prospek CRM ini.
+  leadLines     CrmLeadLine[]
   tasks         CrmTask[]
   notesList     CrmNote[]
   attachments   CrmRecordAttachment[]
   activities    CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
   conversations CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan prospek CRM ini.
+  fulfillmentRequests CrmFulfillmentRequest[]
   @@index([customerId])
   @@index([deletedAt])
 }
@@ -808,6 +854,228 @@ model CrmMessage {
   activities   CrmActivity[] // -- Daftar aktivitas yang terkait dengan pesan CRM ini.
   @@index([conversationId])
   @@index([deletedAt])
+}
+
+model CrmProduct {
+  id              String         @id @default(cuid())
+  code            String         @unique @db.VarChar(50)
+  name            String         @db.VarChar(200)
+  description     String?        @db.Text
+  type            CrmProductType @default(PRODUCT)
+  inventoryItemId String?
+  isActive        Boolean        @default(true)
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  leadLines     CrmLeadLine[]
+
+  @@index([inventoryItemId])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model CrmLeadLine {
+  id                    String   @id @default(cuid())
+  leadId                String
+  crmProductId          String?
+  inventoryItemId       String?
+  warehousePreferenceId String?
+  description           String?  @db.Text
+  qty                   Decimal  @default(1) @db.Decimal(15, 2)
+  unitPrice             Decimal  @default(0) @db.Decimal(15, 2)
+  totalPrice            Decimal  @default(0) @db.Decimal(15, 2)
+  requiresInventory     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  lead                CrmLead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  crmProduct          CrmProduct?                 @relation(fields: [crmProductId], references: [id], onDelete: SetNull)
+  inventoryItem       InventoryItem?              @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehousePreference Warehouse?                  @relation(fields: [warehousePreferenceId], references: [id], onDelete: SetNull)
+  fulfillmentLines    CrmFulfillmentRequestLine[]
+  reservations        InventoryReservation[]
+
+  @@index([leadId])
+  @@index([crmProductId])
+  @@index([inventoryItemId])
+  @@index([warehousePreferenceId])
+}
+
+model CrmFulfillmentRequest {
+  id            String               @id @default(cuid())
+  leadId        String
+  customerId    String?
+  requestNumber String               @unique @db.VarChar(50)
+  status        CrmFulfillmentStatus @default(DRAFT)
+  requestedDate DateTime             @default(now())
+  notes         String?              @db.Text
+  deliveredAt   DateTime?
+  canceledAt    DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  lead     CrmLead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customer CrmCustomer?                @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lines    CrmFulfillmentRequestLine[]
+
+  @@index([leadId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model CrmFulfillmentRequestLine {
+  id                   String   @id @default(cuid())
+  fulfillmentRequestId String
+  leadLineId           String?
+  inventoryItemId      String
+  warehouseId          String?
+  qtyRequested         Decimal  @default(0) @db.Decimal(15, 2)
+  qtyReserved          Decimal  @default(0) @db.Decimal(15, 2)
+  qtyDelivered         Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  fulfillmentRequest CrmFulfillmentRequest @relation(fields: [fulfillmentRequestId], references: [id], onDelete: Cascade)
+  leadLine           CrmLeadLine?          @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
+  inventoryItem      InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  warehouse          Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+
+  @@index([fulfillmentRequestId])
+  @@index([leadLineId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model InventoryItem {
+  id                   String    @id @default(cuid())
+  sku                  String    @unique @db.VarChar(50)
+  name                 String    @db.VarChar(200)
+  description          String?   @db.Text
+  unitOfMeasure        String    @db.VarChar(30)
+  category             String?   @db.VarChar(100)
+  isStockTracked       Boolean   @default(true)
+  minStock             Decimal   @default(0) @db.Decimal(15, 2)
+  reorderPoint         Decimal   @default(0) @db.Decimal(15, 2)
+  standardCost         Decimal?  @db.Decimal(15, 2)
+  inventoryCoaId       String?
+  temporaryAssetCoaId  String?
+  cogsCoaId            String?
+  isActive             Boolean   @default(true)
+  deletedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  inventoryCoa      ChartOfAccount?             @relation("InventoryItemStockCOA", fields: [inventoryCoaId], references: [id])
+  temporaryAssetCoa ChartOfAccount?             @relation("InventoryItemTempAssetCOA", fields: [temporaryAssetCoaId], references: [id])
+  cogsCoa           ChartOfAccount?             @relation("InventoryItemCogsCOA", fields: [cogsCoaId], references: [id])
+  crmProducts       CrmProduct[]
+  leadLines         CrmLeadLine[]
+  fulfillmentLines  CrmFulfillmentRequestLine[]
+  balances          InventoryBalance[]
+  ledgerEntries     InventoryLedgerEntry[]
+  reservations      InventoryReservation[]
+
+  @@index([isActive])
+  @@index([inventoryCoaId])
+  @@index([temporaryAssetCoaId])
+  @@index([cogsCoaId])
+  @@index([deletedAt])
+}
+
+model Warehouse {
+  id          String    @id @default(cuid())
+  code        String    @unique @db.VarChar(30)
+  name        String    @db.VarChar(150)
+  description String?   @db.Text
+  isActive    Boolean   @default(true)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  balances            InventoryBalance[]
+  ledgerEntries       InventoryLedgerEntry[]
+  reservations        InventoryReservation[]
+  leadLinePreferences CrmLeadLine[]
+  fulfillmentLines    CrmFulfillmentRequestLine[]
+
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model InventoryBalance {
+  id          String              @id @default(cuid())
+  itemId      String
+  warehouseId String
+  bucketType  InventoryBucketType @default(SALE_STOCK)
+  qtyOnHand   Decimal             @default(0) @db.Decimal(15, 2)
+  qtyReserved Decimal             @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, warehouseId, bucketType])
+  @@index([warehouseId])
+}
+
+model InventoryLedgerEntry {
+  id               String                @id @default(cuid())
+  itemId           String
+  warehouseId      String
+  bucketType       InventoryBucketType   @default(SALE_STOCK)
+  movementType     InventoryMovementType
+  referenceType    String?               @db.VarChar(50)
+  referenceId      String?               @db.VarChar(100)
+  chartOfAccountId String?
+  quantityBefore   Decimal               @default(0) @db.Decimal(15, 2)
+  quantityChange   Decimal               @default(0) @db.Decimal(15, 2)
+  quantityAfter    Decimal               @default(0) @db.Decimal(15, 2)
+  unitCost         Decimal?              @db.Decimal(15, 2)
+  totalCost        Decimal?              @db.Decimal(15, 2)
+  notes            String?               @db.Text
+  movementDate     DateTime              @default(now())
+  createdById      String?
+  createdAt        DateTime              @default(now())
+
+  item           InventoryItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  chartOfAccount ChartOfAccount? @relation("InventoryLedgerChartOfAccount", fields: [chartOfAccountId], references: [id])
+  createdBy      User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([itemId, warehouseId, movementDate])
+  @@index([bucketType])
+  @@index([referenceType, referenceId])
+  @@index([chartOfAccountId])
+  @@index([createdById])
+}
+
+model InventoryReservation {
+  id           String                     @id @default(cuid())
+  itemId       String
+  warehouseId  String?
+  leadLineId   String?
+  sourceType   String                     @db.VarChar(50)
+  sourceId     String                     @db.VarChar(100)
+  qtyReserved  Decimal                    @default(0) @db.Decimal(15, 2)
+  qtyFulfilled Decimal                    @default(0) @db.Decimal(15, 2)
+  qtyReleased  Decimal                    @default(0) @db.Decimal(15, 2)
+  status       InventoryReservationStatus @default(ACTIVE)
+  expiresAt    DateTime?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  leadLine  CrmLeadLine?  @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@index([warehouseId])
+  @@index([leadLineId])
+  @@index([sourceType, sourceId])
+  @@index([status])
 }
 
 // ============================================================================

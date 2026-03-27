@@ -738,55 +738,19 @@ export default function FinanceDashboard() {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard
-          label="Pencairan Tertunda"
-          value={bailouts.length}
-          unit="bailout"
-          color="yellow"
-        />
-        <SummaryCard
-          label="Bailout Belum Settlement"
-          value={unsettledBailouts.length}
-          unit="siap diproses"
-          color="gray"
-        />
-        <SummaryCard
-          label="Klaim Disetujui"
-          value={pendingClaimsCount}
-          unit="menunggu pembayaran"
-          color="blue"
-        />
-        <SummaryCard
-          label="Perjalanan Siap Dikunci"
-          value={travelApproved.length}
-          unit="disetujui"
-          color="purple"
-        />
-        <SummaryCard
-          label="Nominal Pembayaran Tertunda"
-          value={formatCurrency(pendingPaymentAmount)}
-          color="green"
-        />
-        <SummaryCard
-          label="Outstanding Uang Muka"
-          value={formatCurrency(outstandingAdvanceAmount)}
-          unit={`${unsettledBailouts.length} bailout`}
-          color="yellow"
-        />
-        <SummaryCard
-          label="Piutang Karyawan"
-          value={formatCurrency(outstandingEmployeeReceivable)}
-          unit="saldo akun 1132"
-          color="blue"
-        />
-        <SummaryCard
-          label="Hutang Karyawan"
-          value={formatCurrency(outstandingEmployeePayable)}
-          unit="saldo akun 2110"
-          color="purple"
-        />
-      </div>
+      {summaryCards.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {summaryCards.map((card) => (
+            <SummaryCard
+              key={card.label}
+              label={card.label}
+              value={card.value}
+              unit={card.unit}
+              color={card.color}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {canReadJournals || canReadAccounting ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
