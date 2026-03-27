@@ -16,6 +16,8 @@ import {
   PlaneTakeoff,
   ReceiptText,
   ShieldCheck,
+  ShoppingCart,
+  Store,
   UserCircle2,
   Users,
   Wallet,
@@ -76,6 +78,72 @@ const inventoryChildren: NavLinkItem[] = [
     href: "/inventory/fulfillment",
     moduleKey: "inventory",
     badgeKey: "inventoryFulfillment",
+  },
+];
+
+const purchaseChildren: NavLinkItem[] = [
+  {
+    label: "Overview",
+    href: "/pembelian",
+    moduleKey: "purchases",
+  },
+  {
+    label: "Vendor (CRM)",
+    href: "/pembelian/vendor",
+    moduleKey: "purchases",
+  },
+  {
+    label: "Purchase Request",
+    href: "/pembelian/purchase-request",
+    moduleKey: "purchases",
+  },
+  {
+    label: "Purchase Order",
+    href: "/pembelian/purchase-order",
+    moduleKey: "purchases",
+  },
+  {
+    label: "Goods Receipt",
+    href: "/pembelian/goods-receipt",
+    moduleKey: "purchases",
+  },
+  {
+    label: "Invoice Vendor",
+    href: "/pembelian/vendor-invoice",
+    moduleKey: "purchases",
+  },
+];
+
+const salesChildren: NavLinkItem[] = [
+  {
+    label: "Overview",
+    href: "/penjualan",
+    moduleKey: "sales",
+  },
+  {
+    label: "Customer (CRM)",
+    href: "/penjualan/customer",
+    moduleKey: "sales",
+  },
+  {
+    label: "Quotation",
+    href: "/penjualan/quotation",
+    moduleKey: "sales",
+  },
+  {
+    label: "Sales Order",
+    href: "/penjualan/sales-order",
+    moduleKey: "sales",
+  },
+  {
+    label: "Delivery Order",
+    href: "/penjualan/delivery-order",
+    moduleKey: "sales",
+  },
+  {
+    label: "Invoice Penjualan",
+    href: "/penjualan/invoice",
+    moduleKey: "sales",
   },
 ];
 
@@ -210,6 +278,20 @@ const navigationItems: NavItem[] = [
     moduleKey: "inventory",
     badgeKey: "inventoryFulfillment",
     children: inventoryChildren,
+  },
+  {
+    label: "Pembelian",
+    href: "/pembelian",
+    icon: ShoppingCart,
+    moduleKey: "purchases",
+    children: purchaseChildren,
+  },
+  {
+    label: "Penjualan",
+    href: "/penjualan",
+    icon: Store,
+    moduleKey: "sales",
+    children: salesChildren,
   },
   {
     label: "Akuntansi & Keuangan",

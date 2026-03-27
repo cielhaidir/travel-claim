@@ -369,6 +369,37 @@ export default function CrmLeadDetailPage() {
                             <span className="text-sm text-emerald-700">COGS journal: {request.cogsJournal.journalNumber}</span>
                           ) : null}
                         </div>
+                        {(request.lines ?? []).length > 0 ? (
+                          <div className="mt-4 space-y-3">
+                            {request.lines.map((line: any) => (
+                              <div key={line.id} className="rounded-lg bg-gray-50 p-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-semibold text-gray-900">{line.inventoryItem?.sku} · {line.inventoryItem?.name}</p>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      Warehouse: {line.warehouse ? `${line.warehouse.code} · ${line.warehouse.name}` : "-"} · Tracking: {line.inventoryItem?.trackingMode ?? "QUANTITY"}
+                                    </p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 text-xs">
+                                    <Badge variant="default">Req {Number(line.qtyRequested ?? 0)}</Badge>
+                                    <Badge variant="warning">Res {Number(line.qtyReserved ?? 0)}</Badge>
+                                    <Badge variant="success">Del {Number(line.qtyDelivered ?? 0)}</Badge>
+                                  </div>
+                                </div>
+                                {(line.reservedUnits ?? []).length > 0 ? (
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {line.reservedUnits.map((entry: any) => (
+                                      <span key={entry.id} className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+                                        {entry.inventoryItemUnit.serialNumber ?? entry.inventoryItemUnit.assetTag ?? entry.inventoryItemUnit.id}
+                                        <span className="ml-1 text-slate-500">{entry.inventoryItemUnit.status}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>

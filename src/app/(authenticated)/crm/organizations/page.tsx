@@ -29,6 +29,8 @@ type OrganizationFormState = {
   annualRevenue: string;
   employeeCount: string;
   industry: string;
+  isVendor: boolean;
+  isCustomer: boolean;
   notes: string;
 };
 
@@ -38,6 +40,8 @@ const initialFormState: OrganizationFormState = {
   annualRevenue: "",
   employeeCount: "",
   industry: "",
+  isVendor: false,
+  isCustomer: true,
   notes: "",
 };
 
@@ -79,7 +83,7 @@ export default function CrmOrganizationsPage() {
     },
   });
 
-  const organizations = data ?? [];
+  const organizations = useMemo(() => data ?? [], [data]);
   const totalRevenue = useMemo(
     () => organizations.reduce((sum, organization) => sum + Number(organization.annualRevenue ?? 0), 0),
     [organizations],
@@ -99,6 +103,8 @@ export default function CrmOrganizationsPage() {
       annualRevenue: organization.annualRevenue ? String(Number(organization.annualRevenue)) : "",
       employeeCount: organization.employeeCount ?? "",
       industry: organization.industry ?? "",
+      isVendor: organization.isVendor,
+      isCustomer: organization.isCustomer,
       notes: organization.notes ?? "",
     });
     setIsModalOpen(true);
@@ -111,6 +117,8 @@ export default function CrmOrganizationsPage() {
       annualRevenue: form.annualRevenue ? Number(form.annualRevenue) : null,
       employeeCount: (form.employeeCount || null) as EmployeeRangeValue | null,
       industry: (form.industry || null) as IndustryValue | null,
+      isVendor: form.isVendor,
+      isCustomer: form.isCustomer,
       notes: form.notes.trim() || null,
     };
 
@@ -210,6 +218,8 @@ export default function CrmOrganizationsPage() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         <Badge variant="info">{organization.contacts.length} contacts</Badge>
                         <Badge variant="warning">{organization.deals.length} deals</Badge>
+                        {organization.isCustomer ? <Badge variant="success">Customer</Badge> : null}
+                        {organization.isVendor ? <Badge variant="default">Vendor</Badge> : null}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{organization.website ?? "-"}</td>
@@ -310,6 +320,27 @@ export default function CrmOrganizationsPage() {
               ))}
             </select>
           </label>
+          <div className="space-y-3 md:col-span-2">
+            <span className="text-sm font-medium text-gray-700">Role Usage</span>
+            <div className="flex flex-wrap gap-4 rounded-lg border border-gray-200 p-4">
+              <label className="flex items-center gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={form.isCustomer}
+                  onChange={(event) => setForm((current) => ({ ...current, isCustomer: event.target.checked }))}
+                />
+                Dipakai sebagai Customer penjualan
+              </label>
+              <label className="flex items-center gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={form.isVendor}
+                  onChange={(event) => setForm((current) => ({ ...current, isVendor: event.target.checked }))}
+                />
+                Dipakai sebagai Vendor pembelian
+              </label>
+            </div>
+          </div>
           <label className="space-y-2 md:col-span-2">
             <span className="text-sm font-medium text-gray-700">Notes</span>
             <textarea
