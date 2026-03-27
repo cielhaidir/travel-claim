@@ -1,7 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import type { Session } from "next-auth";
+import type { LucideIcon } from "lucide-react";
+import {
+  BadgeCheck,
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  FolderKanban,
+  HandCoins,
+  LayoutDashboard,
+  PlaneTakeoff,
+  ReceiptText,
+  ShieldCheck,
+  UserCircle2,
+  Users,
+  Wallet,
+} from "lucide-react";
 import {
   hasPermissionMap,
   type PermissionAction,
@@ -19,23 +36,28 @@ type NavAccessContext = {
   roles: Role[];
 };
 
-interface NavItem {
+type NavIcon = LucideIcon | string;
+
+interface NavLinkItem {
   label: string;
   href: string;
-  icon?: string;
   moduleKey?: string;
   action?: PermissionAction;
   roles?: Role[];
-  children?: NavItem[];
+  children?: NavLinkItem[];
   comingSoon?: boolean;
   visibleWhen?: (context: NavAccessContext) => boolean;
 }
 
+interface NavItem extends NavLinkItem {
+  icon: NavIcon;
+}
+
 type ResolvedNavItem = NavItem & {
-  children: NavItem[];
+  children: NavLinkItem[];
 };
 
-const crmChildren: NavItem[] = CRM_ACTIVE_MODULES.map((item) => ({
+const crmChildren: NavLinkItem[] = CRM_ACTIVE_MODULES.map((item) => ({
   label: item.label,
   href: item.href,
 }));
@@ -86,7 +108,7 @@ function canAccessFinanceDashboard(
   );
 }
 
-const accountingChildren: NavItem[] = [
+const accountingChildren: NavLinkItem[] = [
   {
     label: "Finance",
     href: "/finance",
@@ -124,37 +146,37 @@ const navigationItems: NavItem[] = [
   {
     label: "Dasbor",
     href: "/dashboard",
-    icon: "DS",
+    icon: LayoutDashboard,
     moduleKey: "dashboard",
   },
   {
     label: "Pengajuan Perjalanan Dinas",
     href: "/travel",
-    icon: "PD",
+    icon: PlaneTakeoff,
     moduleKey: "travel",
   },
   {
     label: "Proyek",
     href: "/projects",
-    icon: "PR",
+    icon: FolderKanban,
     moduleKey: "projects",
   },
   {
     label: "Persetujuan Bailout",
     href: "/bailout",
-    icon: "BO",
+    icon: HandCoins,
     moduleKey: "bailout",
   },
   {
     label: "Klaim",
     href: "/claims",
-    icon: "KL",
+    icon: ReceiptText,
     moduleKey: "claims",
   },
   {
     label: "Persetujuan",
     href: "/approvals",
-    icon: "AP",
+    icon: BadgeCheck,
     moduleKey: "approvals",
   },
   {
@@ -167,32 +189,32 @@ const navigationItems: NavItem[] = [
   {
     label: "Akuntansi & Keuangan",
     href: "/accounting",
-    icon: "AK",
+    icon: Wallet,
     moduleKey: "accounting",
     children: accountingChildren,
   },
   {
     label: "Manajemen Pengguna",
     href: "/admin/users",
-    icon: "US",
+    icon: Users,
     moduleKey: "users",
   },
   {
     label: "Master Tenant",
     href: "/admin/tenants",
-    icon: "TN",
+    icon: Building2,
     moduleKey: "tenants",
   },
   {
     label: "Manajemen Peran",
     href: "/admin/roles",
-    icon: "RB",
+    icon: ShieldCheck,
     moduleKey: "roles",
   },
   {
     label: "Profil",
     href: "/profile",
-    icon: "PF",
+    icon: UserCircle2,
     moduleKey: "profile",
   },
 ];
@@ -203,7 +225,10 @@ interface SidebarNavProps {
   onNavigate?: () => void;
 }
 
-function hasDirectAccess(item: NavItem, context: NavAccessContext): boolean {
+function hasDirectAccess(
+  item: NavLinkItem,
+  context: NavAccessContext,
+): boolean {
   if (context.isRoot) {
     return true;
   }
@@ -243,7 +268,7 @@ function matchesPath(currentPath: string, href: string): boolean {
   );
 }
 
-function isItemActive(item: NavItem, currentPath: string): boolean {
+function isItemActive(item: NavLinkItem, currentPath: string): boolean {
   return (
     matchesPath(currentPath, item.href) ||
     (item.children?.some((child) => isItemActive(child, currentPath)) ?? false)
@@ -255,6 +280,9 @@ export function SidebarNav({
   currentPath,
   onNavigate,
 }: SidebarNavProps) {
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>(
+    {},
+  );
   const context: NavAccessContext = {
     isRoot: session.user.isRoot === true,
     permissions: session.user.permissions,
@@ -287,56 +315,90 @@ export function SidebarNav({
   }, []);
 
   return (
-    <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-      {allowedItems.map((item: ResolvedNavItem) => {
+    <nav className="flex-1 overflow-y-auto px-3 py-4 bg-white">
+      {allowedItems.map((item) => {
+        const Icon = typeof item.icon === "string" ? null : item.icon;
+        const iconLabel = typeof item.icon === "string" ? item.icon : null;
         const isActive = isItemActive(item, currentPath);
+        const hasChildren = item.children.length > 0;
+        const isExpanded = hasChildren
+          ? (expandedItems[item.href] ?? isActive)
+          : false;
+        const itemClassName = `flex items-center gap-2 rounded-md transition-colors ${
+          isActive
+            ? "bg-[#2f5ec7] text-white shadow-sm"
+            : "text-[#3e3e42] hover:bg-gray-100"
+        }`;
 
         return (
-          <div key={item.label} className="space-y-1">
-            <Link
-              href={item.href}
-              onClick={onNavigate}
-              className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                isActive
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              <span className="flex items-center space-x-3">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-[10px] font-semibold tracking-[0.14em] text-gray-600">
-                  {item.icon}
+          <div key={item.href} className="mb-1">
+            <div className={itemClassName}>
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5"
+              >
+                <span
+                  className={`inline-flex h-8 w-8 items-center justify-center ${
+                    isActive ? "text-white" : "text-[#4a4a4e]"
+                  }`}
+                >
+                  {Icon ? (
+                    <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
+                  ) : (
+                    <span className="text-[11px] font-semibold uppercase tracking-wide">
+                      {iconLabel}
+                    </span>
+                  )}
                 </span>
-                <span>{item.label}</span>
-              </span>
-              {item.children?.length ? (
-                <span className="text-xs text-gray-400">
-                  {isActive ? "v" : ">"}
+                <span className="truncate text-sm font-medium">
+                  {item.label}
                 </span>
-              ) : null}
-            </Link>
+              </Link>
 
-            {item.children?.length && isActive ? (
-              <div className="ml-5 space-y-1 border-l border-gray-200 pl-3">
+              {hasChildren ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedItems((prev) => ({
+                      ...prev,
+                      [item.href]: !(prev[item.href] ?? isActive),
+                    }))
+                  }
+                  className={`mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                    isActive
+                      ? "text-white/90 hover:bg-white/10"
+                      : "text-[#4a4a4e] hover:bg-gray-200"
+                  }`}
+                  aria-expanded={isExpanded}
+                  aria-label={`${isExpanded ? "Collapse" : "Expand"} ${item.label} submenu`}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4" strokeWidth={2.25} />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" strokeWidth={2.25} />
+                  )}
+                </button>
+              ) : null}
+            </div>
+
+            {hasChildren && isExpanded ? (
+              <div className="ml-7 mt-1 border-l border-gray-200 pl-3">
                 {item.children.map((child) => {
-                  const childActive = matchesPath(currentPath, child.href);
+                  const childIsActive = matchesPath(currentPath, child.href);
 
                   return (
                     <Link
                       key={child.href}
                       href={child.href}
                       onClick={onNavigate}
-                      className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
-                        childActive
-                          ? "bg-blue-50 font-semibold text-blue-700"
-                          : "text-gray-600 hover:bg-gray-100"
+                      className={`mb-1 flex rounded-md px-3 py-2 text-sm transition-colors ${
+                        childIsActive
+                          ? "bg-[#e7eefc] font-medium text-[#2f5ec7]"
+                          : "text-[#5a5a5f] hover:bg-gray-100 hover:text-[#2f5ec7]"
                       }`}
                     >
-                      <span>{child.label}</span>
-                      {child.comingSoon ? (
-                        <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
-                          Soon
-                        </span>
-                      ) : null}
+                      {child.label}
                     </Link>
                   );
                 })}

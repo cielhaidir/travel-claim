@@ -7,12 +7,20 @@ import type { Session } from "next-auth";
 
 interface TenantSwitcherProps {
   session: Session;
+  variant?: "header" | "dropdown";
 }
 
-export function TenantSwitcher({ session }: TenantSwitcherProps) {
+export function TenantSwitcher({
+  session,
+  variant = "header",
+}: TenantSwitcherProps) {
   const router = useRouter();
   const { data, update } = useSession();
   const [isPending, setIsPending] = useState(false);
+  const isDropdown = variant === "dropdown";
+  const visibilityClass = isDropdown
+    ? "inline-flex w-full max-w-none"
+    : "hidden max-w-72 lg:inline-flex";
 
   const currentSession = data ?? session;
   const memberships =
@@ -22,7 +30,9 @@ export function TenantSwitcher({ session }: TenantSwitcherProps) {
 
   if (memberships.length === 0) {
     return (
-      <div className="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 lg:inline-flex">
+      <div
+        className={`${visibilityClass} rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800`}
+      >
         <span className="truncate">No active tenant</span>
       </div>
     );
@@ -30,7 +40,9 @@ export function TenantSwitcher({ session }: TenantSwitcherProps) {
 
   if (memberships.length === 1) {
     return (
-      <div className="hidden max-w-72 items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 lg:inline-flex">
+      <div
+        className={`${visibilityClass} items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-2`}
+      >
         <p className="truncate text-sm font-medium text-gray-900">
           {memberships[0]?.tenantName}
         </p>
@@ -39,7 +51,9 @@ export function TenantSwitcher({ session }: TenantSwitcherProps) {
   }
 
   return (
-    <label className="hidden max-w-72 items-center rounded-lg border border-gray-200 bg-white px-3 py-2 lg:inline-flex">
+    <label
+      className={`${visibilityClass} items-center rounded-lg border border-gray-200 bg-white px-3 py-2`}
+    >
       <select
         value={currentSession.user.activeTenantId ?? ""}
         disabled={isPending}

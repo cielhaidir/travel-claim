@@ -1,8 +1,9 @@
 import { type ReactNode } from "react";
+import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 interface EmptyStateProps {
-  icon?: string;
+  icon?: ReactNode;
   title: string;
   description: string;
   action?: {
@@ -14,17 +15,17 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({
-  icon = "📋",
+  icon = <FileText className="h-14 w-14 text-gray-400" strokeWidth={1.75} />,
   title,
   description,
   action,
   children,
 }: EmptyStateProps) {
   return (
-    <div className="text-center py-12">
-      <div className="text-6xl mb-4">{icon}</div>
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
-      <p className="text-gray-600 mb-6 max-w-md mx-auto">{description}</p>
+    <div className="py-12 text-center">
+      <div className="mb-4 flex justify-center">{icon}</div>
+      <h3 className="mb-2 text-lg font-semibold text-gray-900">{title}</h3>
+      <p className="mx-auto mb-6 max-w-md text-gray-600">{description}</p>
       {action && (
         <>
           {action.href ? (
