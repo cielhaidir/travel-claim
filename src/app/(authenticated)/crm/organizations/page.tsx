@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,8 @@ import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/features/PageHeader";
 import {
   CrmEmptyHint,
+  CrmActionIconButton,
+  CrmActionIconLink,
   crmInputClassName,
   CrmMetricCard,
   crmTextareaClassName,
@@ -125,10 +128,10 @@ export default function CrmOrganizationsPage() {
     try {
       if (editingId) {
         await updateMutation.mutateAsync({ id: editingId, ...payload });
-        showToast({ title: "Organization updated", message: "Organization master data has been saved.", variant: "success" });
+        showToast({ title: "Organisasi diperbarui", message: "Data master organisasi berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Organization created", message: "Organization master data has been added.", variant: "success" });
+        showToast({ title: "Organisasi ditambahkan", message: "Data master organisasi berhasil ditambahkan.", variant: "success" });
       }
 
       setIsModalOpen(false);
@@ -136,8 +139,8 @@ export default function CrmOrganizationsPage() {
       setEditingId(null);
     } catch (error) {
       showToast({
-        title: "Failed to save organization",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan organisasi",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -148,12 +151,12 @@ export default function CrmOrganizationsPage() {
 
     try {
       await deleteMutation.mutateAsync({ id: deleteId });
-      showToast({ title: "Organization deleted", message: "Organization master data has been removed.", variant: "success" });
+      showToast({ title: "Organisasi dihapus", message: "Data master organisasi berhasil dihapus.", variant: "success" });
       setDeleteId(null);
     } catch (error) {
       showToast({
-        title: "Failed to delete organization",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menghapus organisasi",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -164,50 +167,50 @@ export default function CrmOrganizationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Organizations"
-        description="Master data organizations used across CRM leads, deals, and contacts."
-        primaryAction={{ label: "Add Organization", onClick: openCreateModal }}
+        title="Organisasi CRM"
+        description="Data master organisasi yang digunakan pada prospek, peluang, dan kontak CRM."
+        primaryAction={{ label: "Tambah Organisasi", onClick: openCreateModal }}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <CrmMetricCard label="Organizations" value={String(organizations.length)} />
-        <CrmMetricCard label="Contacts" value={String(organizations.reduce((sum, item) => sum + item.contacts.length, 0))} />
-        <CrmMetricCard label="Annual Revenue" value={formatCurrency(totalRevenue)} />
+        <CrmMetricCard label="Organisasi" value={String(organizations.length)} />
+        <CrmMetricCard label="Kontak" value={String(organizations.reduce((sum, item) => sum + item.contacts.length, 0))} />
+        <CrmMetricCard label="Pendapatan Tahunan" value={formatCurrency(totalRevenue)} />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search organization, website, or notes"
+          placeholder="Cari organisasi, situs web, atau catatan"
           className={crmInputClassName}
         />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Organizations</h2>
-          <p className="text-sm text-gray-500">{organizations.length} records</p>
+          <h2 className="text-lg font-semibold text-gray-900">Organisasi</h2>
+          <p className="text-sm text-gray-500">{organizations.length} data</p>
         </div>
 
         {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Loading organizations...</div>
+          <div className="p-5 text-sm text-gray-500">Memuat organisasi...</div>
         ) : organizations.length === 0 ? (
           <div className="p-5">
-            <CrmEmptyHint text="No organizations available." />
+            <CrmEmptyHint text="Belum ada organisasi." />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organization</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Website</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Revenue</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Employees</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Industry</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Last Modified</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organisasi</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Situs Web</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pendapatan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Jumlah Karyawan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Industri</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Terakhir Diubah</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
@@ -216,10 +219,8 @@ export default function CrmOrganizationsPage() {
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900">{organization.company}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <Badge variant="info">{organization.contacts.length} contacts</Badge>
-                        <Badge variant="warning">{organization.deals.length} deals</Badge>
-                        {organization.isCustomer ? <Badge variant="success">Customer</Badge> : null}
-                        {organization.isVendor ? <Badge variant="default">Vendor</Badge> : null}
+                        <Badge variant="info">{organization.contacts.length} kontak</Badge>
+                        <Badge variant="warning">{organization.deals.length} peluang</Badge>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{organization.website ?? "-"}</td>
@@ -231,23 +232,15 @@ export default function CrmOrganizationsPage() {
                     <td className="px-4 py-3 text-gray-600">{formatDate(organization.updatedAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Link href={`/crm/organizations/${organization.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                          Detail
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(organization)}
-                          className="text-sm font-medium text-gray-700 hover:text-gray-900"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteId(organization.id)}
-                          className="text-sm font-medium text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
+                        <CrmActionIconLink href={`/crm/organizations/${organization.id}`} label="Lihat detail organisasi" tone="primary">
+                          <Eye className="h-4 w-4" />
+                        </CrmActionIconLink>
+                        <CrmActionIconButton label="Ubah organisasi" onClick={() => openEditModal(organization)}>
+                          <Pencil className="h-4 w-4" />
+                        </CrmActionIconButton>
+                        <CrmActionIconButton label="Hapus organisasi" tone="danger" onClick={() => setDeleteId(organization.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </CrmActionIconButton>
                       </div>
                     </td>
                   </tr>
@@ -261,12 +254,12 @@ export default function CrmOrganizationsPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Organization" : "Create Organization"}
+        title={editingId ? "Ubah Organisasi" : "Tambah Organisasi"}
         size="lg"
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Organization Name</span>
+            <span className="text-sm font-medium text-gray-700">Nama Organisasi</span>
             <input
               value={form.company}
               onChange={(event) => setForm((current) => ({ ...current, company: event.target.value }))}
@@ -274,7 +267,7 @@ export default function CrmOrganizationsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Website</span>
+            <span className="text-sm font-medium text-gray-700">Situs Web</span>
             <input
               value={form.website}
               onChange={(event) => setForm((current) => ({ ...current, website: event.target.value }))}
@@ -282,7 +275,7 @@ export default function CrmOrganizationsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Annual Revenue</span>
+            <span className="text-sm font-medium text-gray-700">Pendapatan Tahunan</span>
             <input
               type="number"
               value={form.annualRevenue}
@@ -291,13 +284,13 @@ export default function CrmOrganizationsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">No. of Employees</span>
+            <span className="text-sm font-medium text-gray-700">Jumlah Karyawan</span>
             <select
               value={form.employeeCount}
               onChange={(event) => setForm((current) => ({ ...current, employeeCount: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select employee range</option>
+              <option value="">Pilih rentang karyawan</option>
               {CRM_EMPLOYEE_RANGE_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -306,13 +299,13 @@ export default function CrmOrganizationsPage() {
             </select>
           </label>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Industry</span>
+            <span className="text-sm font-medium text-gray-700">Industri</span>
             <select
               value={form.industry}
               onChange={(event) => setForm((current) => ({ ...current, industry: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select industry</option>
+              <option value="">Pilih industri</option>
               {CRM_INDUSTRY_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -342,7 +335,7 @@ export default function CrmOrganizationsPage() {
             </div>
           </div>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Notes</span>
+            <span className="text-sm font-medium text-gray-700">Catatan</span>
             <textarea
               value={form.notes}
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
@@ -353,10 +346,10 @@ export default function CrmOrganizationsPage() {
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingId ? "Save Changes" : "Create Organization"}
+            {editingId ? "Simpan Perubahan" : "Tambah Organisasi"}
           </Button>
         </div>
       </Modal>
@@ -365,9 +358,9 @@ export default function CrmOrganizationsPage() {
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void handleDelete()}
-        title="Delete Organization"
-        message="This organization will be removed from the active CRM master data."
-        confirmLabel="Delete"
+        title="Hapus Organisasi"
+        message="Organisasi ini akan dihapus dari data master CRM aktif."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>

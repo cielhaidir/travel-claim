@@ -129,8 +129,7 @@ export default function ExpenseSummaryPage() {
     };
   }, [expenseLines]);
 
-  const activeTenantName =
-    session?.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const reportScopeLabel = "Semua Data";
 
   if (!session || !isAllowed) return null;
 
@@ -138,13 +137,13 @@ export default function ExpenseSummaryPage() {
     <div className="space-y-6">
       <PageHeader
         title="Expense Summary"
-        description="Ringkasan beban tenant aktif berdasarkan akun expense dan sumber jurnal"
+        description="Ringkasan beban berdasarkan akun expense dan sumber jurnal"
         primaryAction={{ label: "Muat Ulang", onClick: () => void journalQuery.refetch() }}
         secondaryAction={{ label: "General Ledger", href: "/reports/general-ledger" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant aktif" />
+        <SummaryCard label="Cakupan Data" value={reportScopeLabel} helper="Laporan mencakup seluruh data yang tersedia" />
         <SummaryCard label="Total Beban" value={formatCurrency(summary.total)} helper="Akumulasi akun bertipe EXPENSE" tone="amber" />
         <SummaryCard label="Baris Expense" value={summary.lineCount.toString()} helper="Jumlah line jurnal expense pada filter" tone="blue" />
         <SummaryCard label="Akun Expense" value={summary.distinctAccounts.toString()} helper="Jumlah akun expense yang terpakai" tone="green" />
@@ -241,12 +240,12 @@ export default function ExpenseSummaryPage() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Top Expense Transactions</h2>
-          <p className="text-sm text-gray-500">Line jurnal expense terbesar pada tenant aktif</p>
+          <p className="text-sm text-gray-500">Line jurnal expense terbesar pada data saat ini</p>
         </div>
         {journalQuery.isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat expense summary...</div>
         ) : summary.topTransactions.length === 0 ? (
-          <EmptyState icon="📒" title="Belum ada expense transaction" description="Tidak ada line expense pada tenant aktif untuk filter yang dipilih." />
+          <EmptyState icon="📒" title="Belum ada expense transaction" description="Tidak ada line expense untuk filter yang dipilih." />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">

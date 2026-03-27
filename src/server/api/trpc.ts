@@ -41,10 +41,6 @@ function hasRootSessionAccess(ctx: {
       role?: string;
       roles?: string[];
       isRoot?: boolean;
-      memberships?: Array<{
-        status: string;
-        isRootTenant: boolean;
-      }>;
     };
   } | null;
 }): boolean {
@@ -59,49 +55,8 @@ function hasRootSessionAccess(ctx: {
 
   return (
     user.isRoot === true ||
-    userRoles.includes("ROOT" as Role) ||
-    (user.memberships ?? []).some(
-      (membership) => membership.status === "ACTIVE" && membership.isRootTenant,
-    )
+    userRoles.includes("ROOT" as Role)
   );
-}
-
-function resolveSessionTenantId(ctx: {
-  session?: {
-    user?: {
-      activeTenantId?: string | null;
-      memberships?: Array<{
-        tenantId: string;
-        status: string;
-        isDefault?: boolean;
-      }>;
-    };
-  } | null;
-}): string | null {
-  const user = ctx.session?.user;
-  if (!user) return null;
-
-  const activeMemberships = (user.memberships ?? []).filter(
-    (membership) => membership.status === "ACTIVE",
-  );
-
-  if (
-    user.activeTenantId &&
-    activeMemberships.some(
-      (membership) => membership.tenantId === user.activeTenantId,
-    )
-  ) {
-    return user.activeTenantId;
-  }
-
-  const defaultMembership = activeMemberships.find(
-    (membership) => membership.isDefault,
-  );
-  if (defaultMembership) {
-    return defaultMembership.tenantId;
-  }
-
-  return activeMemberships[0]?.tenantId ?? null;
 }
 
 /**
@@ -224,34 +179,6 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   });
 });
 
-const enforceTenantContext = t.middleware(({ ctx, next }) => {
-  if (!ctx.session?.user) {
-    throw new TRPCError({
-      code: "UNAUTHORIZED",
-      message: "Authentication required",
-    });
-  }
-
-  const isRoot = hasRootSessionAccess(ctx);
-  const tenantId = resolveSessionTenantId(ctx);
-
-  if (!isRoot && !tenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Active tenant is required",
-    });
-  }
-
-  return next({
-    ctx: {
-      ...ctx,
-      session: { ...ctx.session, user: ctx.session.user },
-      tenantId: tenantId ?? null,
-      isRoot,
-    },
-  });
-});
-
 /**
  * Middleware: Enforce role requirements
  *
@@ -357,7 +284,14 @@ const enforcePermission = (
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
   .use(enforceUserIsAuthed)
-  .use(enforceTenantContext)
+  .use(({ ctx, next }) =>
+    next({
+      ctx: {
+        ...ctx,
+        isRoot: hasRootSessionAccess(ctx),
+      },
+    }),
+  )
   .use(({ ctx, next }) => {
     if (!ctx.session?.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });

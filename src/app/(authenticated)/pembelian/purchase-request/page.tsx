@@ -33,7 +33,7 @@ export default function PurchaseRequestPage() {
       ]}
       stages={[
         "User/departemen mengajukan kebutuhan barang atau jasa.",
-        "PR melewati approval sesuai struktur tenant atau anggaran.",
+        "PR melewati approval sesuai struktur perusahaan atau anggaran.",
         "PR yang disetujui dikonversi menjadi purchase order ke vendor.",
         "Status PR dipantau sampai closed atau canceled.",
       ]}
@@ -44,7 +44,7 @@ export default function PurchaseRequestPage() {
       notes={[
         "Tambahkan status draft, submitted, approved, rejected, dan converted to PO.",
         "Sediakan line item kebutuhan barang/jasa dan estimasi anggaran.",
-        "Bisa dihubungkan ke approval workflow tenant yang sudah ada.",
+        "Bisa dihubungkan ke approval workflow perusahaan yang sudah ada.",
       ]}
     />
   );

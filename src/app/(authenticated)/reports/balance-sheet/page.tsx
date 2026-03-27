@@ -80,8 +80,7 @@ export default function BalanceSheetPage() {
     },
   );
 
-  const activeTenantName =
-    session?.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const dataScopeLabel = "Semua data";
 
   const coaAccounts = (coaQuery.data as CoaAccount[] | undefined) ?? [];
   const journals = ((journalQuery.data as { journalEntries: JournalEntry[] } | undefined)?.journalEntries ?? []);
@@ -154,13 +153,13 @@ export default function BalanceSheetPage() {
     <div className="space-y-6">
       <PageHeader
         title="Neraca"
-        description="Posisi aset, kewajiban, dan ekuitas tenant aktif sampai tanggal laporan"
+        description="Posisi aset, kewajiban, dan ekuitas sampai tanggal laporan"
         primaryAction={{ label: "Muat Ulang", onClick: () => void journalQuery.refetch() }}
         secondaryAction={{ label: "Laba Rugi", href: "/reports/income-statement" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant aktif" />
+        <SummaryCard label="Cakupan Data" value={dataScopeLabel} helper="Laporan mengikuti data global saat ini" />
         <SummaryCard label="Total Aset" value={formatCurrency(report.totalAssets)} helper="Saldo normal akun ASSET" tone="blue" />
         <SummaryCard label="Liabilitas + Ekuitas" value={formatCurrency(report.totalLiabilityAndEquity)} helper="Termasuk laba rugi berjalan" tone="green" />
         <SummaryCard
@@ -267,7 +266,7 @@ export default function BalanceSheetPage() {
         <EmptyState
           icon="📗"
           title="Belum ada data neraca"
-          description="Tidak ditemukan saldo akun aset, kewajiban, atau ekuitas pada tenant aktif untuk tanggal laporan yang dipilih."
+          description="Tidak ditemukan saldo akun aset, kewajiban, atau ekuitas untuk tanggal laporan yang dipilih."
         />
       ) : null}
     </div>

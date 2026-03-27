@@ -21,25 +21,7 @@ import {
   generateJournalEntryNumber,
 } from "@/lib/utils/numberGenerators";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
-  where: T,
-): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
+function withInventoryWhere<T extends Record<string, unknown>>(where: T): T {
   return where;
 }
 
@@ -52,7 +34,6 @@ function isSerializedTrackingMode(mode: InventoryTrackingMode) {
 async function ensureInventoryBalance(
   tx: Prisma.TransactionClient,
   input: {
-    tenantId: string | null;
     itemId: string;
     warehouseId: string;
     bucketType?: InventoryBucketType;
@@ -74,7 +55,6 @@ async function ensureInventoryBalance(
 
   return tx.inventoryBalance.create({
     data: {
-      tenantId: input.tenantId,
       itemId: input.itemId,
       warehouseId: input.warehouseId,
       bucketType,
@@ -96,7 +76,7 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where = withTenantWhere(ctx, {
+      const where = withInventoryWhere({
         deletedAt: null,
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         ...(input.isStockTracked !== undefined
@@ -160,7 +140,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
         include: {
           balances: {
             include: {
@@ -284,7 +264,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const relatedJournals = journalSourceIds.length
         ? await ctx.db.journalEntry.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceId: { in: journalSourceIds },
               status: JournalStatus.POSTED,
             }),
@@ -337,9 +317,8 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
       const existing = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { sku: input.sku }),
+        where: withInventoryWhere({ sku: input.sku }),
       });
 
       if (existing) {
@@ -351,7 +330,6 @@ export const inventoryRouter = createTRPCRouter({
 
       const item = await ctx.db.inventoryItem.create({
         data: {
-          tenantId: scope.tenantId,
           sku: input.sku,
           name: input.name,
           description: input.description,
@@ -377,7 +355,6 @@ export const inventoryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: item.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "InventoryItem",
@@ -431,7 +408,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
       });
 
       if (!current) {
@@ -440,7 +417,7 @@ export const inventoryRouter = createTRPCRouter({
 
       if (input.isActive === false && current.isActive) {
         const activeReservation = await ctx.db.inventoryReservation.findFirst({
-          where: withTenantWhere(ctx, {
+          where: withInventoryWhere({
             itemId: current.id,
             status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
           }),
@@ -459,7 +436,7 @@ export const inventoryRouter = createTRPCRouter({
           where: {
             inventoryItemId: current.id,
             fulfillmentRequest: {
-              is: withTenantWhere(ctx, {
+              is: withInventoryWhere({
                 status: {
                   in: [
                     CrmFulfillmentStatus.DRAFT,
@@ -517,7 +494,6 @@ export const inventoryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: updated.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "InventoryItem",
@@ -542,7 +518,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const warehouses = await ctx.db.warehouse.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           deletedAt: null,
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
           ...(input.search
@@ -580,7 +556,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const accounts = await ctx.db.chartOfAccount.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           isActive: true,
           ...(input.accountType ? { accountType: input.accountType } : {}),
         }),
@@ -602,51 +578,25 @@ export const inventoryRouter = createTRPCRouter({
     .input(z.object({ search: z.string().optional() }).optional())
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
+      const users = await ctx.db.user.findMany({
+        where: {
+          deletedAt: null,
+          ...(input?.search
+            ? {
+                OR: [
+                  { name: { contains: input.search, mode: "insensitive" } },
+                  { email: { contains: input.search, mode: "insensitive" } },
+                  { employeeId: { contains: input.search, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, name: true, email: true, employeeId: true },
+        orderBy: [{ name: "asc" }],
+        take: 100,
+      });
 
-      const memberships = scope.isRoot
-        ? await ctx.db.user.findMany({
-            where: {
-              deletedAt: null,
-              ...(input?.search
-                ? {
-                    OR: [
-                      { name: { contains: input.search, mode: "insensitive" } },
-                      { email: { contains: input.search, mode: "insensitive" } },
-                      { employeeId: { contains: input.search, mode: "insensitive" } },
-                    ],
-                  }
-                : {}),
-            },
-            select: { id: true, name: true, email: true, employeeId: true },
-            orderBy: [{ name: "asc" }],
-            take: 100,
-          })
-        : await ctx.db.tenantMembership.findMany({
-            where: {
-              tenantId: scope.tenantId ?? undefined,
-              status: "ACTIVE",
-              user: {
-                deletedAt: null,
-                ...(input?.search
-                  ? {
-                      OR: [
-                        { name: { contains: input.search, mode: "insensitive" } },
-                        { email: { contains: input.search, mode: "insensitive" } },
-                        { employeeId: { contains: input.search, mode: "insensitive" } },
-                      ],
-                    }
-                  : {}),
-              },
-            },
-            select: {
-              user: { select: { id: true, name: true, email: true, employeeId: true } },
-            },
-            orderBy: [{ user: { name: "asc" } }],
-            take: 100,
-          }).then((rows) => rows.map((row) => row.user));
-
-      return { users: memberships };
+      return { users };
     }),
 
   createWarehouse: permissionProcedure("inventory", "create")
@@ -660,9 +610,8 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
       const existing = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { code: input.code }),
+        where: withInventoryWhere({ code: input.code }),
       });
 
       if (existing) {
@@ -674,7 +623,6 @@ export const inventoryRouter = createTRPCRouter({
 
       const warehouse = await ctx.db.warehouse.create({
         data: {
-          tenantId: scope.tenantId,
           code: input.code,
           name: input.name,
           description: input.description,
@@ -684,7 +632,6 @@ export const inventoryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: warehouse.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "Warehouse",
@@ -708,7 +655,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: withInventoryWhere({ id: input.id, deletedAt: null }),
       });
 
       if (!current) {
@@ -717,7 +664,7 @@ export const inventoryRouter = createTRPCRouter({
 
       if (input.isActive === false && current.isActive) {
         const activeReservation = await ctx.db.inventoryReservation.findFirst({
-          where: withTenantWhere(ctx, {
+          where: withInventoryWhere({
             warehouseId: current.id,
             status: { in: [InventoryReservationStatus.ACTIVE, InventoryReservationStatus.PARTIAL] },
           }),
@@ -736,7 +683,7 @@ export const inventoryRouter = createTRPCRouter({
           where: {
             warehouseId: current.id,
             fulfillmentRequest: {
-              is: withTenantWhere(ctx, {
+              is: withInventoryWhere({
                 status: {
                   in: [
                     CrmFulfillmentStatus.DRAFT,
@@ -774,7 +721,6 @@ export const inventoryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: updated.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "Warehouse",
@@ -800,7 +746,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const balances = await ctx.db.inventoryBalance.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           ...(input.warehouseId ? { warehouseId: input.warehouseId } : {}),
           ...(input.itemId ? { itemId: input.itemId } : {}),
         }),
@@ -846,7 +792,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const serializedUnits = serializedCandidates.length
         ? await ctx.db.inventoryItemUnit.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               inventoryItemId: { in: [...new Set(serializedCandidates.map((balance) => balance.itemId))] },
               warehouseId: { in: [...new Set(serializedCandidates.map((balance) => balance.warehouseId))] },
             }),
@@ -867,7 +813,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const receiptBatches = rows.length
         ? await ctx.db.inventoryReceiptBatch.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               inventoryItemId: { in: [...new Set(rows.map((balance) => balance.itemId))] },
               warehouseId: { in: [...new Set(rows.map((balance) => balance.warehouseId))] },
               bucketType: { in: [...new Set(rows.map((balance) => balance.bucketType))] },
@@ -944,17 +890,15 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
-
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.itemId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.itemId, deletedAt: null }),
       });
       if (!item) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
       }
 
       const warehouse = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { id: input.warehouseId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.warehouseId, deletedAt: null }),
       });
       if (!warehouse) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
@@ -962,14 +906,12 @@ export const inventoryRouter = createTRPCRouter({
 
       const result = await ctx.db.$transaction(async (tx) => {
         const tempAssetBalance = await ensureInventoryBalance(tx, {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId: warehouse.id,
           bucketType: InventoryBucketType.TEMP_ASSET,
         });
 
         const saleStockBalance = await ensureInventoryBalance(tx, {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId: warehouse.id,
           bucketType: InventoryBucketType.SALE_STOCK,
@@ -1010,7 +952,6 @@ export const inventoryRouter = createTRPCRouter({
 
         const transferOutLedger = await tx.inventoryLedgerEntry.create({
           data: {
-            tenantId: scope.tenantId,
             itemId: item.id,
             warehouseId: warehouse.id,
             bucketType: InventoryBucketType.TEMP_ASSET,
@@ -1033,7 +974,6 @@ export const inventoryRouter = createTRPCRouter({
 
         const transferInLedger = await tx.inventoryLedgerEntry.create({
           data: {
-            tenantId: scope.tenantId,
             itemId: item.id,
             warehouseId: warehouse.id,
             bucketType: InventoryBucketType.SALE_STOCK,
@@ -1056,7 +996,6 @@ export const inventoryRouter = createTRPCRouter({
 
         await tx.auditLog.create({
           data: {
-            tenantId: scope.tenantId,
             userId: ctx.session.user.id,
             action: AuditAction.UPDATE,
             entityType: "InventoryReclassification",
@@ -1097,9 +1036,8 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
       const units = await ctx.db.inventoryItemUnit.findMany({
-        where: withTenantWhere(ctx, { id: { in: input.unitIds } }),
+        where: withInventoryWhere({ id: { in: input.unitIds } }),
         include: { inventoryItem: true, warehouse: true },
       });
 
@@ -1133,13 +1071,11 @@ export const inventoryRouter = createTRPCRouter({
 
       return ctx.db.$transaction(async (tx) => {
         const fromBalance = await ensureInventoryBalance(tx, {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId,
           bucketType: first.bucketType,
         });
         const toBalance = await ensureInventoryBalance(tx, {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId,
           bucketType: input.toBucketType,
@@ -1161,7 +1097,6 @@ export const inventoryRouter = createTRPCRouter({
         const referenceId = input.referenceId ?? `${item.id}:${warehouseId}:${Date.now()}`;
 
         await tx.inventoryLedgerEntry.create({ data: {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId,
           bucketType: first.bucketType,
@@ -1178,7 +1113,6 @@ export const inventoryRouter = createTRPCRouter({
           createdById: ctx.session.user.id,
         } });
         await tx.inventoryLedgerEntry.create({ data: {
-          tenantId: scope.tenantId,
           itemId: item.id,
           warehouseId,
           bucketType: input.toBucketType,
@@ -1204,7 +1138,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const unit = await ctx.db.inventoryItemUnit.findFirst({
-        where: withTenantWhere(ctx, { id: input.unitId }),
+        where: withInventoryWhere({ id: input.unitId }),
         include: { inventoryItem: true },
       });
       if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory unit not found" });
@@ -1233,7 +1167,6 @@ export const inventoryRouter = createTRPCRouter({
       });
 
       await ctx.db.auditLog.create({ data: {
-        tenantId: unit.tenantId,
         userId: ctx.session.user.id,
         action: AuditAction.UPDATE,
         entityType: "InventoryUnitAssignment",
@@ -1248,7 +1181,7 @@ export const inventoryRouter = createTRPCRouter({
     .input(z.object({ unitId: z.string(), notes: z.string().optional() }))
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const unit = await ctx.db.inventoryItemUnit.findFirst({ where: withTenantWhere(ctx, { id: input.unitId }) });
+      const unit = await ctx.db.inventoryItemUnit.findFirst({ where: withInventoryWhere({ id: input.unitId }) });
       if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory unit not found" });
       if (unit.status !== InventoryUnitStatus.ASSIGNED) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Hanya unit ASSIGNED yang bisa di-unassign" });
@@ -1269,7 +1202,6 @@ export const inventoryRouter = createTRPCRouter({
       });
 
       await ctx.db.auditLog.create({ data: {
-        tenantId: unit.tenantId,
         userId: ctx.session.user.id,
         action: AuditAction.UPDATE,
         entityType: "InventoryUnitAssignment",
@@ -1287,12 +1219,12 @@ export const inventoryRouter = createTRPCRouter({
       const [requests, reservationCounts] = await Promise.all([
         ctx.db.crmFulfillmentRequest.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {}),
+          where: withInventoryWhere({}),
           _count: { _all: true },
         }),
         ctx.db.inventoryReservation.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {}),
+          where: withInventoryWhere({}),
           _count: { _all: true },
         }),
       ]);
@@ -1337,7 +1269,7 @@ export const inventoryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const requests = await ctx.db.crmFulfillmentRequest.findMany({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           ...(input.status ? { status: input.status } : {}),
           ...(input.search
             ? {
@@ -1386,7 +1318,7 @@ export const inventoryRouter = createTRPCRouter({
 
       const cogsJournals = requests.length
         ? await ctx.db.journalEntry.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceId: { in: requests.map((request) => request.id) },
               referenceNumber: { in: requests.map((request) => request.requestNumber) },
               status: JournalStatus.POSTED,
@@ -1465,17 +1397,15 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
-
       const item = await ctx.db.inventoryItem.findFirst({
-        where: withTenantWhere(ctx, { id: input.itemId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.itemId, deletedAt: null }),
       });
       if (!item) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
       }
 
       const warehouse = await ctx.db.warehouse.findFirst({
-        where: withTenantWhere(ctx, { id: input.warehouseId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.warehouseId, deletedAt: null }),
       });
       if (!warehouse) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found" });
@@ -1600,7 +1530,6 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const allocation of allocations) {
           const balance = await ensureInventoryBalance(tx, {
-            tenantId: scope.tenantId,
             itemId: item.id,
             warehouseId: warehouse.id,
             bucketType: allocation.bucketType,
@@ -1618,7 +1547,6 @@ export const inventoryRouter = createTRPCRouter({
 
           const ledger = await tx.inventoryLedgerEntry.create({
             data: {
-              tenantId: scope.tenantId,
               itemId: item.id,
               warehouseId: warehouse.id,
               bucketType: allocation.bucketType,
@@ -1644,7 +1572,6 @@ export const inventoryRouter = createTRPCRouter({
 
           const createdBatch = await tx.inventoryReceiptBatch.create({
             data: {
-              tenantId: scope.tenantId,
               inventoryItemId: item.id,
               warehouseId: warehouse.id,
               bucketType: allocation.bucketType,
@@ -1672,7 +1599,7 @@ export const inventoryRouter = createTRPCRouter({
           for (const unit of normalizedSerializedUnits) {
             if (unit.serialNumber) {
               const existingSerial = await tx.inventoryItemUnit.findFirst({
-                where: withTenantWhere(ctx, { serialNumber: unit.serialNumber }),
+                where: withInventoryWhere({ serialNumber: unit.serialNumber }),
                 select: { id: true },
               });
               if (existingSerial) {
@@ -1685,7 +1612,7 @@ export const inventoryRouter = createTRPCRouter({
 
             if (unit.assetTag) {
               const existingAssetTag = await tx.inventoryItemUnit.findFirst({
-                where: withTenantWhere(ctx, { assetTag: unit.assetTag }),
+                where: withInventoryWhere({ assetTag: unit.assetTag }),
                 select: { id: true },
               });
               if (existingAssetTag) {
@@ -1700,7 +1627,6 @@ export const inventoryRouter = createTRPCRouter({
 
             const createdUnit = await tx.inventoryItemUnit.create({
               data: {
-                tenantId: scope.tenantId,
                 inventoryItemId: item.id,
                 warehouseId: warehouse.id,
                 receiptBatchId: receiptBatch?.id,
@@ -1730,7 +1656,6 @@ export const inventoryRouter = createTRPCRouter({
 
         await tx.auditLog.create({
           data: {
-            tenantId: scope.tenantId,
             userId: ctx.session.user.id,
             action: AuditAction.CREATE,
             entityType: "InventoryStockReceipt",
@@ -1775,11 +1700,9 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
-
       const result = await ctx.db.$transaction(async (tx) => {
         const request = await tx.crmFulfillmentRequest.findFirst({
-          where: withTenantWhere(ctx, { id: input.fulfillmentRequestId }),
+          where: withInventoryWhere({ id: input.fulfillmentRequestId }),
           include: {
             lines: true,
             lead: { select: { id: true } },
@@ -1806,7 +1729,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of request.lines) {
           const reservations = await tx.inventoryReservation.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceType: "FULFILLMENT_REQUEST",
               sourceId: request.id,
               itemId: line.inventoryItemId,
@@ -1829,7 +1752,7 @@ export const inventoryRouter = createTRPCRouter({
           }
 
           const item = await tx.inventoryItem.findFirst({
-            where: withTenantWhere(ctx, { id: line.inventoryItemId, deletedAt: null }),
+            where: withInventoryWhere({ id: line.inventoryItemId, deletedAt: null }),
           });
           if (!item) {
             throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found for fulfillment delivery" });
@@ -1843,7 +1766,6 @@ export const inventoryRouter = createTRPCRouter({
             if (!reservation.warehouseId) continue;
 
             const balance = await ensureInventoryBalance(tx, {
-              tenantId: scope.tenantId,
               itemId: reservation.itemId,
               warehouseId: reservation.warehouseId,
             });
@@ -1933,7 +1855,7 @@ export const inventoryRouter = createTRPCRouter({
             } else {
               let qtyToConsumeFromBatches = issueQty;
               const fifoBatches = await tx.inventoryReceiptBatch.findMany({
-                where: withTenantWhere(ctx, {
+                where: withInventoryWhere({
                   inventoryItemId: reservation.itemId,
                   warehouseId: reservation.warehouseId,
                   bucketType: InventoryBucketType.SALE_STOCK,
@@ -1966,7 +1888,6 @@ export const inventoryRouter = createTRPCRouter({
 
             await tx.inventoryLedgerEntry.create({
               data: {
-                tenantId: scope.tenantId,
                 itemId: reservation.itemId,
                 warehouseId: reservation.warehouseId,
                 bucketType: InventoryBucketType.SALE_STOCK,
@@ -2021,13 +1942,11 @@ export const inventoryRouter = createTRPCRouter({
         if (cogsPostingMap.size > 0) {
           const journalNumber = await generateJournalEntryNumber(
             tx as unknown as Prisma.DefaultPrismaClient,
-            scope.tenantId,
           );
           const postingEntries = [...cogsPostingMap.values()];
 
           cogsJournal = await tx.journalEntry.create({
             data: {
-              tenantId: scope.tenantId,
               journalNumber,
               transactionDate: input.deliveredAt ?? new Date(),
               description: `COGS posting for ${request.requestNumber}`,
@@ -2128,7 +2047,6 @@ export const inventoryRouter = createTRPCRouter({
 
         await tx.auditLog.create({
           data: {
-            tenantId: scope.tenantId,
             userId: ctx.session.user.id,
             action: AuditAction.UPDATE,
             entityType: "CrmFulfillmentDelivery",
@@ -2162,11 +2080,9 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
-
       const result = await ctx.db.$transaction(async (tx) => {
         const request = await tx.crmFulfillmentRequest.findFirst({
-          where: withTenantWhere(ctx, { id: input.fulfillmentRequestId }),
+          where: withInventoryWhere({ id: input.fulfillmentRequestId }),
           include: {
             lines: true,
             lead: { select: { id: true } },
@@ -2193,7 +2109,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of request.lines) {
           const reservations = await tx.inventoryReservation.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               sourceType: "FULFILLMENT_REQUEST",
               sourceId: request.id,
               itemId: line.inventoryItemId,
@@ -2221,7 +2137,6 @@ export const inventoryRouter = createTRPCRouter({
             if (remainingReserved <= 0 || !reservation.warehouseId) continue;
 
             const balance = await ensureInventoryBalance(tx, {
-              tenantId: scope.tenantId,
               itemId: reservation.itemId,
               warehouseId: reservation.warehouseId,
             });
@@ -2254,12 +2169,11 @@ export const inventoryRouter = createTRPCRouter({
             }
 
             const item = await tx.inventoryItem.findFirst({
-              where: withTenantWhere(ctx, { id: reservation.itemId, deletedAt: null }),
+              where: withInventoryWhere({ id: reservation.itemId, deletedAt: null }),
             });
 
             await tx.inventoryLedgerEntry.create({
               data: {
-                tenantId: scope.tenantId,
                 itemId: reservation.itemId,
                 warehouseId: reservation.warehouseId,
                 movementType: InventoryMovementType.RELEASE,
@@ -2309,7 +2223,6 @@ export const inventoryRouter = createTRPCRouter({
 
         await tx.auditLog.create({
           data: {
-            tenantId: scope.tenantId,
             userId: ctx.session.user.id,
             action: AuditAction.UPDATE,
             entityType: "CrmFulfillmentCancellation",
@@ -2349,9 +2262,8 @@ export const inventoryRouter = createTRPCRouter({
     )
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
-      const scope = getTenantScope(ctx);
       const lead = await ctx.db.crmLead.findFirst({
-        where: withTenantWhere(ctx, { id: input.leadId, deletedAt: null }),
+        where: withInventoryWhere({ id: input.leadId, deletedAt: null }),
         include: { customer: { select: { id: true } } },
       });
 
@@ -2359,10 +2271,11 @@ export const inventoryRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "CRM lead not found" });
       }
 
-      const requestNumber = input.requestNumber ?? await generateFulfillmentRequestNumber(ctx.db, scope.tenantId);
+      const requestNumber =
+        input.requestNumber ?? await generateFulfillmentRequestNumber(ctx.db);
 
       const existing = await ctx.db.crmFulfillmentRequest.findFirst({
-        where: withTenantWhere(ctx, { requestNumber }),
+        where: withInventoryWhere({ requestNumber }),
       });
       if (existing) {
         throw new TRPCError({
@@ -2379,7 +2292,7 @@ export const inventoryRouter = createTRPCRouter({
       ];
 
       const activeRequest = await ctx.db.crmFulfillmentRequest.findFirst({
-        where: withTenantWhere(ctx, {
+        where: withInventoryWhere({
           leadId: lead.id,
           status: { in: activeStatuses },
         }),
@@ -2402,7 +2315,7 @@ export const inventoryRouter = createTRPCRouter({
           where: {
             leadLineId: { in: incomingLeadLineIds },
             fulfillmentRequest: {
-              is: withTenantWhere(ctx, {
+              is: withInventoryWhere({
                 status: { in: activeStatuses },
               }),
             },
@@ -2425,7 +2338,6 @@ export const inventoryRouter = createTRPCRouter({
       const request = await ctx.db.$transaction(async (tx) => {
         const createdRequest = await tx.crmFulfillmentRequest.create({
           data: {
-            tenantId: scope.tenantId,
             leadId: lead.id,
             customerId: input.customerId ?? lead.customer?.id,
             requestNumber,
@@ -2434,7 +2346,6 @@ export const inventoryRouter = createTRPCRouter({
             status: CrmFulfillmentStatus.DRAFT,
             lines: {
               create: input.lines.map((line) => ({
-                tenantId: scope.tenantId,
                 leadLineId: line.leadLineId,
                 inventoryItemId: line.inventoryItemId,
                 warehouseId: line.warehouseId,
@@ -2454,7 +2365,7 @@ export const inventoryRouter = createTRPCRouter({
 
         for (const line of createdRequest.lines) {
           const item = await tx.inventoryItem.findFirst({
-            where: withTenantWhere(ctx, { id: line.inventoryItemId, deletedAt: null }),
+            where: withInventoryWhere({ id: line.inventoryItemId, deletedAt: null }),
           });
           if (!item) {
             throw new TRPCError({
@@ -2464,7 +2375,7 @@ export const inventoryRouter = createTRPCRouter({
           }
 
           const candidateBalances = await tx.inventoryBalance.findMany({
-            where: withTenantWhere(ctx, {
+            where: withInventoryWhere({
               itemId: line.inventoryItemId,
               bucketType: InventoryBucketType.SALE_STOCK,
               ...(line.warehouseId ? { warehouseId: line.warehouseId } : {}),
@@ -2498,7 +2409,7 @@ export const inventoryRouter = createTRPCRouter({
 
             if (isSerializedTrackingMode(item.trackingMode)) {
               const availableUnits = await tx.inventoryItemUnit.findMany({
-                where: withTenantWhere(ctx, {
+                where: withInventoryWhere({
                   inventoryItemId: line.inventoryItemId,
                   warehouseId: balance.warehouseId,
                   bucketType: InventoryBucketType.SALE_STOCK,
@@ -2525,7 +2436,6 @@ export const inventoryRouter = createTRPCRouter({
 
             const reservation = await tx.inventoryReservation.create({
               data: {
-                tenantId: scope.tenantId,
                 itemId: line.inventoryItemId,
                 warehouseId: balance.warehouseId,
                 leadLineId: line.leadLineId,
@@ -2549,7 +2459,6 @@ export const inventoryRouter = createTRPCRouter({
 
               await tx.inventoryReservationUnit.createMany({
                 data: reservedUnitIds.map((unitId) => ({
-                  tenantId: scope.tenantId,
                   reservationId: reservation.id,
                   inventoryItemUnitId: unitId,
                   fulfillmentRequestLineId: line.id,
@@ -2559,7 +2468,6 @@ export const inventoryRouter = createTRPCRouter({
 
             await tx.inventoryLedgerEntry.create({
               data: {
-                tenantId: scope.tenantId,
                 itemId: line.inventoryItemId,
                 warehouseId: balance.warehouseId,
                 movementType: InventoryMovementType.RESERVATION,
@@ -2622,7 +2530,6 @@ export const inventoryRouter = createTRPCRouter({
 
         await tx.auditLog.create({
           data: {
-            tenantId: finalizedRequest.tenantId,
             userId: ctx.session.user.id,
             action: AuditAction.CREATE,
             entityType: "CrmFulfillmentRequest",

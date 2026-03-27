@@ -73,7 +73,7 @@ async function resolveApprovalBase<TInclude extends Prisma.ApprovalInclude>(
     : { approvalNumber: identifier.approvalNumber! };
 
   const approval = await db.approval.findFirst({
-    where: applyTenantFilter(ctx, where),
+    where: applyScope(ctx, where),
     include,
   });
 
@@ -125,58 +125,11 @@ function verifyCallerPhone(
   }
 }
 
-function getTenantContext(ctx: unknown): {
-  isRoot: boolean;
-  tenantId: string | null;
-} {
-  const typed = ctx as { isRoot?: boolean; tenantId?: string | null };
-  return {
-    isRoot: typed.isRoot ?? false,
-    tenantId: typed.tenantId ?? null,
-  };
-}
-
-function applyTenantFilter(
-  ctx: unknown,
+function applyScope(
+  _ctx: unknown,
   where: Prisma.ApprovalWhereInput,
 ): Prisma.ApprovalWhereInput {
-  const { isRoot, tenantId } = getTenantContext(ctx);
-  if (isRoot || !tenantId) {
-    return where;
-  }
-
-  return {
-    AND: [
-      where,
-      {
-        OR: [
-          { tenantId },
-          {
-            tenantId: null,
-            OR: [
-              { travelRequest: { is: { tenantId } } },
-              { claim: { is: { tenantId } } },
-              { bailout: { is: { tenantId } } },
-            ],
-          },
-        ],
-      },
-    ],
-  };
-}
-
-function assertTenantAccess(
-  ctx: unknown,
-  recordTenantId: string | null | undefined,
-) {
-  const { isRoot, tenantId } = getTenantContext(ctx);
-  if (isRoot) return;
-  if (!tenantId || !recordTenantId || tenantId !== recordTenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Cross-tenant access denied",
-    });
-  }
+  return where;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -376,7 +329,7 @@ export const approvalRouter = createTRPCRouter({
       // ACTION: list
       // ══════════════════════════════════════════════════════════════════════
       if (input.action === "list") {
-        const where: Prisma.ApprovalWhereInput = applyTenantFilter(ctx, {
+        const where: Prisma.ApprovalWhereInput = applyScope(ctx, {
           approverId: ctx.session.user.id,
         } satisfies Prisma.ApprovalWhereInput);
 
@@ -442,7 +395,7 @@ export const approvalRouter = createTRPCRouter({
       // ══════════════════════════════════════════════════════════════════════
       if (input.action === "pending_count") {
         return ctx.db.approval.count({
-          where: applyTenantFilter(ctx, {
+          where: applyScope(ctx, {
             approverId: ctx.session.user.id,
             status: ApprovalStatus.PENDING,
           } satisfies Prisma.ApprovalWhereInput),
@@ -456,7 +409,7 @@ export const approvalRouter = createTRPCRouter({
         if (input.approvalNumber && !input.approvalId) {
           // Lookup by approvalNumber with optional phone verification (WhatsApp flow)
           const found = await ctx.db.approval.findFirst({
-            where: applyTenantFilter(ctx, {
+            where: applyScope(ctx, {
               approvalNumber: input.approvalNumber,
             } satisfies Prisma.ApprovalWhereInput),
             include: fullApprovalInclude,
@@ -1638,7 +1591,7 @@ export const approvalRouter = createTRPCRouter({
         where.claimId = { not: null };
       }
 
-      applyTenantFilter(ctx, where);
+      applyScope(ctx, where);
 
       const approvals = await ctx.db.approval.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -1738,7 +1691,7 @@ export const approvalRouter = createTRPCRouter({
     .output(z.number())
     .query(async ({ ctx }) => {
       return ctx.db.approval.count({
-        where: applyTenantFilter(ctx, {
+        where: applyScope(ctx, {
           approverId: ctx.session.user.id,
           status: ApprovalStatus.PENDING,
         } satisfies Prisma.ApprovalWhereInput),
@@ -1766,7 +1719,7 @@ export const approvalRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const approval = await ctx.db.approval.findFirst({
-        where: applyTenantFilter(ctx, {
+        where: applyScope(ctx, {
           id: input.id,
         } satisfies Prisma.ApprovalWhereInput),
         include: {
@@ -1910,7 +1863,7 @@ export const approvalRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const approval = await ctx.db.approval.findFirst({
-        where: applyTenantFilter(ctx, {
+        where: applyScope(ctx, {
           approvalNumber: input.approvalNumber,
         } satisfies Prisma.ApprovalWhereInput),
         include: {
@@ -3032,7 +2985,7 @@ export const approvalRouter = createTRPCRouter({
         where.status = input.status;
       }
 
-      applyTenantFilter(ctx, where);
+      applyScope(ctx, where);
 
       const approvals = await ctx.db.approval.findMany({
         take: input?.limit ? input.limit + 1 : 51,
@@ -3093,7 +3046,7 @@ export const approvalRouter = createTRPCRouter({
       }
 
       const approval = await ctx.db.approval.findFirst({
-        where: applyTenantFilter(ctx, {
+        where: applyScope(ctx, {
           id: input.approvalId,
         } satisfies Prisma.ApprovalWhereInput),
         include: {
@@ -3286,11 +3239,7 @@ export const approvalRouter = createTRPCRouter({
         // Find requests that have a DIRECTOR-level approval pending, or are at APPROVED_L1/L2/L3 waiting for the next step
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
-            deletedAt: null,
-            ...(getTenantContext(ctx).isRoot
-              ? {}
-              : { tenantId: getTenantContext(ctx).tenantId }),
-            status: {
+            deletedAt: null,            status: {
               in: [
                 TravelStatus.SUBMITTED,
                 TravelStatus.APPROVED_L1,
@@ -3330,11 +3279,7 @@ export const approvalRouter = createTRPCRouter({
         // ALL: return any travel request that has a DIRECTOR-level approval
         const travelRequests = await ctx.db.travelRequest.findMany({
           where: {
-            deletedAt: null,
-            ...(getTenantContext(ctx).isRoot
-              ? {}
-              : { tenantId: getTenantContext(ctx).tenantId }),
-            approvals: { some: { level: ApprovalLevel.DIRECTOR } },
+            deletedAt: null,            approvals: { some: { level: ApprovalLevel.DIRECTOR } },
           },
           include: {
             requester: {
@@ -3389,11 +3334,7 @@ export const approvalRouter = createTRPCRouter({
 
       const travelRequest = await ctx.db.travelRequest.findFirst({
         where: {
-          id: input.travelRequestId,
-          ...(getTenantContext(ctx).isRoot
-            ? {}
-            : { tenantId: getTenantContext(ctx).tenantId }),
-        },
+          id: input.travelRequestId,        },
       });
 
       if (!travelRequest) {
@@ -3411,13 +3352,9 @@ export const approvalRouter = createTRPCRouter({
             : ApprovalStatus.REVISION_REQUESTED;
 
       // Create a DIRECTOR-level approval record with a resolved status (create + approve in one shot)
-      const approvalNumber = await generateApprovalNumber(
-        ctx.db,
-        getTenantContext(ctx).tenantId,
-      );
+      const approvalNumber = await generateApprovalNumber(ctx.db);
       await ctx.db.approval.create({
         data: {
-          tenantId: getTenantContext(ctx).tenantId,
           approvalNumber,
           travelRequestId: input.travelRequestId,
           approverId: ctx.session.user.id,
@@ -3478,3 +3415,4 @@ export const approvalRouter = createTRPCRouter({
       return { success: true };
     }),
 });
+

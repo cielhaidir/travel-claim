@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { Session } from "next-auth";
 import { signOut } from "next-auth/react";
 import { Bell, ChevronDown, LogOut, PanelLeft, Search } from "lucide-react";
-import { TenantSwitcher } from "@/components/navigation/TenantSwitcher";
 
 interface TopHeaderProps {
   session: Session;
@@ -190,13 +189,6 @@ export function TopHeader({ session, onMenuClick }: TopHeaderProps) {
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500">
-                    Active Tenant
-                  </p>
-                  <TenantSwitcher session={session} variant="dropdown" />
-                </div>
-
                 <button
                   onClick={() => signOut({ callbackUrl: "/login" })}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"

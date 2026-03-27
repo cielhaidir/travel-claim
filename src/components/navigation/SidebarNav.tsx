@@ -6,7 +6,6 @@ import type { Session } from "next-auth";
 import type { LucideIcon } from "lucide-react";
 import {
   BadgeCheck,
-  Building2,
   ChevronDown,
   ChevronRight,
   FolderKanban,
@@ -305,12 +304,6 @@ const navigationItems: NavItem[] = [
     href: "/admin/users",
     icon: Users,
     moduleKey: "users",
-  },
-  {
-    label: "Master Tenant",
-    href: "/admin/tenants",
-    icon: Building2,
-    moduleKey: "tenants",
   },
   {
     label: "Manajemen Peran",

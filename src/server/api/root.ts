@@ -15,7 +15,7 @@ import { financeRouter } from "@/server/api/routers/finance";
 import { journalTransactionRouter } from "@/server/api/routers/journalTransaction";
 import { journalEntryRouter } from "@/server/api/routers/journalEntry";
 import { balanceAccountRouter } from "@/server/api/routers/balanceAccount";
-import { tenantRouter } from "@/server/api/routers/tenant";
+import { roleRouter } from "@/server/api/routers/role";
 import { crmRouter } from "@/server/api/routers/crm";
 import { inventoryRouter } from "@/server/api/routers/inventory";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
@@ -43,7 +43,7 @@ export const appRouter = createTRPCRouter({
   journalTransaction: journalTransactionRouter,
   journalEntry: journalEntryRouter,
   balanceAccount: balanceAccountRouter,
-  tenant: tenantRouter,
+  role: roleRouter,
   crm: crmRouter,
   inventory: inventoryRouter,
 });

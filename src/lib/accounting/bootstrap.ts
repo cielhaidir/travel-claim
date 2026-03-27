@@ -185,7 +185,7 @@ const DEFAULT_COA_TEMPLATE: CoaTemplate[] = [
     category: "Ekuitas",
     subcategory: "Saldo Awal",
     parentCode: "3000",
-    description: "Akun pembukaan saldo awal atau ekuitas pembentukan tenant",
+    description: "Akun pembukaan saldo awal atau ekuitas pembentukan perusahaan",
   },
   {
     code: "3200",
@@ -382,26 +382,22 @@ const DEFAULT_BALANCE_ACCOUNT_TEMPLATE: BalanceAccountTemplate[] = [
     code: "BANK-OPS",
     name: "Rekening Operasional Utama",
     defaultChartOfAccountCode: "1120",
-    description: "Rekening bank operasional utama tenant",
+    description: "Rekening bank operasional utama perusahaan",
   },
 ];
 
-export async function bootstrapTenantAccounting(
+export async function bootstrapAccountingCatalog(
   tx: Prisma.TransactionClient,
   input: {
-    tenantId: string;
     userId: string;
   },
 ): Promise<void> {
-  const { tenantId, userId } = input;
+  const { userId } = input;
 
   for (const template of DEFAULT_COA_TEMPLATE) {
     await tx.chartOfAccount.upsert({
       where: {
-        tenantId_code: {
-          tenantId,
-          code: template.code,
-        },
+        code: template.code,
       },
       update: {
         name: template.name,
@@ -413,7 +409,6 @@ export async function bootstrapTenantAccounting(
         updatedById: userId,
       },
       create: {
-        tenantId,
         code: template.code,
         name: template.name,
         accountType: template.accountType,
@@ -429,7 +424,6 @@ export async function bootstrapTenantAccounting(
 
   const accounts = await tx.chartOfAccount.findMany({
     where: {
-      tenantId,
       code: { in: DEFAULT_COA_TEMPLATE.map((item) => item.code) },
     },
     select: {
@@ -461,16 +455,13 @@ export async function bootstrapTenantAccounting(
     const defaultChartOfAccount = accountByCode.get(template.defaultChartOfAccountCode);
     if (!defaultChartOfAccount) {
       throw new Error(
-        `Missing default Chart of Account ${template.defaultChartOfAccountCode} for tenant bootstrap`,
+        `Missing default Chart of Account ${template.defaultChartOfAccountCode} for accounting bootstrap`,
       );
     }
 
     await tx.balanceAccount.upsert({
       where: {
-        tenantId_code: {
-          tenantId,
-          code: template.code,
-        },
+        code: template.code,
       },
       update: {
         name: template.name,
@@ -479,7 +470,6 @@ export async function bootstrapTenantAccounting(
         isActive: true,
       },
       create: {
-        tenantId,
         code: template.code,
         name: template.name,
         balance: 0,

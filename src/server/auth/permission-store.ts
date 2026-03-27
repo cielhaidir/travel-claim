@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   ROLES,
   ROLE_LABELS as DEFAULT_ROLE_LABELS,
@@ -7,7 +8,6 @@ import {
   DEFAULT_ROLE_PERMISSION_PRESETS,
   FULL_ACCESS_PERMISSIONS,
   mergeMissingPermissionModules,
-  mergePermissionMaps,
   sanitizePermissionMap,
   type PermissionMap,
 } from "@/lib/auth/permissions";
@@ -17,94 +17,40 @@ type PermissionDbClient = {
   $executeRawUnsafe(query: string, ...values: unknown[]): Promise<unknown>;
 };
 
-type LegacyRolePermissionRow = {
+type RolePermissionRow = {
+  id: string;
   role: Role;
   displayName: string | null;
   isArchived: boolean;
   permissions: unknown;
-};
-
-type TenantRoleRow = {
-  id: string;
-  baseRole: Role | null;
-  isSystem: boolean;
-  slug: string;
-  displayName: string;
-  isArchived: boolean;
-  permissions: unknown;
-  defaultPermissions: unknown;
   createdAt: Date;
   updatedAt: Date;
 };
 
-type TenantRoleMembershipCountRow = {
-  customRoleId: string;
-  membershipCount: number;
-  activeMembershipCount: number;
-};
-
-type TenantSummary = {
-  id: string;
-  name: string;
-  slug: string;
-  isRoot: boolean;
+type RoleUsageRow = {
+  role: Role;
+  userCount: number;
 };
 
 export type RolePermissionProfile = {
   id: string | null;
   roleKey: string;
-  roleKind: "SYSTEM" | "CUSTOM";
-  tenantId: string;
-  tenantName: string;
-  tenantSlug: string;
-  tenantIsRoot: boolean;
-  role: Role | null;
-  systemRole: Role | null;
-  customRoleId: string | null;
-  slug: string | null;
+  role: Role;
   displayName: string;
   defaultDisplayName: string;
   isArchived: boolean;
-  membershipCount: number;
-  activeMembershipCount: number;
   permissions: PermissionMap;
   defaultPermissions: PermissionMap;
   isCustomized: boolean;
+  userCount: number;
   createdAt: Date | null;
   updatedAt: Date | null;
 };
 
 const ROLE_VALUES = Object.values(ROLES) as Role[];
-const NON_ROOT_SEEDED_ROLES: Role[] = [
-  ROLES.ADMIN,
-  ROLES.FINANCE,
-  ROLES.DIRECTOR,
-  ROLES.MANAGER,
-  ROLES.SALES_CHIEF,
-  ROLES.SUPERVISOR,
-  ROLES.SALES_EMPLOYEE,
-  ROLES.EMPLOYEE,
-];
-const ROOT_TENANT_SEEDED_ROLES: Role[] = [ROLES.ROOT];
-const MINIMAL_CUSTOM_ROLE_DEFAULTS = sanitizePermissionMap({
-  dashboard: ["read"],
-  profile: ["read", "update"],
-});
 
-function buildSystemRoleKey(role: Role): string {
+function buildRoleKey(role: Role): string {
   return `system:${role}`;
-}
-
-function buildCustomRoleKey(customRoleId: string): string {
-  return `custom:${customRoleId}`;
-}
-
-function buildSystemRoleSlug(role: Role): string {
-  return `system-${role.toLowerCase().replace(/_/g, "-")}`;
-}
-
-function getSeededRolesForTenant(isRootTenant: boolean): Role[] {
-  return isRootTenant ? ROOT_TENANT_SEEDED_ROLES : NON_ROOT_SEEDED_ROLES;
 }
 
 function normalizePermissionMap(
@@ -131,19 +77,6 @@ export function getDefaultRoleDisplayName(role: Role): string {
   return DEFAULT_ROLE_LABELS[role] ?? role;
 }
 
-export function getDefaultCustomRolePermissions(): PermissionMap {
-  return MINIMAL_CUSTOM_ROLE_DEFAULTS;
-}
-
-export function normalizeCustomRoleSlug(displayName: string): string {
-  return displayName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
-}
-
 export function isRolePermissionTableMissing(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;
@@ -161,625 +94,366 @@ export function isRolePermissionTableMissing(error: unknown): boolean {
   );
 }
 
-export function isTenantCustomRoleTableMissing(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const message =
-    "message" in error && typeof error.message === "string"
-      ? error.message
-      : "";
-
-  return (
-    message.includes('relation "TenantCustomRole" does not exist') ||
-    (message.includes("TenantCustomRole") &&
-      (message.includes("does not exist") || message.includes("not found")))
-  );
-}
-
-async function getTenantSummary(
+async function listStoredRolePermissions(
   db: PermissionDbClient,
-  tenantId: string,
-): Promise<TenantSummary | null> {
-  const rows = await db.$queryRawUnsafe<TenantSummary[]>(
-    `
-      SELECT
-        t."id" as "id",
-        t."name" as "name",
-        t."slug" as "slug",
-        t."isRoot" as "isRoot"
-      FROM "Tenant" t
-      WHERE t."id" = $1
-        AND t."deletedAt" IS NULL
-      LIMIT 1
-    `,
-    tenantId,
-  );
-
-  return rows[0] ?? null;
-}
-
-async function getLegacySystemRoleRows(
-  db: PermissionDbClient,
-  tenantId: string,
-): Promise<Map<Role, LegacyRolePermissionRow>> {
+): Promise<RolePermissionRow[]> {
   try {
-    const rows = await db.$queryRawUnsafe<LegacyRolePermissionRow[]>(
+    return await db.$queryRawUnsafe<RolePermissionRow[]>(
       `
         SELECT
+          rp."id" as "id",
           rp."role"::text as "role",
           rp."displayName" as "displayName",
           rp."isArchived" as "isArchived",
-          rp."permissions" as "permissions"
+          rp."permissions" as "permissions",
+          rp."createdAt" as "createdAt",
+          rp."updatedAt" as "updatedAt"
         FROM "RolePermission" rp
-        WHERE rp."tenantId" = $1
       `,
-      tenantId,
     );
-
-    return new Map(rows.map((row) => [row.role, row]));
   } catch (error) {
     if (!isRolePermissionTableMissing(error)) {
       throw error;
     }
 
-    return new Map();
+    return [];
   }
 }
 
-async function getTenantRoleRows(
+export async function ensureRolePermissionCatalog(
   db: PermissionDbClient,
-  tenantId: string,
-): Promise<TenantRoleRow[]> {
-  return db.$queryRawUnsafe<TenantRoleRow[]>(
-    `
-      SELECT
-        cr."id" as "id",
-        cr."baseRole"::text as "baseRole",
-        cr."isSystem" as "isSystem",
-        cr."slug" as "slug",
-        cr."displayName" as "displayName",
-        cr."isArchived" as "isArchived",
-        cr."permissions" as "permissions",
-        cr."defaultPermissions" as "defaultPermissions",
-        cr."createdAt" as "createdAt",
-        cr."updatedAt" as "updatedAt"
-      FROM "TenantCustomRole" cr
-      WHERE cr."tenantId" = $1
-    `,
-    tenantId,
-  );
-}
-
-async function ensureTenantRoleDefaults(
-  db: PermissionDbClient,
-  tenantId: string,
 ): Promise<void> {
-  await db.$executeRawUnsafe(
-    `
-      UPDATE "TenantCustomRole"
-      SET "defaultPermissions" = "permissions"
-      WHERE "tenantId" = $1
-        AND "defaultPermissions" IS NULL
-    `,
-    tenantId,
-  );
-}
+  const storedRows = await listStoredRolePermissions(db);
+  const rowsByRole = new Map(storedRows.map((row) => [row.role, row]));
 
-async function backfillMembershipRoleBindings(
-  db: PermissionDbClient,
-  tenantId: string,
-): Promise<void> {
-  await db.$executeRawUnsafe(
-    `
-      UPDATE "TenantMembership" tm
-      SET "customRoleId" = tr."id"
-      FROM "TenantCustomRole" tr
-      WHERE tm."tenantId" = $1
-        AND tm."tenantId" = tr."tenantId"
-        AND tm."customRoleId" IS NULL
-        AND tr."isSystem" = true
-        AND tr."baseRole" = tm."role"
-    `,
-    tenantId,
-  );
-}
+  for (const role of ROLE_VALUES) {
+    const defaults = getDefaultRolePermissions(role);
+    const existing = rowsByRole.get(role);
 
-export async function ensureTenantRoleCatalog(
-  db: PermissionDbClient,
-  tenantId: string,
-): Promise<void> {
-  const tenant = await getTenantSummary(db, tenantId);
-  if (!tenant) {
-    return;
-  }
-
-  await ensureTenantRoleDefaults(db, tenantId);
-
-  const seededRoles = getSeededRolesForTenant(tenant.isRoot);
-  const legacyRowsByRole = await getLegacySystemRoleRows(db, tenantId);
-  const existingRows = await getTenantRoleRows(db, tenantId);
-  const existingSystemRows = new Map<Role, TenantRoleRow>();
-
-  for (const row of existingRows) {
-    if (row.isSystem && row.baseRole) {
-      existingSystemRows.set(row.baseRole, row);
-    }
-  }
-
-  for (const role of seededRoles) {
-    const defaultPermissions = getDefaultRolePermissions(role);
-    const legacyRow = legacyRowsByRole.get(role);
-    const existingRow = existingSystemRows.get(role);
-
-    if (!existingRow) {
-      const permissions = legacyRow
-        ? normalizePermissionMap(legacyRow.permissions, defaultPermissions)
-        : defaultPermissions;
-
+    if (!existing) {
       await db.$executeRawUnsafe(
         `
-          INSERT INTO "TenantCustomRole" (
+          INSERT INTO "RolePermission" (
             "id",
-            "tenantId",
-            "baseRole",
-            "isSystem",
-            "slug",
+            "role",
             "displayName",
             "isArchived",
             "permissions",
-            "defaultPermissions",
             "createdAt",
             "updatedAt"
           )
           VALUES (
             md5(random()::text || clock_timestamp()::text),
-            $1,
-            $2::"Role",
-            true,
-            $3,
-            $4,
-            $5,
-            $6::jsonb,
-            $7::jsonb,
+            $1::"Role",
+            $2,
+            false,
+            $3::jsonb,
             NOW(),
             NOW()
           )
         `,
-        tenantId,
         role,
-        buildSystemRoleSlug(role),
-        normalizeRoleDisplayName(role, legacyRow?.displayName),
-        legacyRow?.isArchived ?? false,
-        JSON.stringify(permissions),
-        JSON.stringify(defaultPermissions),
+        getDefaultRoleDisplayName(role),
+        JSON.stringify(defaults),
       );
       continue;
     }
 
-    const nextDefaultPermissions = normalizePermissionMap(
-      existingRow.defaultPermissions,
-      defaultPermissions,
-    );
-    const nextPermissions = normalizePermissionMap(
-      existingRow.permissions,
-      nextDefaultPermissions,
-    );
-    const nextDisplayName =
-      existingRow.displayName?.trim() ??
-      legacyRow?.displayName?.trim() ??
-      getDefaultRoleDisplayName(role);
-    const nextIsArchived = existingRow.isArchived ?? legacyRow?.isArchived ?? false;
+    const nextPermissions = normalizePermissionMap(existing.permissions, defaults);
+    const nextDisplayName = normalizeRoleDisplayName(role, existing.displayName);
 
     if (
-      !existingRow.isSystem ||
-      existingRow.baseRole !== role ||
-      !jsonEquals(existingRow.defaultPermissions, nextDefaultPermissions) ||
-      !jsonEquals(existingRow.permissions, nextPermissions) ||
-      existingRow.displayName !== nextDisplayName ||
-      existingRow.isArchived !== nextIsArchived
+      existing.displayName !== nextDisplayName ||
+      !jsonEquals(existing.permissions, nextPermissions)
     ) {
       await db.$executeRawUnsafe(
         `
-          UPDATE "TenantCustomRole"
+          UPDATE "RolePermission"
           SET
-            "baseRole" = $2::"Role",
-            "isSystem" = true,
-            "slug" = $3,
-            "displayName" = $4,
-            "isArchived" = $5,
-            "permissions" = $6::jsonb,
-            "defaultPermissions" = $7::jsonb,
+            "displayName" = $2,
+            "permissions" = $3::jsonb,
             "updatedAt" = NOW()
           WHERE "id" = $1
         `,
-        existingRow.id,
-        role,
-        buildSystemRoleSlug(role),
+        existing.id,
         nextDisplayName,
-        nextIsArchived,
         JSON.stringify(nextPermissions),
-        JSON.stringify(nextDefaultPermissions),
       );
     }
   }
-
-  await backfillMembershipRoleBindings(db, tenantId);
 }
 
-async function getSystemTenantRoleRow(
+async function getRolePermissionRow(
   db: PermissionDbClient,
-  tenantId: string,
   role: Role,
-): Promise<TenantRoleRow | null> {
-  await ensureTenantRoleCatalog(db, tenantId);
-
-  const rows = await db.$queryRawUnsafe<TenantRoleRow[]>(
+): Promise<RolePermissionRow | null> {
+  await ensureRolePermissionCatalog(db);
+  const rows = await db.$queryRawUnsafe<RolePermissionRow[]>(
     `
       SELECT
-        cr."id" as "id",
-        cr."baseRole"::text as "baseRole",
-        cr."isSystem" as "isSystem",
-        cr."slug" as "slug",
-        cr."displayName" as "displayName",
-        cr."isArchived" as "isArchived",
-        cr."permissions" as "permissions",
-        cr."defaultPermissions" as "defaultPermissions",
-        cr."createdAt" as "createdAt",
-        cr."updatedAt" as "updatedAt"
-      FROM "TenantCustomRole" cr
-      WHERE cr."tenantId" = $1
-        AND cr."isSystem" = true
-        AND cr."baseRole" = $2::"Role"
+        rp."id" as "id",
+        rp."role"::text as "role",
+        rp."displayName" as "displayName",
+        rp."isArchived" as "isArchived",
+        rp."permissions" as "permissions",
+        rp."createdAt" as "createdAt",
+        rp."updatedAt" as "updatedAt"
+      FROM "RolePermission" rp
+      WHERE rp."role" = $1::"Role"
       LIMIT 1
     `,
-    tenantId,
     role,
   );
 
   return rows[0] ?? null;
 }
 
-export async function getTenantSystemRoleId(
+export async function listRolePermissionProfiles(
   db: PermissionDbClient,
-  tenantId: string,
-  role: Role,
-): Promise<string | null> {
-  const row = await getSystemTenantRoleRow(db, tenantId, role);
-  return row?.id ?? null;
-}
-
-export async function listTenantRolePermissionProfiles(
-  db: PermissionDbClient,
-  tenantId: string,
 ): Promise<RolePermissionProfile[]> {
-  const tenant = await getTenantSummary(db, tenantId);
-  if (!tenant) {
-    return [];
-  }
+  await ensureRolePermissionCatalog(db);
 
-  await ensureTenantRoleCatalog(db, tenantId);
+  const [rows, userCounts] = await Promise.all([
+    listStoredRolePermissions(db),
+    db.$queryRawUnsafe<RoleUsageRow[]>(
+      `
+        SELECT
+          u."role"::text as "role",
+          COUNT(*)::int as "userCount"
+        FROM "User" u
+        WHERE u."deletedAt" IS NULL
+        GROUP BY u."role"
+      `,
+    ),
+  ]);
 
-  const rows = await getTenantRoleRows(db, tenantId);
-  const membershipCounts = await db.$queryRawUnsafe<TenantRoleMembershipCountRow[]>(
-    `
-      SELECT
-        tm."customRoleId" as "customRoleId",
-        COUNT(*)::int as "membershipCount",
-        COUNT(*) FILTER (
-          WHERE tm."status" = 'ACTIVE'::"MembershipStatus"
-        )::int as "activeMembershipCount"
-      FROM "TenantMembership" tm
-      WHERE tm."tenantId" = $1
-        AND tm."customRoleId" IS NOT NULL
-      GROUP BY tm."customRoleId"
-    `,
-    tenantId,
-  );
-  const membershipCountsByRoleId = new Map(
-    membershipCounts.map((row) => [row.customRoleId, row]),
-  );
+  const countByRole = new Map(userCounts.map((row) => [row.role, row.userCount]));
 
-  const systemProfiles: RolePermissionProfile[] = [];
-  const customProfiles: RolePermissionProfile[] = [];
+  return rows
+    .map((row) => {
+      const defaultPermissions = getDefaultRolePermissions(row.role);
+      const permissions = normalizePermissionMap(row.permissions, defaultPermissions);
+      const defaultDisplayName = getDefaultRoleDisplayName(row.role);
 
-  for (const row of rows) {
-    const systemRole = row.isSystem ? row.baseRole : null;
-    const defaultPermissions = normalizePermissionMap(
-      row.defaultPermissions,
-      row.baseRole
-        ? getDefaultRolePermissions(row.baseRole)
-        : getDefaultCustomRolePermissions(),
+      return {
+        id: row.id,
+        roleKey: buildRoleKey(row.role),
+        role: row.role,
+        displayName: normalizeRoleDisplayName(row.role, row.displayName),
+        defaultDisplayName,
+        isArchived: row.isArchived,
+        permissions,
+        defaultPermissions,
+        isCustomized:
+          !jsonEquals(permissions, defaultPermissions) ||
+          normalizeRoleDisplayName(row.role, row.displayName) !==
+            defaultDisplayName ||
+          row.isArchived,
+        userCount: countByRole.get(row.role) ?? 0,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      } satisfies RolePermissionProfile;
+    })
+    .sort(
+      (left, right) => ROLE_VALUES.indexOf(left.role) - ROLE_VALUES.indexOf(right.role),
     );
-    const permissions = normalizePermissionMap(row.permissions, defaultPermissions);
-    const membershipCount = membershipCountsByRoleId.get(row.id);
-    const defaultDisplayName =
-      systemRole ? getDefaultRoleDisplayName(systemRole) : row.displayName;
-
-    const profile: RolePermissionProfile = {
-      id: row.id,
-      roleKey: row.isSystem
-        ? buildSystemRoleKey(systemRole ?? ROLES.EMPLOYEE)
-        : buildCustomRoleKey(row.id),
-      roleKind: row.isSystem ? "SYSTEM" : "CUSTOM",
-      tenantId: tenant.id,
-      tenantName: tenant.name,
-      tenantSlug: tenant.slug,
-      tenantIsRoot: tenant.isRoot,
-      role: row.baseRole,
-      systemRole,
-      customRoleId: row.id,
-      slug: row.slug,
-      displayName: row.displayName,
-      defaultDisplayName,
-      isArchived: row.isArchived,
-      membershipCount: membershipCount?.membershipCount ?? 0,
-      activeMembershipCount: membershipCount?.activeMembershipCount ?? 0,
-      permissions,
-      defaultPermissions,
-      isCustomized:
-        !jsonEquals(permissions, defaultPermissions) ||
-        row.displayName !== defaultDisplayName ||
-        row.isArchived,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-
-    if (row.isSystem) {
-      systemProfiles.push(profile);
-    } else {
-      customProfiles.push(profile);
-    }
-  }
-
-  systemProfiles.sort((left, right) => {
-    const leftIndex = ROLE_VALUES.indexOf(left.systemRole ?? ROLES.EMPLOYEE);
-    const rightIndex = ROLE_VALUES.indexOf(right.systemRole ?? ROLES.EMPLOYEE);
-    return leftIndex - rightIndex;
-  });
-  customProfiles.sort((left, right) =>
-    left.displayName.localeCompare(right.displayName),
-  );
-
-  return [...systemProfiles, ...customProfiles];
 }
 
 export async function resolveEffectivePermissions(
   db: PermissionDbClient,
   input: {
-    tenantId: string | null;
     roles: Role[];
     isRoot?: boolean;
-    customRoleId?: string | null;
   },
 ): Promise<PermissionMap> {
   if (input.isRoot || input.roles.includes(ROLES.ROOT)) {
     return FULL_ACCESS_PERMISSIONS;
   }
 
-  if (input.tenantId && input.customRoleId) {
-    try {
-      const rows = await db.$queryRawUnsafe<
-        Array<{ permissions: unknown; defaultPermissions: unknown }>
-      >(
-        `
-          SELECT
-            cr."permissions" as "permissions",
-            cr."defaultPermissions" as "defaultPermissions"
-          FROM "TenantCustomRole" cr
-          WHERE cr."tenantId" = $1
-            AND cr."id" = $2
-            AND COALESCE(cr."isArchived", false) = false
-          LIMIT 1
-        `,
-        input.tenantId,
-        input.customRoleId,
-      );
-
-      const activeRole = rows[0];
-      if (activeRole) {
-        return normalizePermissionMap(
-          activeRole.permissions,
-          normalizePermissionMap(
-            activeRole.defaultPermissions,
-            getDefaultCustomRolePermissions(),
-          ),
-        );
-      }
-    } catch (error) {
-      if (!isTenantCustomRoleTableMissing(error)) {
-        throw error;
-      }
-    }
+  if (input.roles.length === 0) {
+    return {};
   }
 
-  if (!input.tenantId || input.roles.length === 0) {
-    return mergePermissionMaps(
-      ...input.roles.map((role) => getDefaultRolePermissions(role)),
-    );
-  }
-
-  await ensureTenantRoleCatalog(db, input.tenantId);
+  await ensureRolePermissionCatalog(db);
 
   try {
     const rows = await db.$queryRawUnsafe<
       Array<{
-        baseRole: Role;
+        role: Role;
         permissions: unknown;
-        defaultPermissions: unknown;
+        isArchived: boolean;
       }>
     >(
       `
         SELECT
-          cr."baseRole"::text as "baseRole",
-          cr."permissions" as "permissions",
-          cr."defaultPermissions" as "defaultPermissions"
-        FROM "TenantCustomRole" cr
-        WHERE cr."tenantId" = $1
-          AND cr."isSystem" = true
-          AND cr."baseRole"::text = ANY($2)
-          AND COALESCE(cr."isArchived", false) = false
+          rp."role"::text as "role",
+          rp."permissions" as "permissions",
+          rp."isArchived" as "isArchived"
+        FROM "RolePermission" rp
+        WHERE rp."role"::text = ANY($1)
       `,
-      input.tenantId,
       input.roles,
     );
 
-    const permissionsByRole = new Map<Role, PermissionMap>(
-      rows.map((row) => [
-        row.baseRole,
-        normalizePermissionMap(
-          row.permissions,
-          normalizePermissionMap(
-            row.defaultPermissions,
-            getDefaultRolePermissions(row.baseRole),
-          ),
-        ),
-      ]),
-    );
+    const permissionsByRole = new Map<Role, PermissionMap>();
 
-    return mergePermissionMaps(
-      ...input.roles.map(
-        (role) => permissionsByRole.get(role) ?? getDefaultRolePermissions(role),
-      ),
-    );
+    for (const row of rows) {
+      if (row.isArchived) {
+        continue;
+      }
+
+      permissionsByRole.set(
+        row.role,
+        normalizePermissionMap(row.permissions, getDefaultRolePermissions(row.role)),
+      );
+    }
+
+    return input.roles.reduce<PermissionMap>((merged, role) => {
+      const next = permissionsByRole.get(role) ?? getDefaultRolePermissions(role);
+      for (const [moduleKey, actions] of Object.entries(next)) {
+        const current = new Set(merged[moduleKey] ?? []);
+        for (const action of actions) {
+          current.add(action);
+        }
+        merged[moduleKey] = [...current].sort();
+      }
+      return merged;
+    }, {});
   } catch (error) {
-    if (!isTenantCustomRoleTableMissing(error)) {
+    if (!isRolePermissionTableMissing(error)) {
       throw error;
     }
 
-    return mergePermissionMaps(
-      ...input.roles.map((role) => getDefaultRolePermissions(role)),
-    );
+    return input.roles.reduce<PermissionMap>((merged, role) => {
+      const next = getDefaultRolePermissions(role);
+      for (const [moduleKey, actions] of Object.entries(next)) {
+        const current = new Set(merged[moduleKey] ?? []);
+        for (const action of actions) {
+          current.add(action);
+        }
+        merged[moduleKey] = [...current].sort();
+      }
+      return merged;
+    }, {});
   }
 }
 
-export async function upsertTenantRolePermissionProfile(
+export async function upsertRolePermissionProfile(
   db: PermissionDbClient,
   input: {
-    tenantId: string;
     role: Role;
     permissions: PermissionMap;
   },
 ): Promise<void> {
-  const systemRole = await getSystemTenantRoleRow(db, input.tenantId, input.role);
-  if (!systemRole) {
+  const row = await getRolePermissionRow(db, input.role);
+  if (!row) {
     return;
   }
 
   await db.$executeRawUnsafe(
     `
-      UPDATE "TenantCustomRole"
+      UPDATE "RolePermission"
       SET
         "permissions" = $2::jsonb,
         "updatedAt" = NOW()
       WHERE "id" = $1
     `,
-    systemRole.id,
+    row.id,
     JSON.stringify(sanitizePermissionMap(input.permissions)),
   );
 }
 
-export async function resetTenantRolePermissionProfile(
+export async function resetRolePermissionProfile(
   db: PermissionDbClient,
   input: {
-    tenantId: string;
     role: Role;
   },
 ): Promise<void> {
-  const systemRole = await getSystemTenantRoleRow(db, input.tenantId, input.role);
-  if (!systemRole) {
+  const row = await getRolePermissionRow(db, input.role);
+  if (!row) {
     return;
   }
 
-  const defaultPermissions = normalizePermissionMap(
-    systemRole.defaultPermissions,
-    getDefaultRolePermissions(input.role),
-  );
-
   await db.$executeRawUnsafe(
     `
-      UPDATE "TenantCustomRole"
+      UPDATE "RolePermission"
       SET
         "permissions" = $2::jsonb,
         "updatedAt" = NOW()
       WHERE "id" = $1
     `,
-    systemRole.id,
-    JSON.stringify(defaultPermissions),
+    row.id,
+    JSON.stringify(getDefaultRolePermissions(input.role)),
   );
 }
 
-export async function updateTenantRoleDisplayName(
+export async function updateRoleDisplayName(
   db: PermissionDbClient,
   input: {
-    tenantId: string;
     role: Role;
     displayName: string | null;
   },
 ): Promise<void> {
-  const systemRole = await getSystemTenantRoleRow(db, input.tenantId, input.role);
-  if (!systemRole) {
+  const row = await getRolePermissionRow(db, input.role);
+  if (!row) {
     return;
   }
 
   await db.$executeRawUnsafe(
     `
-      UPDATE "TenantCustomRole"
+      UPDATE "RolePermission"
       SET
         "displayName" = $2,
         "updatedAt" = NOW()
       WHERE "id" = $1
     `,
-    systemRole.id,
+    row.id,
     normalizeRoleDisplayName(input.role, input.displayName),
   );
 }
 
-export async function archiveTenantRoleProfile(
+export async function archiveRoleProfile(
   db: PermissionDbClient,
   input: {
-    tenantId: string;
     role: Role;
   },
 ): Promise<void> {
-  const systemRole = await getSystemTenantRoleRow(db, input.tenantId, input.role);
-  if (!systemRole) {
+  const row = await getRolePermissionRow(db, input.role);
+  if (!row) {
     return;
   }
 
   await db.$executeRawUnsafe(
     `
-      UPDATE "TenantCustomRole"
+      UPDATE "RolePermission"
       SET
         "isArchived" = true,
         "updatedAt" = NOW()
       WHERE "id" = $1
     `,
-    systemRole.id,
+    row.id,
   );
 }
 
-export async function restoreTenantRoleProfile(
+export async function restoreRoleProfile(
   db: PermissionDbClient,
   input: {
-    tenantId: string;
     role: Role;
   },
 ): Promise<void> {
-  const systemRole = await getSystemTenantRoleRow(db, input.tenantId, input.role);
-  if (!systemRole) {
+  const row = await getRolePermissionRow(db, input.role);
+  if (!row) {
     return;
   }
 
   await db.$executeRawUnsafe(
     `
-      UPDATE "TenantCustomRole"
+      UPDATE "RolePermission"
       SET
         "isArchived" = false,
         "updatedAt" = NOW()
       WHERE "id" = $1
     `,
-    systemRole.id,
+    row.id,
   );
 }

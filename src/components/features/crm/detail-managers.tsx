@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { Download, Eye, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConfirmModal, Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import {
+  CrmActionIconButton,
+  CrmActionIconLink,
   crmInputClassName,
   CrmEmptyHint,
   crmTextareaClassName,
@@ -167,16 +170,16 @@ export function CrmTasksSection({
     try {
       if (editingTask) {
         await updateMutation.mutateAsync({ id: editingTask.id, ...payload });
-        showToast({ title: "Task updated", message: "CRM task has been saved.", variant: "success" });
+        showToast({ title: "Tugas diperbarui", message: "Tugas CRM berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Task created", message: "CRM task has been added.", variant: "success" });
+        showToast({ title: "Tugas ditambahkan", message: "Tugas CRM berhasil ditambahkan.", variant: "success" });
       }
       setIsModalOpen(false);
     } catch (error) {
       showToast({
-        title: "Failed to save task",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan tugas",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -185,7 +188,7 @@ export function CrmTasksSection({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={openCreate}>Add Task</Button>
+        <Button onClick={openCreate}>Tambah Tugas</Button>
       </div>
 
       {items.length ? (
@@ -194,35 +197,35 @@ export function CrmTasksSection({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold text-gray-900">{task.title}</p>
-                <p className="mt-1 text-sm text-gray-500">{task.assigneeName ?? "Unassigned"}</p>
+                <p className="mt-1 text-sm text-gray-500">{task.assigneeName ?? "Belum ditugaskan"}</p>
               </div>
               <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${badgeClass(task.status)}`}>
                 {getCrmLabel(task.status)}
               </span>
             </div>
-            <p className="mt-3 text-sm text-gray-600">{task.description ?? "No description"}</p>
+            <p className="mt-3 text-sm text-gray-600">{task.description ?? "Tidak ada deskripsi"}</p>
             <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-              <span>Priority: {getCrmLabel(task.priority)}</span>
-              <span>Due: {task.dueDate ? formatDate(task.dueDate) : "No due date"}</span>
+              <span>Prioritas: {getCrmLabel(task.priority)}</span>
+              <span>Jatuh tempo: {task.dueDate ? formatDate(task.dueDate) : "Tanpa jatuh tempo"}</span>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => openEdit(task)} className="text-sm font-medium text-gray-700 hover:text-gray-900">
-                Edit
-              </button>
-              <button type="button" onClick={() => setDeleteId(task.id)} className="text-sm font-medium text-red-600 hover:text-red-700">
-                Delete
-              </button>
+              <CrmActionIconButton label="Ubah tugas" onClick={() => openEdit(task)}>
+                <Pencil className="h-4 w-4" />
+              </CrmActionIconButton>
+              <CrmActionIconButton label="Hapus tugas" tone="danger" onClick={() => setDeleteId(task.id)}>
+                <Trash2 className="h-4 w-4" />
+              </CrmActionIconButton>
             </div>
           </div>
         ))
       ) : (
-        <CrmEmptyHint text="No tasks for this record." />
+        <CrmEmptyHint text="Belum ada tugas untuk data ini." />
       )}
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingTask ? "Edit Task" : "Create Task"} size="lg">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingTask ? "Ubah Tugas" : "Tambah Tugas"} size="lg">
         <div className="grid gap-4">
-          <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} className={crmInputClassName} placeholder="Title" />
-          <textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} className={crmTextareaClassName} placeholder="Description" />
+          <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} className={crmInputClassName} placeholder="Judul" />
+          <textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} className={crmTextareaClassName} placeholder="Deskripsi" />
           <div className="grid gap-4 md:grid-cols-2">
             <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))} className={crmInputClassName}>
               {CRM_TASK_STATUS_OPTIONS.map((option) => (
@@ -232,7 +235,7 @@ export function CrmTasksSection({
               ))}
             </select>
             <select value={form.assigneeId} onChange={(event) => setForm((current) => ({ ...current, assigneeId: event.target.value }))} className={crmInputClassName}>
-              <option value="">Select assignee</option>
+              <option value="">Pilih penanggung jawab</option>
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.name ?? user.email ?? user.id}
@@ -252,10 +255,10 @@ export function CrmTasksSection({
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingTask ? "Save Task" : "Create Task"}
+            {editingTask ? "Simpan Tugas" : "Tambah Tugas"}
           </Button>
         </div>
       </Modal>
@@ -264,9 +267,9 @@ export function CrmTasksSection({
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void deleteMutation.mutateAsync({ id: deleteId ?? "" })}
-        title="Delete Task"
-        message="This task will be removed from the CRM record."
-        confirmLabel="Delete"
+        title="Hapus Tugas"
+        message="Tugas ini akan dihapus dari data CRM terkait."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>
@@ -339,16 +342,16 @@ export function CrmNotesSection({
     try {
       if (editingNote) {
         await updateMutation.mutateAsync({ id: editingNote.id, ...payload });
-        showToast({ title: "Note updated", message: "CRM note has been saved.", variant: "success" });
+        showToast({ title: "Catatan diperbarui", message: "Catatan CRM berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Note created", message: "CRM note has been added.", variant: "success" });
+        showToast({ title: "Catatan ditambahkan", message: "Catatan CRM berhasil ditambahkan.", variant: "success" });
       }
       setIsModalOpen(false);
     } catch (error) {
       showToast({
-        title: "Failed to save note",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan catatan",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -357,36 +360,38 @@ export function CrmNotesSection({
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={openCreate}>Add Note</Button>
+        <Button onClick={openCreate}>Tambah Catatan</Button>
       </div>
 
       {items.length ? (
-        items.map((note) => (
-          <div key={note.id} className="rounded-lg border border-gray-200 p-4">
-            <p className="font-semibold text-gray-900">{note.title}</p>
-            <p className="mt-1 text-xs uppercase tracking-wide text-gray-400">{note.writerName ?? "Unknown writer"}</p>
-            <p className="mt-3 text-sm text-gray-600 whitespace-pre-wrap">{note.content}</p>
-            <p className="mt-3 text-xs text-gray-500">Updated: {formatDate(note.updatedAt)}</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => openEdit(note)} className="text-sm font-medium text-gray-700 hover:text-gray-900">
-                Edit
-              </button>
-              <button type="button" onClick={() => setDeleteId(note.id)} className="text-sm font-medium text-red-600 hover:text-red-700">
-                Delete
-              </button>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {items.map((note) => (
+            <div key={note.id} className="flex h-full flex-col rounded-lg border border-gray-200 p-4">
+              <p className="font-semibold text-gray-900">{note.title}</p>
+              <p className="mt-1 text-xs uppercase tracking-wide text-gray-400">{note.writerName ?? "Penulis tidak diketahui"}</p>
+              <p className="mt-3 flex-1 whitespace-pre-wrap text-sm text-gray-600">{note.content}</p>
+              <p className="mt-3 text-xs text-gray-500">Diperbarui: {formatDate(note.updatedAt)}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <CrmActionIconButton label="Ubah catatan" onClick={() => openEdit(note)}>
+                  <Pencil className="h-4 w-4" />
+                </CrmActionIconButton>
+                <CrmActionIconButton label="Hapus catatan" tone="danger" onClick={() => setDeleteId(note.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </CrmActionIconButton>
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+        </div>
       ) : (
-        <CrmEmptyHint text="No notes for this record." />
+        <CrmEmptyHint text="Belum ada catatan untuk data ini." />
       )}
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingNote ? "Edit Note" : "Create Note"} size="lg">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingNote ? "Ubah Catatan" : "Tambah Catatan"} size="lg">
         <div className="grid gap-4">
-          <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} className={crmInputClassName} placeholder="Title" />
-          <textarea value={form.content} onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))} className={crmTextareaClassName} placeholder="Content" />
+          <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} className={crmInputClassName} placeholder="Judul" />
+          <textarea value={form.content} onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))} className={crmTextareaClassName} placeholder="Isi catatan" />
           <select value={form.writerId} onChange={(event) => setForm((current) => ({ ...current, writerId: event.target.value }))} className={crmInputClassName}>
-            <option value="">Current user</option>
+            <option value="">Pengguna saat ini</option>
             {users.map((user) => (
               <option key={user.id} value={user.id}>
                 {user.name ?? user.email ?? user.id}
@@ -397,10 +402,10 @@ export function CrmNotesSection({
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingNote ? "Save Note" : "Create Note"}
+            {editingNote ? "Simpan Catatan" : "Tambah Catatan"}
           </Button>
         </div>
       </Modal>
@@ -409,9 +414,9 @@ export function CrmNotesSection({
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void deleteMutation.mutateAsync({ id: deleteId ?? "" })}
-        title="Delete Note"
-        message="This note will be removed from the CRM record."
-        confirmLabel="Delete"
+        title="Hapus Catatan"
+        message="Catatan ini akan dihapus dari data CRM terkait."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>
@@ -457,11 +462,11 @@ export function CrmAttachmentsSection({
           fileSize: file.size,
           storageUrl: String(reader.result),
         });
-        showToast({ title: "Attachment added", message: "CRM attachment has been stored.", variant: "success" });
+        showToast({ title: "Lampiran ditambahkan", message: "Lampiran CRM berhasil disimpan.", variant: "success" });
       } catch (error) {
         showToast({
-          title: "Failed to add attachment",
-          message: error instanceof Error ? error.message : "Unexpected error",
+          title: "Gagal menambahkan lampiran",
+          message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
           variant: "error",
         });
       } finally {
@@ -477,7 +482,7 @@ export function CrmAttachmentsSection({
       <div className="flex justify-end">
         <label className="inline-flex cursor-pointer items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
           <input type="file" className="hidden" onChange={(event) => void handleFileChange(event)} />
-          {isUploading ? "Uploading..." : "Add Attachment"}
+          {isUploading ? "Mengunggah..." : "Tambah Lampiran"}
         </label>
       </div>
 
@@ -489,30 +494,26 @@ export function CrmAttachmentsSection({
               {attachment.mimeType} · {Math.round(attachment.fileSize / 1024)} KB
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <a
-                href={attachment.storageUrl}
-                download={attachment.originalName}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              >
-                Download
-              </a>
-              <button type="button" onClick={() => setDeleteId(attachment.id)} className="text-sm font-medium text-red-600 hover:text-red-700">
-                Delete
-              </button>
+              <CrmActionIconLink href={attachment.storageUrl} label={`Unduh lampiran ${attachment.originalName}`} tone="primary">
+                <Download className="h-4 w-4" />
+              </CrmActionIconLink>
+              <CrmActionIconButton label="Hapus lampiran" tone="danger" onClick={() => setDeleteId(attachment.id)}>
+                <Trash2 className="h-4 w-4" />
+              </CrmActionIconButton>
             </div>
           </div>
         ))
       ) : (
-        <CrmEmptyHint text="No attachments for this record." />
+        <CrmEmptyHint text="Belum ada lampiran untuk data ini." />
       )}
 
       <ConfirmModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void deleteMutation.mutateAsync({ id: deleteId ?? "" })}
-        title="Delete Attachment"
-        message="This attachment will be removed from the CRM record."
-        confirmLabel="Delete"
+        title="Hapus Lampiran"
+        message="Lampiran ini akan dihapus dari data CRM terkait."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>
@@ -521,7 +522,7 @@ export function CrmAttachmentsSection({
 
 export function CrmActivitySection({ items }: { items: ActivityItem[] }) {
   if (!items.length) {
-    return <CrmEmptyHint text="No activity recorded for this record." />;
+    return <CrmEmptyHint text="Belum ada aktivitas untuk data ini." />;
   }
 
   return (

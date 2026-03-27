@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,8 @@ import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/features/PageHeader";
 import {
   crmInputClassName,
+  CrmActionIconButton,
+  CrmActionIconLink,
   CrmEmptyHint,
   CrmMetricCard,
   crmTextareaClassName,
@@ -129,10 +132,10 @@ export default function CrmContactsPage() {
     try {
       if (editingId) {
         await updateMutation.mutateAsync({ id: editingId, ...payload });
-        showToast({ title: "Contact updated", message: "Contact master data has been saved.", variant: "success" });
+        showToast({ title: "Kontak diperbarui", message: "Data master kontak berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Contact created", message: "Contact master data has been added.", variant: "success" });
+        showToast({ title: "Kontak ditambahkan", message: "Data master kontak berhasil ditambahkan.", variant: "success" });
       }
 
       setIsModalOpen(false);
@@ -140,8 +143,8 @@ export default function CrmContactsPage() {
       setEditingId(null);
     } catch (error) {
       showToast({
-        title: "Failed to save contact",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan kontak",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -152,12 +155,12 @@ export default function CrmContactsPage() {
 
     try {
       await deleteMutation.mutateAsync({ id: deleteId });
-      showToast({ title: "Contact deleted", message: "Contact master data has been removed.", variant: "success" });
+      showToast({ title: "Kontak dihapus", message: "Data master kontak berhasil dihapus.", variant: "success" });
       setDeleteId(null);
     } catch (error) {
       showToast({
-        title: "Failed to delete contact",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menghapus kontak",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -168,51 +171,51 @@ export default function CrmContactsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Contacts"
-        description="Master contacts used across organizations and deals."
-        primaryAction={{ label: "Add Contact", onClick: openCreateModal }}
+        title="Kontak CRM"
+        description="Data master kontak yang digunakan pada organisasi dan peluang."
+        primaryAction={{ label: "Tambah Kontak", onClick: openCreateModal }}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <CrmMetricCard label="Contacts" value={String(contacts.length)} />
-        <CrmMetricCard label="Primary Contacts" value={String(contacts.filter((item) => item.isPrimary).length)} />
-        <CrmMetricCard label="Linked Deals" value={String(contacts.reduce((sum, item) => sum + item.deals.length, 0))} />
+        <CrmMetricCard label="Kontak" value={String(contacts.length)} />
+        <CrmMetricCard label="Kontak Utama" value={String(contacts.filter((item) => item.isPrimary).length)} />
+        <CrmMetricCard label="Peluang Terkait" value={String(contacts.reduce((sum, item) => sum + item.deals.length, 0))} />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search contact, email, phone, designation, or organization"
+          placeholder="Cari kontak, email, telepon, jabatan, atau organisasi"
           className={crmInputClassName}
         />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Contacts</h2>
-          <p className="text-sm text-gray-500">{contacts.length} records</p>
+          <h2 className="text-lg font-semibold text-gray-900">Kontak</h2>
+          <p className="text-sm text-gray-500">{contacts.length} data</p>
         </div>
 
         {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Loading contacts...</div>
+          <div className="p-5 text-sm text-gray-500">Memuat kontak...</div>
         ) : contacts.length === 0 ? (
           <div className="p-5">
-            <CrmEmptyHint text="No contacts available." />
+            <CrmEmptyHint text="Belum ada kontak." />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Contact</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Kontak</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Mobile</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Gender</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Company</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Designation</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Last Modified</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Seluler</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Jenis Kelamin</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Perusahaan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Jabatan</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Terakhir Diubah</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
@@ -221,8 +224,8 @@ export default function CrmContactsPage() {
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900">{contact.name}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {contact.isPrimary ? <Badge variant="success">Primary</Badge> : null}
-                        <Badge variant="warning">{contact.deals.length} deals</Badge>
+                        {contact.isPrimary ? <Badge variant="success">Utama</Badge> : null}
+                        <Badge variant="warning">{contact.deals.length} peluang</Badge>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{contact.email ?? "-"}</td>
@@ -233,23 +236,15 @@ export default function CrmContactsPage() {
                     <td className="px-4 py-3 text-gray-600">{formatDate(contact.updatedAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Link href={`/crm/contacts/${contact.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                          Detail
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(contact)}
-                          className="text-sm font-medium text-gray-700 hover:text-gray-900"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteId(contact.id)}
-                          className="text-sm font-medium text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
+                        <CrmActionIconLink href={`/crm/contacts/${contact.id}`} label="Lihat detail kontak" tone="primary">
+                          <Eye className="h-4 w-4" />
+                        </CrmActionIconLink>
+                        <CrmActionIconButton label="Ubah kontak" onClick={() => openEditModal(contact)}>
+                          <Pencil className="h-4 w-4" />
+                        </CrmActionIconButton>
+                        <CrmActionIconButton label="Hapus kontak" tone="danger" onClick={() => setDeleteId(contact.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </CrmActionIconButton>
                       </div>
                     </td>
                   </tr>
@@ -263,18 +258,18 @@ export default function CrmContactsPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Contact" : "Create Contact"}
+        title={editingId ? "Ubah Kontak" : "Tambah Kontak"}
         size="xl"
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Organization</span>
+            <span className="text-sm font-medium text-gray-700">Organisasi</span>
             <select
               value={form.customerId}
               onChange={(event) => setForm((current) => ({ ...current, customerId: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select organization</option>
+              <option value="">Pilih organisasi</option>
               {options?.organizations.map((organization) => (
                 <option key={organization.id} value={organization.id}>
                   {organization.company}
@@ -283,7 +278,7 @@ export default function CrmContactsPage() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">First Name</span>
+            <span className="text-sm font-medium text-gray-700">Nama Depan</span>
             <input
               value={form.firstName}
               onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
@@ -291,7 +286,7 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Last Name</span>
+            <span className="text-sm font-medium text-gray-700">Nama Belakang</span>
             <input
               value={form.lastName}
               onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
@@ -299,7 +294,7 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Email Address</span>
+            <span className="text-sm font-medium text-gray-700">Alamat Email</span>
             <input
               value={form.email}
               onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
@@ -307,7 +302,7 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Mobile Phone</span>
+            <span className="text-sm font-medium text-gray-700">Telepon Seluler</span>
             <input
               value={form.mobilePhone}
               onChange={(event) => setForm((current) => ({ ...current, mobilePhone: event.target.value }))}
@@ -315,13 +310,13 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Gender</span>
+            <span className="text-sm font-medium text-gray-700">Jenis Kelamin</span>
             <select
               value={form.gender}
               onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}
               className={crmInputClassName}
             >
-              <option value="">Select gender</option>
+              <option value="">Pilih jenis kelamin</option>
               {CRM_GENDER_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {getCrmLabel(option)}
@@ -330,7 +325,7 @@ export default function CrmContactsPage() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">Designation</span>
+            <span className="text-sm font-medium text-gray-700">Jabatan</span>
             <input
               value={form.designation}
               onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))}
@@ -338,7 +333,7 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Address</span>
+            <span className="text-sm font-medium text-gray-700">Alamat</span>
             <textarea
               value={form.address}
               onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
@@ -346,7 +341,7 @@ export default function CrmContactsPage() {
             />
           </label>
           <label className="space-y-2 md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Notes</span>
+            <span className="text-sm font-medium text-gray-700">Catatan</span>
             <textarea
               value={form.notes}
               onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
@@ -359,16 +354,16 @@ export default function CrmContactsPage() {
               checked={form.isPrimary}
               onChange={(event) => setForm((current) => ({ ...current, isPrimary: event.target.checked }))}
             />
-            <span className="text-sm text-gray-700">Mark as primary contact</span>
+            <span className="text-sm text-gray-700">Tandai sebagai kontak utama</span>
           </label>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingId ? "Save Changes" : "Create Contact"}
+            {editingId ? "Simpan Perubahan" : "Tambah Kontak"}
           </Button>
         </div>
       </Modal>
@@ -377,9 +372,9 @@ export default function CrmContactsPage() {
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void handleDelete()}
-        title="Delete Contact"
-        message="This contact will be removed from the active CRM master data."
-        confirmLabel="Delete"
+        title="Hapus Kontak"
+        message="Kontak ini akan dihapus dari data master CRM aktif."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>

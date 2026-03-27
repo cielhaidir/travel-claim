@@ -168,8 +168,7 @@ export default function GeneralLedgerPage() {
   }, [ledgerRows]);
 
   const selectedCoa = coaOptions.find((coa) => coa.id === selectedCoaId);
-  const activeTenantName =
-    session?.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const reportScopeLabel = "Semua Data";
 
   if (!session || !isAllowed) return null;
 
@@ -177,13 +176,13 @@ export default function GeneralLedgerPage() {
     <div className="space-y-6">
       <PageHeader
         title="General Ledger"
-        description="Buku besar tenant aktif per akun COA berdasarkan jurnal dalam periode yang dipilih"
+        description="Buku besar per akun COA berdasarkan jurnal dalam periode yang dipilih"
         primaryAction={{ label: "Muat Ulang", onClick: () => void journalQuery.refetch() }}
         secondaryAction={{ label: "Trial Balance", href: "/reports/trial-balance" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant aktif" />
+        <SummaryCard label="Cakupan Data" value={reportScopeLabel} helper="Laporan mencakup seluruh data yang tersedia" />
         <SummaryCard label="Akun COA" value={selectedCoa ? `${selectedCoa.code} · ${selectedCoa.name}` : "-"} helper={selectedCoa?.accountType ?? "Pilih akun untuk melihat buku besar"} tone="blue" />
         <SummaryCard label="Total Debit" value={formatCurrency(totals.debit)} helper="Akumulasi debit akun terpilih" tone="green" />
         <SummaryCard label="Running Balance" value={formatCurrency(totals.balance)} helper="Saldo berjalan akhir akun terpilih" tone="amber" />
@@ -246,9 +245,9 @@ export default function GeneralLedgerPage() {
           </div>
         </Panel>
 
-        <Panel title="Informasi Ledger" description="Buku besar disusun dari line jurnal tenant aktif">
+        <Panel title="Informasi Ledger" description="Buku besar disusun dari line jurnal pada filter aktif">
           <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-            <p>• Filter tenant mengikuti tenant aktif pada tenant switcher.</p>
+            <p>• Data mengikuti filter akun, tanggal, dan status jurnal yang dipilih.</p>
             <p>• Running balance dihitung dari debit - kredit secara kronologis.</p>
             <p>• Untuk akurasi laporan operasional, gunakan status POSTED sebagai default.</p>
           </div>
@@ -263,9 +262,9 @@ export default function GeneralLedgerPage() {
         {journalQuery.isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat data general ledger...</div>
         ) : !selectedCoaId ? (
-          <EmptyState icon="📙" title="Pilih akun COA" description="Pilih akun COA terlebih dahulu untuk melihat buku besar tenant aktif." />
+          <EmptyState icon="📙" title="Pilih akun COA" description="Pilih akun COA terlebih dahulu untuk melihat buku besar." />
         ) : ledgerRows.length === 0 ? (
-          <EmptyState icon="📙" title="Belum ada mutasi ledger" description="Tidak ada baris jurnal untuk akun terpilih pada periode dan tenant aktif." />
+          <EmptyState icon="📙" title="Belum ada mutasi ledger" description="Tidak ada baris jurnal untuk akun terpilih pada periode aktif." />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">

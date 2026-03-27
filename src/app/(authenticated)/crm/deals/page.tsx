@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,8 @@ import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/features/PageHeader";
 import {
   crmInputClassName,
+  CrmActionIconButton,
+  CrmActionIconLink,
   CrmEmptyHint,
   CrmMetricCard,
   crmTextareaClassName,
@@ -206,10 +209,10 @@ export default function CrmDealsPage() {
     try {
       if (editingId) {
         await updateMutation.mutateAsync({ id: editingId, ...payload });
-        showToast({ title: "Deal updated", message: "Deal data has been saved.", variant: "success" });
+        showToast({ title: "Peluang diperbarui", message: "Data peluang berhasil disimpan.", variant: "success" });
       } else {
         await createMutation.mutateAsync(payload);
-        showToast({ title: "Deal created", message: "Deal has been added to CRM.", variant: "success" });
+        showToast({ title: "Peluang ditambahkan", message: "Peluang berhasil ditambahkan ke CRM.", variant: "success" });
       }
 
       setIsModalOpen(false);
@@ -217,8 +220,8 @@ export default function CrmDealsPage() {
       setEditingId(null);
     } catch (error) {
       showToast({
-        title: "Failed to save deal",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menyimpan peluang",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -229,12 +232,12 @@ export default function CrmDealsPage() {
 
     try {
       await deleteMutation.mutateAsync({ id: deleteId });
-      showToast({ title: "Deal deleted", message: "Deal has been removed from CRM.", variant: "success" });
+      showToast({ title: "Peluang dihapus", message: "Peluang berhasil dihapus dari CRM.", variant: "success" });
       setDeleteId(null);
     } catch (error) {
       showToast({
-        title: "Failed to delete deal",
-        message: error instanceof Error ? error.message : "Unexpected error",
+        title: "Gagal menghapus peluang",
+        message: error instanceof Error ? error.message : "Terjadi kesalahan tak terduga",
         variant: "error",
       });
     }
@@ -245,22 +248,22 @@ export default function CrmDealsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CRM Deals"
-        description="Deals with manual or master-data organization/contact selection."
-        primaryAction={{ label: "Add Deal", onClick: openCreateModal }}
+        title="Peluang CRM"
+        description="Peluang dengan pilihan organisasi/kontak manual atau dari data master."
+        primaryAction={{ label: "Tambah Peluang", onClick: openCreateModal }}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <CrmMetricCard label="Deals" value={String(deals.length)} />
-        <CrmMetricCard label="Won Deals" value={String(deals.filter((deal) => deal.status === "WON").length)} />
-        <CrmMetricCard label="Lost Deals" value={String(deals.filter((deal) => deal.status === "LOST").length)} />
+        <CrmMetricCard label="Peluang" value={String(deals.length)} />
+        <CrmMetricCard label="Peluang Menang" value={String(deals.filter((deal) => deal.status === "WON").length)} />
+        <CrmMetricCard label="Peluang Kalah" value={String(deals.filter((deal) => deal.status === "LOST").length)} />
       </div>
 
       <div className="grid gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-2">
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search title, organization, contact, email, or owner"
+          placeholder="Cari judul, organisasi, kontak, email, atau pemilik peluang"
           className={crmInputClassName}
         />
         <select
@@ -268,7 +271,7 @@ export default function CrmDealsPage() {
           onChange={(event) => setStatusFilter(event.target.value)}
           className={crmInputClassName}
         >
-          <option value="">All statuses</option>
+          <option value="">Semua status</option>
           {CRM_DEAL_STATUS_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {getCrmLabel(option)}
@@ -279,28 +282,28 @@ export default function CrmDealsPage() {
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Deals</h2>
-          <p className="text-sm text-gray-500">{deals.length} records</p>
+          <h2 className="text-lg font-semibold text-gray-900">Peluang</h2>
+          <p className="text-sm text-gray-500">{deals.length} data</p>
         </div>
 
         {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Loading deals...</div>
+          <div className="p-5 text-sm text-gray-500">Memuat peluang...</div>
         ) : deals.length === 0 ? (
           <div className="p-5">
-            <CrmEmptyHint text="No deals available." />
+            <CrmEmptyHint text="Belum ada peluang." />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Deal</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organization</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Contact</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Peluang</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Organisasi</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Kontak</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Deal Owner</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Last Modified</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Pemilik Peluang</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Terakhir Diubah</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
@@ -321,23 +324,15 @@ export default function CrmDealsPage() {
                     <td className="px-4 py-3 text-gray-700">{formatDate(deal.updatedAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Link href={`/crm/deals/${deal.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                          Detail
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(deal)}
-                          className="text-sm font-medium text-gray-700 hover:text-gray-900"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteId(deal.id)}
-                          className="text-sm font-medium text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
+                        <CrmActionIconLink href={`/crm/deals/${deal.id}`} label="Lihat detail peluang" tone="primary">
+                          <Eye className="h-4 w-4" />
+                        </CrmActionIconLink>
+                        <CrmActionIconButton label="Ubah peluang" onClick={() => openEditModal(deal)}>
+                          <Pencil className="h-4 w-4" />
+                        </CrmActionIconButton>
+                        <CrmActionIconButton label="Hapus peluang" tone="danger" onClick={() => setDeleteId(deal.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </CrmActionIconButton>
                       </div>
                     </td>
                   </tr>
@@ -348,10 +343,10 @@ export default function CrmDealsPage() {
         )}
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? "Edit Deal" : "Create Deal"} size="xl">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? "Ubah Peluang" : "Tambah Peluang"} size="xl">
         <div className="space-y-6">
           <div className="rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-semibold text-gray-900">Organization</p>
+            <p className="text-sm font-semibold text-gray-900">Organisasi</p>
             <div className="mt-3 flex flex-wrap gap-4">
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -359,7 +354,7 @@ export default function CrmDealsPage() {
                   checked={form.existingOrganization}
                   onChange={() => setForm((current) => ({ ...current, existingOrganization: true }))}
                 />
-                Existing organization
+                Organisasi yang sudah ada
               </label>
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -367,15 +362,15 @@ export default function CrmDealsPage() {
                   checked={!form.existingOrganization}
                   onChange={() => setForm((current) => ({ ...current, existingOrganization: false, customerId: "" }))}
                 />
-                Manual organization
+                Organisasi manual
               </label>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               {form.existingOrganization ? (
                 <label className="space-y-2 md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">Organization</span>
+                  <span className="text-sm font-medium text-gray-700">Organisasi</span>
                   <select value={form.customerId} onChange={(event) => fillOrganization(event.target.value)} className={crmInputClassName}>
-                    <option value="">Select organization</option>
+                    <option value="">Pilih organisasi</option>
                     {options?.organizations.map((organization) => (
                       <option key={organization.id} value={organization.id}>
                         {organization.company}
@@ -386,17 +381,17 @@ export default function CrmDealsPage() {
               ) : (
                 <>
                   <label className="space-y-2 md:col-span-2">
-                    <span className="text-sm font-medium text-gray-700">Organization Name</span>
+                    <span className="text-sm font-medium text-gray-700">Nama Organisasi</span>
                     <input value={form.organizationName} onChange={(event) => setForm((current) => ({ ...current, organizationName: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Website</span>
+                    <span className="text-sm font-medium text-gray-700">Situs Web</span>
                     <input value={form.website} onChange={(event) => setForm((current) => ({ ...current, website: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">No. of Employees</span>
+                    <span className="text-sm font-medium text-gray-700">Jumlah Karyawan</span>
                     <select value={form.employeeCount} onChange={(event) => setForm((current) => ({ ...current, employeeCount: event.target.value }))} className={crmInputClassName}>
-                      <option value="">Select employee range</option>
+                      <option value="">Pilih rentang karyawan</option>
                       {CRM_EMPLOYEE_RANGE_OPTIONS.map((option) => (
                         <option key={option} value={option}>
                           {getCrmLabel(option)}
@@ -405,13 +400,13 @@ export default function CrmDealsPage() {
                     </select>
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Annual Revenue</span>
+                    <span className="text-sm font-medium text-gray-700">Pendapatan Tahunan</span>
                     <input type="number" value={form.annualRevenue} onChange={(event) => setForm((current) => ({ ...current, annualRevenue: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Industry</span>
+                    <span className="text-sm font-medium text-gray-700">Industri</span>
                     <select value={form.industry} onChange={(event) => setForm((current) => ({ ...current, industry: event.target.value }))} className={crmInputClassName}>
-                      <option value="">Select industry</option>
+                      <option value="">Pilih industri</option>
                       {CRM_INDUSTRY_OPTIONS.map((option) => (
                         <option key={option} value={option}>
                           {getCrmLabel(option)}
@@ -425,7 +420,7 @@ export default function CrmDealsPage() {
           </div>
 
           <div className="rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-semibold text-gray-900">Contact</p>
+            <p className="text-sm font-semibold text-gray-900">Kontak</p>
             <div className="mt-3 flex flex-wrap gap-4">
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -433,7 +428,7 @@ export default function CrmDealsPage() {
                   checked={form.existingContact}
                   onChange={() => setForm((current) => ({ ...current, existingContact: true }))}
                 />
-                Existing contact
+                Kontak yang sudah ada
               </label>
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -441,15 +436,15 @@ export default function CrmDealsPage() {
                   checked={!form.existingContact}
                   onChange={() => setForm((current) => ({ ...current, existingContact: false, contactId: "" }))}
                 />
-                Manual contact
+                Kontak manual
               </label>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               {form.existingContact ? (
                 <label className="space-y-2 md:col-span-2">
-                  <span className="text-sm font-medium text-gray-700">Contact</span>
+                  <span className="text-sm font-medium text-gray-700">Kontak</span>
                   <select value={form.contactId} onChange={(event) => fillContact(event.target.value)} className={crmInputClassName}>
-                    <option value="">Select contact</option>
+                    <option value="">Pilih kontak</option>
                     {filteredContacts.map((contact) => (
                       <option key={contact.id} value={contact.id}>
                         {contact.name} {contact.customer?.company ? `- ${contact.customer.company}` : ""}
@@ -460,25 +455,25 @@ export default function CrmDealsPage() {
               ) : (
                 <>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">First Name</span>
+                    <span className="text-sm font-medium text-gray-700">Nama Depan</span>
                     <input value={form.firstName} onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Last Name</span>
+                    <span className="text-sm font-medium text-gray-700">Nama Belakang</span>
                     <input value={form.lastName} onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Primary Email</span>
+                    <span className="text-sm font-medium text-gray-700">Email Utama</span>
                     <input value={form.primaryEmail} onChange={(event) => setForm((current) => ({ ...current, primaryEmail: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-gray-700">Primary Mobile No.</span>
+                    <span className="text-sm font-medium text-gray-700">No. Seluler Utama</span>
                     <input value={form.primaryMobileNo} onChange={(event) => setForm((current) => ({ ...current, primaryMobileNo: event.target.value }))} className={crmInputClassName} />
                   </label>
                   <label className="space-y-2 md:col-span-2">
-                    <span className="text-sm font-medium text-gray-700">Gender</span>
+                    <span className="text-sm font-medium text-gray-700">Jenis Kelamin</span>
                     <select value={form.gender} onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))} className={crmInputClassName}>
-                      <option value="">Select gender</option>
+                      <option value="">Pilih jenis kelamin</option>
                       {CRM_GENDER_OPTIONS.map((option) => (
                         <option key={option} value={option}>
                           {getCrmLabel(option)}
@@ -493,7 +488,7 @@ export default function CrmDealsPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-medium text-gray-700">Deal Title</span>
+              <span className="text-sm font-medium text-gray-700">Judul Peluang</span>
               <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} className={crmInputClassName} />
             </label>
             <label className="space-y-2">
@@ -507,9 +502,9 @@ export default function CrmDealsPage() {
               </select>
             </label>
             <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Deal Owner</span>
+              <span className="text-sm font-medium text-gray-700">Pemilik Peluang</span>
               <select value={form.ownerId} onChange={(event) => setForm((current) => ({ ...current, ownerId: event.target.value }))} className={crmInputClassName}>
-                <option value="">Select owner</option>
+                <option value="">Pilih pemilik</option>
                 {options?.users.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name ?? user.email ?? user.id}
@@ -518,17 +513,17 @@ export default function CrmDealsPage() {
               </select>
             </label>
             <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Expected Close Date</span>
+              <span className="text-sm font-medium text-gray-700">Perkiraan Tanggal Penutupan</span>
               <input type="date" value={form.expectedCloseDate} onChange={(event) => setForm((current) => ({ ...current, expectedCloseDate: event.target.value }))} className={crmInputClassName} />
             </label>
             {form.status === "LOST" ? (
               <label className="space-y-2">
-                <span className="text-sm font-medium text-gray-700">Lost Reason</span>
+                <span className="text-sm font-medium text-gray-700">Alasan Kalah</span>
                 <input value={form.lostReason} onChange={(event) => setForm((current) => ({ ...current, lostReason: event.target.value }))} className={crmInputClassName} />
               </label>
             ) : null}
             <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-medium text-gray-700">Notes</span>
+              <span className="text-sm font-medium text-gray-700">Catatan</span>
               <textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} className={crmTextareaClassName} />
             </label>
           </div>
@@ -536,10 +531,10 @@ export default function CrmDealsPage() {
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-            Cancel
+            Batal
           </Button>
           <Button onClick={() => void handleSubmit()} isLoading={createMutation.isPending || updateMutation.isPending}>
-            {editingId ? "Save Changes" : "Create Deal"}
+            {editingId ? "Simpan Perubahan" : "Tambah Peluang"}
           </Button>
         </div>
       </Modal>
@@ -548,9 +543,9 @@ export default function CrmDealsPage() {
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => void handleDelete()}
-        title="Delete Deal"
-        message="This deal will be removed from the active CRM list."
-        confirmLabel="Delete"
+        title="Hapus Peluang"
+        message="Peluang ini akan dihapus dari daftar CRM aktif."
+        confirmLabel="Hapus"
         isLoading={deleteMutation.isPending}
       />
     </div>

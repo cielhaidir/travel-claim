@@ -9,25 +9,10 @@ import {
 import { createTRPCRouter, permissionProcedure } from "@/server/api/trpc";
 import { generateJournalEntryNumber } from "@/lib/utils/numberGenerators";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -72,8 +57,6 @@ function assertBalanced(
 async function validateJournalSourceLinks(
   ctx: {
     db: Prisma.TransactionClient | Prisma.DefaultPrismaClient;
-    tenantId?: string | null;
-    isRoot?: boolean;
   },
   input: {
     sourceType?: JournalSourceType;
@@ -117,14 +100,9 @@ async function validateJournalSourceLinks(
     });
   }
 
-  const scopedCtx = {
-    tenantId: ctx.tenantId ?? null,
-    isRoot: ctx.isRoot ?? false,
-  };
-
   if (input.claimId) {
     const claim = await ctx.db.claim.findFirst({
-      where: withTenantWhere(scopedCtx, {
+      where: applyScope(ctx, {
         id: input.claimId,
         deletedAt: null,
       } satisfies Prisma.ClaimWhereInput),
@@ -134,7 +112,7 @@ async function validateJournalSourceLinks(
     if (!claim) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Claim tidak ditemukan dalam tenant aktif",
+        message: "Claim tidak ditemukan dalam data aktif",
       });
     }
 
@@ -148,7 +126,7 @@ async function validateJournalSourceLinks(
 
   if (input.bailoutId) {
     const bailout = await ctx.db.bailout.findFirst({
-      where: withTenantWhere(scopedCtx, {
+      where: applyScope(ctx, {
         id: input.bailoutId,
         deletedAt: null,
       } satisfies Prisma.BailoutWhereInput),
@@ -158,7 +136,7 @@ async function validateJournalSourceLinks(
     if (!bailout) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Bailout tidak ditemukan dalam tenant aktif",
+        message: "Bailout tidak ditemukan dalam data aktif",
       });
     }
 
@@ -171,11 +149,10 @@ async function validateJournalSourceLinks(
   }
 }
 
-async function assertPostingReferencesBelongToJournalTenant(
+async function assertPostingReferencesActive(
   tx: Prisma.TransactionClient,
   journal: {
     id: string;
-    tenantId: string | null;
     lines: Array<{
       chartOfAccountId: string;
       balanceAccountId: string | null;
@@ -195,7 +172,6 @@ async function assertPostingReferencesBelongToJournalTenant(
     tx.chartOfAccount.findMany({
       where: {
         id: { in: coaIds },
-        tenantId: journal.tenantId,
         isActive: true,
       },
       select: { id: true },
@@ -204,7 +180,6 @@ async function assertPostingReferencesBelongToJournalTenant(
       ? tx.balanceAccount.findMany({
           where: {
             id: { in: balanceIds },
-            tenantId: journal.tenantId,
             isActive: true,
             deletedAt: null,
           },
@@ -217,7 +192,7 @@ async function assertPostingReferencesBelongToJournalTenant(
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
-        "Ada bagan akun jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+        "Ada bagan akun jurnal yang tidak sesuai cakupan data atau sudah tidak aktif",
     });
   }
 
@@ -225,7 +200,7 @@ async function assertPostingReferencesBelongToJournalTenant(
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
-        "Ada akun saldo jurnal yang tidak sesuai tenant atau sudah tidak aktif",
+        "Ada akun saldo jurnal yang tidak sesuai cakupan data atau sudah tidak aktif",
     });
   }
 }
@@ -253,7 +228,7 @@ export const journalEntryRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.JournalEntryWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.JournalEntryWhereInput = applyScope(ctx, {
         deletedAt: null,
       } satisfies Prisma.JournalEntryWhereInput);
 
@@ -303,7 +278,7 @@ export const journalEntryRouter = createTRPCRouter({
     .output(z.any())
     .query(async ({ ctx, input }) => {
       const journal = await ctx.db.journalEntry.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: applyScope(ctx, { id: input.id, deletedAt: null }),
         include: {
           createdBy: { select: { id: true, name: true, email: true } },
           postedBy: { select: { id: true, name: true, email: true } },
@@ -364,14 +339,11 @@ export const journalEntryRouter = createTRPCRouter({
       await validateJournalSourceLinks(
         {
           db: ctx.db,
-          tenantId: getTenantScope(ctx).tenantId,
-          isRoot: getTenantScope(ctx).isRoot,
         },
         input,
       );
 
-      const tenantId = getTenantScope(ctx).tenantId;
-      const journalNumber = await generateJournalEntryNumber(ctx.db, tenantId);
+      const journalNumber = await generateJournalEntryNumber(ctx.db);
 
       const coaIds = [
         ...new Set(input.lines.map((line) => line.chartOfAccountId)),
@@ -384,7 +356,7 @@ export const journalEntryRouter = createTRPCRouter({
 
       const [coas, balances] = await Promise.all([
         ctx.db.chartOfAccount.findMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             id: { in: coaIds },
             isActive: true,
           } satisfies Prisma.ChartOfAccountWhereInput),
@@ -392,7 +364,7 @@ export const journalEntryRouter = createTRPCRouter({
         }),
         balanceIds.length > 0
           ? ctx.db.balanceAccount.findMany({
-              where: withTenantWhere(ctx, {
+              where: applyScope(ctx, {
                 id: { in: balanceIds },
                 isActive: true,
                 deletedAt: null,
@@ -418,7 +390,6 @@ export const journalEntryRouter = createTRPCRouter({
 
       const created = await ctx.db.journalEntry.create({
         data: {
-          tenantId,
           journalNumber,
           transactionDate: input.transactionDate,
           description: input.description,
@@ -454,7 +425,6 @@ export const journalEntryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.CREATE,
           entityType: "JournalEntry",
@@ -474,7 +444,7 @@ export const journalEntryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const journal = await ctx.db.journalEntry.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: applyScope(ctx, { id: input.id, deletedAt: null }),
         include: {
           lines: true,
         },
@@ -509,8 +479,6 @@ export const journalEntryRouter = createTRPCRouter({
       await validateJournalSourceLinks(
         {
           db: ctx.db,
-          tenantId: journal.tenantId,
-          isRoot: false,
         },
         {
           sourceType: journal.sourceType ?? undefined,
@@ -524,7 +492,7 @@ export const journalEntryRouter = createTRPCRouter({
         (line) => line.balanceAccountId,
       );
       const result = await ctx.db.$transaction(async (tx) => {
-        await assertPostingReferencesBelongToJournalTenant(tx, journal);
+        await assertPostingReferencesActive(tx, journal);
 
         for (const line of balanceLines) {
           if (!line.balanceAccountId) continue;
@@ -570,7 +538,6 @@ export const journalEntryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: journal.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "JournalEntry",
@@ -595,7 +562,7 @@ export const journalEntryRouter = createTRPCRouter({
     .output(z.any())
     .mutation(async ({ ctx, input }) => {
       const journal = await ctx.db.journalEntry.findFirst({
-        where: withTenantWhere(ctx, { id: input.id, deletedAt: null }),
+        where: applyScope(ctx, { id: input.id, deletedAt: null }),
       });
 
       if (!journal) {
@@ -626,7 +593,6 @@ export const journalEntryRouter = createTRPCRouter({
 
       await ctx.db.auditLog.create({
         data: {
-          tenantId: journal.tenantId,
           userId: ctx.session.user.id,
           action: AuditAction.UPDATE,
           entityType: "JournalEntry",

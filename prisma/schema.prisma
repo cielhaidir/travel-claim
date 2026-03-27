@@ -179,12 +179,6 @@ enum JournalStatus {
   VOID
 }
 
-enum MembershipStatus {
-  ACTIVE
-  INVITED
-  SUSPENDED
-}
-
 enum CrmLeadStage {
   NEW
   QUALIFIED
@@ -392,86 +386,6 @@ enum CrmFulfillmentStatus {
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
 
-model Tenant {
-  id        String    @id @default(cuid()) // -- ID unik tenant ini.
-  slug      String    @unique @db.VarChar(100) // -- Slug tenant ini.
-  name      String    @db.VarChar(200) // -- Nama tenant ini.
-  isRoot    Boolean   @default(false) // -- Menandakan apakah tenant ini merupakan tenant root.
-  deletedAt DateTime? // -- Waktu penghapusan lunak tenant ini.
-  createdAt DateTime  @default(now()) // -- Waktu pembuatan tenant ini.
-  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan tenant ini.
-
-  memberships         TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan tenant ini.
-  rolePermissions     RolePermission[] // -- Daftar izin peran yang terkait dengan tenant ini.
-  userRoles           UserRole[] // -- Daftar peran pengguna yang terkait dengan tenant ini.
-  departments         Department[] // -- Daftar departemen yang terkait dengan tenant ini.
-  projects            Project[] // -- Daftar proyek yang terkait dengan tenant ini.
-  travelRequests      TravelRequest[] // -- Daftar permintaan perjalanan dinas yang terkait dengan tenant ini.
-  travelParticipants  TravelParticipant[] // -- Daftar peserta perjalanan yang terkait dengan tenant ini.
-  bailouts            Bailout[] // -- Daftar dana talangan yang terkait dengan tenant ini.
-  approvals           Approval[] // -- Daftar persetujuan yang terkait dengan tenant ini.
-  claims              Claim[] // -- Daftar klaim yang terkait dengan tenant ini.
-  attachments         Attachment[] // -- Daftar lampiran yang terkait dengan tenant ini.
-  notifications       Notification[] // -- Daftar notifikasi yang terkait dengan tenant ini.
-  auditLogs           AuditLog[] // -- Daftar log audit yang terkait dengan tenant ini.
-  chartOfAccounts     ChartOfAccount[] // -- Daftar akun COA yang terkait dengan tenant ini.
-  balanceAccounts     BalanceAccount[] // -- Daftar akun saldo yang terkait dengan tenant ini.
-  journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan tenant ini.
-  journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan tenant ini.
-  crmCustomers        CrmCustomer[] // -- Daftar pelanggan CRM yang terkait dengan tenant ini.
-  crmContacts         CrmContact[] // -- Daftar kontak CRM yang terkait dengan tenant ini.
-  crmLeads            CrmLead[] // -- Daftar prospek CRM yang terkait dengan tenant ini.
-  crmDeals            CrmDeal[] // -- Daftar deal CRM yang terkait dengan tenant ini.
-  crmTasks            CrmTask[]
-  crmNotes            CrmNote[]
-  crmRecordAttachments CrmRecordAttachment[]
-  crmActivities        CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan tenant ini.
-  crmConversations     CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan tenant ini.
-  crmMessages          CrmMessage[] // -- Daftar pesan CRM yang terkait dengan tenant ini.
-  crmProducts          CrmProduct[]
-  crmLeadLines         CrmLeadLine[]
-  crmFulfillmentRequests CrmFulfillmentRequest[]
-  crmFulfillmentRequestLines CrmFulfillmentRequestLine[]
-  inventoryItems       InventoryItem[]
-  warehouses           Warehouse[]
-  inventoryBalances    InventoryBalance[]
-  inventoryLedgerEntries InventoryLedgerEntry[]
-  inventoryReservations InventoryReservation[]
-  inventoryReservationUnits InventoryReservationUnit[]
-  inventoryReceiptBatches InventoryReceiptBatch[]
-  inventoryItemUnits   InventoryItemUnit[]
-  customRoles          TenantCustomRole[] // -- Daftar peran kustom tenant yang terkait dengan tenant ini.
-
-  @@index([isRoot])
-}
-
-model TenantMembership {
-  id              String           @id @default(cuid()) // -- ID unik keanggotaan tenant ini.
-  userId          String // -- ID pengguna yang terkait dengan keanggotaan tenant ini.
-  tenantId        String // -- ID tenant yang terkait dengan keanggotaan tenant ini.
-  role            Role             @default(EMPLOYEE) // -- Peran keanggotaan tenant ini.
-  customRoleId    String? // -- ID peran kustom yang terkait dengan keanggotaan tenant ini.
-  status          MembershipStatus @default(ACTIVE) // -- Status keanggotaan tenant ini.
-  isDefault       Boolean          @default(false) // -- Menandakan apakah keanggotaan tenant ini menjadi pilihan default.
-  invitedAt       DateTime? // -- Waktu pengiriman undangan keanggotaan tenant ini.
-  activatedAt     DateTime? // -- Waktu aktivasi keanggotaan tenant ini.
-  suspendedAt     DateTime? // -- Waktu penangguhan keanggotaan tenant ini.
-  suspendedReason String?          @db.Text // -- Alasan penangguhan keanggotaan tenant ini.
-  createdAt       DateTime         @default(now()) // -- Waktu pembuatan keanggotaan tenant ini.
-  updatedAt       DateTime         @updatedAt // -- Waktu terakhir pembaruan keanggotaan tenant ini.
-
-  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk keanggotaan tenant ini.
-  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk keanggotaan tenant ini.
-  customRole TenantCustomRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull) // -- Relasi ke peran kustom tenant untuk keanggotaan tenant ini.
-
-  @@unique([userId, tenantId])
-  @@index([tenantId, role])
-  @@index([customRoleId])
-  @@index([tenantId, customRoleId])
-  @@index([userId, isDefault])
-  @@index([status])
-}
-
 // Necessary for Next auth
 model Account {
   id                       String  @id @default(cuid()) // -- ID unik akun ini.
@@ -512,7 +426,6 @@ model User {
   // Extended user fields
   employeeId   String?     @unique @db.VarChar(50) // -- ID pegawai yang terkait dengan pengguna ini.
   role         Role        @default(EMPLOYEE) // -- Peran pengguna ini.
-  userRoles    UserRole[] // -- Daftar peran pengguna yang terkait dengan pengguna ini.
   departmentId String? // -- ID departemen yang terkait dengan pengguna ini.
   department   Department? @relation(fields: [departmentId], references: [id]) // -- Relasi ke departemen untuk pengguna ini.
 
@@ -553,10 +466,8 @@ model User {
   coaCreated ChartOfAccount[] @relation("COACreatedBy") // -- Daftar akun COA yang terkait dengan pengguna ini.
   coaUpdated ChartOfAccount[] @relation("COAUpdatedBy") // -- Daftar akun COA yang terkait dengan pengguna ini.
 
-  memberships TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan pengguna ini.
-
-  journalEntriesCreated      JournalEntry[]         @relation("JournalEntryCreatedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
-  journalEntriesPosted       JournalEntry[]         @relation("JournalEntryPostedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
+  journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
+  journalEntriesPosted  JournalEntry[] @relation("JournalEntryPostedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
   inventoryLedgerEntriesCreated InventoryLedgerEntry[]
   assignedInventoryUnits     InventoryItemUnit[]    @relation("InventoryUnitAssignedTo")
 
@@ -567,24 +478,8 @@ model User {
   @@index([role])
 }
 
-model UserRole {
-  tenantId  String? // -- ID tenant yang terkait dengan peran pengguna ini.
-  userId    String // -- ID pengguna yang terkait dengan peran pengguna ini.
-  role      Role // -- Peran pengguna ini.
-  createdAt DateTime @default(now()) // -- Waktu pembuatan peran pengguna ini.
-  createdBy String? // -- ID pengguna pembuat peran pengguna ini.
-
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk peran pengguna ini.
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk peran pengguna ini.
-
-  @@id([userId, role])
-  @@index([role])
-  @@index([tenantId])
-}
-
 model RolePermission {
   id          String   @id @default(cuid()) // -- ID unik izin peran ini.
-  tenantId    String // -- ID tenant yang terkait dengan izin peran ini.
   role        Role // -- Peran yang diatur dalam izin peran ini.
   displayName String?  @db.VarChar(100) // -- Nama tampilan izin peran ini.
   isArchived  Boolean  @default(false) // -- Menandakan apakah izin peran ini diarsipkan.
@@ -592,34 +487,8 @@ model RolePermission {
   createdAt   DateTime @default(now()) // -- Waktu pembuatan izin peran ini.
   updatedAt   DateTime @updatedAt // -- Waktu terakhir pembaruan izin peran ini.
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk izin peran ini.
-
-  @@unique([tenantId, role])
+  @@unique([role])
   @@index([role])
-  @@index([tenantId])
-}
-
-model TenantCustomRole {
-  id          String   @id @default(cuid()) // -- ID unik peran kustom tenant ini.
-  tenantId    String // -- ID tenant yang terkait dengan peran kustom tenant ini.
-  baseRole    Role? // -- Peran dasar untuk peran kustom tenant ini.
-  isSystem    Boolean  @default(false) // -- Menandakan apakah peran kustom tenant ini dikelola oleh sistem.
-  slug        String   @db.VarChar(120) // -- Slug peran kustom tenant ini.
-  displayName String   @db.VarChar(100) // -- Nama tampilan peran kustom tenant ini.
-  isArchived  Boolean  @default(false) // -- Menandakan apakah peran kustom tenant ini diarsipkan.
-  permissions Json // -- Daftar izin peran kustom tenant ini.
-  defaultPermissions Json // -- Daftar izin bawaan peran kustom tenant ini.
-  createdAt   DateTime @default(now()) // -- Waktu pembuatan peran kustom tenant ini.
-  updatedAt   DateTime @updatedAt // -- Waktu terakhir pembaruan peran kustom tenant ini.
-
-  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk peran kustom tenant ini.
-  memberships  TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan peran kustom tenant ini.
-
-  @@unique([tenantId, slug])
-  @@index([tenantId, isArchived])
-  @@index([baseRole])
-  @@index([tenantId, isSystem])
-  @@index([tenantId])
 }
 
 model VerificationToken {
@@ -636,12 +505,10 @@ model VerificationToken {
 
 model Department {
   id          String  @id @default(cuid()) // -- ID unik departemen ini.
-  tenantId    String? // -- ID tenant yang terkait dengan departemen ini.
   name        String  @db.VarChar(100) // -- Nama departemen ini.
   code        String  @db.VarChar(20) // -- Kode departemen ini.
   description String? @db.Text // -- Deskripsi departemen ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk departemen ini.
 
   // Department hierarchy
   parentId String? // -- ID induk yang terkait dengan departemen ini.
@@ -659,10 +526,8 @@ model Department {
 
   users User[] // -- Daftar pengguna yang terkait dengan departemen ini.
 
-  @@unique([tenantId, code])
+  @@unique([code])
   @@index([code])
-  @@index([tenantId])
-  @@index([tenantId, deletedAt])
   @@index([parentId])
   @@index([chiefId])
 }
@@ -673,14 +538,12 @@ model Department {
 
 model ChartOfAccount {
   id          String  @id @default(cuid()) // -- ID unik akun COA ini.
-  tenantId    String? // -- ID tenant yang terkait dengan akun COA ini.
   code        String  @db.VarChar(20) // -- Kode akun COA ini.
   name        String  @db.VarChar(100) // -- Nama akun COA ini.
   accountType COAType // -- Akun tipe akun COA ini.
   category    String  @db.VarChar(50) // -- Kategori akun COA ini.
   subcategory String? @db.VarChar(50) // -- Subkategori akun COA ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk akun COA ini.
 
   // Self-referential hierarchy
   parentId String? // -- ID induk yang terkait dengan akun COA ini.
@@ -710,10 +573,8 @@ model ChartOfAccount {
   inventoryItemsAsCogsCoa   InventoryItem[]      @relation("InventoryItemCogsCOA")
   inventoryLedgerEntries    InventoryLedgerEntry[] @relation("InventoryLedgerChartOfAccount")
 
-  @@unique([tenantId, code])
+  @@unique([code])
   @@index([code])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
   @@index([accountType])
   @@index([parentId])
   @@index([isActive])
@@ -725,7 +586,6 @@ model ChartOfAccount {
 
 model Project {
   id          String    @id @default(cuid()) // -- ID unik proyek ini.
-  tenantId    String? // -- ID tenant yang terkait dengan proyek ini.
   code        String    @db.VarChar(30) // -- Kode proyek ini.
   name        String    @db.VarChar(200) // -- Nama proyek ini.
   description String?   @db.Text // -- Deskripsi proyek ini.
@@ -736,14 +596,11 @@ model Project {
   updatedAt   DateTime  @updatedAt // -- Waktu terakhir pembaruan proyek ini.
   salesId     String?   @db.VarChar(50) // -- ID pimpinan sales yang terkait dengan proyek ini.
   salesLead   User?     @relation("SalesLead", fields: [salesId], references: [employeeId]) // -- Relasi ke pengguna untuk proyek ini.
-  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk proyek ini.
 
   travelRequests TravelRequest[] // -- Daftar permintaan perjalanan dinas yang terkait dengan proyek ini.
 
-  @@unique([tenantId, code])
+  @@unique([code])
   @@index([code])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
   @@index([isActive])
 }
 
@@ -753,7 +610,6 @@ model Project {
 
 model CrmCustomer {
   id            String             @id @default(cuid()) // -- ID unik organisasi CRM ini.
-  tenantId      String?
   name          String?            @db.VarChar(150)
   company       String             @db.VarChar(200)
   email         String?            @db.VarChar(200)
@@ -775,26 +631,17 @@ model CrmCustomer {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  tenant              Tenant?                  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  contacts            CrmContact[]
-  leads               CrmLead[]
-  deals               CrmDeal[]
-  activities          CrmActivity[]
-  conversations       CrmConversation[]
+  contacts      CrmContact[]
+  leads         CrmLead[]
+  deals         CrmDeal[]
+  activities    CrmActivity[]
+  conversations CrmConversation[]
   fulfillmentRequests CrmFulfillmentRequest[]
-
-  @@index([tenantId])
-  @@index([tenantId, company])
-  @@index([tenantId, status])
-  @@index([tenantId, isVendor])
-  @@index([tenantId, isCustomer])
-  @@index([tenantId, ownerName])
   @@index([deletedAt])
 }
 
 model CrmContact {
   id          String     @id @default(cuid())
-  tenantId    String?
   customerId  String
   name        String     @db.VarChar(150)
   title       String?    @db.VarChar(150)
@@ -813,19 +660,14 @@ model CrmContact {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  tenant   Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   customer CrmCustomer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   deals    CrmDeal[]
-
-  @@index([tenantId])
   @@index([customerId])
-  @@index([tenantId, isPrimary])
   @@index([deletedAt])
 }
 
 model CrmLead {
   id                String          @id @default(cuid()) // -- ID unik prospek CRM ini.
-  tenantId          String? // -- ID tenant yang terkait dengan prospek CRM ini.
   customerId        String? // -- ID pelanggan yang terkait dengan prospek CRM ini.
   name              String          @db.VarChar(150) // -- Nama prospek CRM ini.
   company           String          @db.VarChar(200) // -- Nama perusahaan prospek CRM ini.
@@ -855,28 +697,21 @@ model CrmLead {
   createdAt         DateTime        @default(now()) // -- Waktu pembuatan prospek CRM ini.
   updatedAt         DateTime        @updatedAt // -- Waktu terakhir pembaruan prospek CRM ini.
 
-  tenant              Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk prospek CRM ini.
-  customer            CrmCustomer?              @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
-  deals               CrmDeal[] // -- Daftar deal CRM yang berasal dari prospek CRM ini.
-  tasks               CrmTask[]
-  notesList           CrmNote[]
-  attachments         CrmRecordAttachment[]
-  activities          CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
-  conversations       CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan prospek CRM ini.
-  leadLines           CrmLeadLine[]
+  customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
+  deals         CrmDeal[] // -- Daftar deal CRM yang berasal dari prospek CRM ini.
+  leadLines     CrmLeadLine[]
+  tasks         CrmTask[]
+  notesList     CrmNote[]
+  attachments   CrmRecordAttachment[]
+  activities    CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
+  conversations CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan prospek CRM ini.
   fulfillmentRequests CrmFulfillmentRequest[]
-
-  @@index([tenantId])
-  @@index([tenantId, stage])
-  @@index([tenantId, status])
-  @@index([tenantId, ownerName])
   @@index([customerId])
   @@index([deletedAt])
 }
 
 model CrmDeal {
   id                String          @id @default(cuid()) // -- ID unik deal CRM ini.
-  tenantId          String?
   customerId        String?
   contactId         String?
   leadId            String?         @unique
@@ -907,7 +742,6 @@ model CrmDeal {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   contact       CrmContact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
   lead          CrmLead?            @relation(fields: [leadId], references: [id], onDelete: SetNull)
@@ -916,11 +750,6 @@ model CrmDeal {
   attachments   CrmRecordAttachment[]
   activities    CrmActivity[]
   conversations CrmConversation[]
-
-  @@index([tenantId])
-  @@index([tenantId, stage])
-  @@index([tenantId, status])
-  @@index([tenantId, ownerName])
   @@index([customerId])
   @@index([contactId])
   @@index([deletedAt])
@@ -928,7 +757,6 @@ model CrmDeal {
 
 model CrmTask {
   id           String          @id @default(cuid())
-  tenantId     String?
   leadId       String?
   dealId       String?
   title        String          @db.VarChar(200)
@@ -942,11 +770,8 @@ model CrmTask {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
-  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
   deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
-
-  @@index([tenantId])
   @@index([leadId])
   @@index([dealId])
   @@index([status])
@@ -956,7 +781,6 @@ model CrmTask {
 
 model CrmNote {
   id         String    @id @default(cuid())
-  tenantId   String?
   leadId     String?
   dealId     String?
   title      String    @db.VarChar(200)
@@ -967,11 +791,8 @@ model CrmNote {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
   deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
-
-  @@index([tenantId])
   @@index([leadId])
   @@index([dealId])
   @@index([deletedAt])
@@ -979,7 +800,6 @@ model CrmNote {
 
 model CrmRecordAttachment {
   id              String    @id @default(cuid())
-  tenantId        String?
   leadId          String?
   dealId          String?
   filename        String    @db.VarChar(255)
@@ -992,11 +812,8 @@ model CrmRecordAttachment {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
   deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
-
-  @@index([tenantId])
   @@index([leadId])
   @@index([dealId])
   @@index([deletedAt])
@@ -1004,7 +821,6 @@ model CrmRecordAttachment {
 
 model CrmActivity {
   id          String          @id @default(cuid()) // -- ID unik aktivitas CRM ini.
-  tenantId    String? // -- ID tenant yang terkait dengan aktivitas CRM ini.
   customerId  String? // -- ID pelanggan yang terkait dengan aktivitas CRM ini.
   leadId      String? // -- ID prospek yang terkait dengan aktivitas CRM ini.
   dealId      String? // -- ID deal yang terkait dengan aktivitas CRM ini.
@@ -1020,15 +836,11 @@ model CrmActivity {
   createdAt   DateTime        @default(now()) // -- Waktu pembuatan aktivitas CRM ini.
   updatedAt   DateTime        @updatedAt // -- Waktu terakhir pembaruan aktivitas CRM ini.
 
-  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk aktivitas CRM ini.
   customer     CrmCustomer?      @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk aktivitas CRM ini.
   lead         CrmLead?          @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke prospek CRM untuk aktivitas CRM ini.
   deal         CrmDeal?          @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk aktivitas CRM ini.
   conversation CrmConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull) // -- Relasi ke percakapan CRM untuk aktivitas CRM ini.
   message      CrmMessage?       @relation(fields: [messageId], references: [id], onDelete: SetNull) // -- Relasi ke pesan CRM untuk aktivitas CRM ini.
-
-  @@index([tenantId])
-  @@index([tenantId, scheduledAt])
   @@index([customerId])
   @@index([leadId])
   @@index([dealId])
@@ -1039,7 +851,6 @@ model CrmActivity {
 
 model CrmConversation {
   id                 String                @id @default(cuid()) // -- ID unik percakapan CRM ini.
-  tenantId           String? // -- ID tenant yang terkait dengan percakapan CRM ini.
   customerId         String? // -- ID customer yang terkait dengan percakapan CRM ini.
   leadId             String? // -- ID lead yang terkait dengan percakapan CRM ini.
   dealId             String? // -- ID deal yang terkait dengan percakapan CRM ini.
@@ -1052,24 +863,19 @@ model CrmConversation {
   createdAt          DateTime              @default(now()) // -- Waktu pembuatan percakapan CRM ini.
   updatedAt          DateTime              @updatedAt // -- Waktu terakhir pembaruan percakapan CRM ini.
 
-  tenant     Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk percakapan CRM ini.
   customer   CrmCustomer?   @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke customer CRM untuk percakapan CRM ini.
   lead       CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke lead CRM untuk percakapan CRM ini.
   deal       CrmDeal?       @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk percakapan CRM ini.
   messages   CrmMessage[] // -- Daftar pesan yang terkait dengan percakapan CRM ini.
   activities CrmActivity[] // -- Daftar aktivitas yang terkait dengan percakapan CRM ini.
-
-  @@index([tenantId])
   @@index([customerId])
   @@index([leadId])
   @@index([dealId])
-  @@index([tenantId, status])
   @@index([deletedAt])
 }
 
 model CrmMessage {
   id             String           @id @default(cuid()) // -- ID unik pesan CRM ini.
-  tenantId       String? // -- ID tenant yang terkait dengan pesan CRM ini.
   conversationId String // -- ID percakapan yang terkait dengan pesan CRM ini.
   status         CrmMessageStatus @default(SENT) // -- Status pesan CRM ini.
   senderName     String           @db.VarChar(150) // -- Nama pengirim pesan CRM ini.
@@ -1079,20 +885,15 @@ model CrmMessage {
   createdAt      DateTime         @default(now()) // -- Waktu pembuatan pesan CRM ini.
   updatedAt      DateTime         @updatedAt // -- Waktu terakhir pembaruan pesan CRM ini.
 
-  tenant       Tenant?          @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk pesan CRM ini.
   conversation CrmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade) // -- Relasi ke percakapan CRM untuk pesan CRM ini.
   activities   CrmActivity[] // -- Daftar aktivitas yang terkait dengan pesan CRM ini.
-
-  @@index([tenantId])
   @@index([conversationId])
-  @@index([tenantId, status])
   @@index([deletedAt])
 }
 
 model CrmProduct {
   id              String         @id @default(cuid())
-  tenantId        String?
-  code            String         @db.VarChar(50)
+  code            String         @unique @db.VarChar(50)
   name            String         @db.VarChar(200)
   description     String?        @db.Text
   type            CrmProductType @default(PRODUCT)
@@ -1102,20 +903,16 @@ model CrmProduct {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
   leadLines     CrmLeadLine[]
 
-  @@unique([tenantId, code])
-  @@index([tenantId])
   @@index([inventoryItemId])
-  @@index([tenantId, isActive])
+  @@index([isActive])
   @@index([deletedAt])
 }
 
 model CrmLeadLine {
   id                    String   @id @default(cuid())
-  tenantId              String?
   leadId                String
   crmProductId          String?
   inventoryItemId       String?
@@ -1128,7 +925,6 @@ model CrmLeadLine {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  tenant              Tenant?                     @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   lead                CrmLead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   crmProduct          CrmProduct?                 @relation(fields: [crmProductId], references: [id], onDelete: SetNull)
   inventoryItem       InventoryItem?              @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
@@ -1136,7 +932,6 @@ model CrmLeadLine {
   fulfillmentLines    CrmFulfillmentRequestLine[]
   reservations        InventoryReservation[]
 
-  @@index([tenantId])
   @@index([leadId])
   @@index([crmProductId])
   @@index([inventoryItemId])
@@ -1145,10 +940,9 @@ model CrmLeadLine {
 
 model CrmFulfillmentRequest {
   id            String               @id @default(cuid())
-  tenantId      String?
   leadId        String
   customerId    String?
-  requestNumber String               @db.VarChar(50)
+  requestNumber String               @unique @db.VarChar(50)
   status        CrmFulfillmentStatus @default(DRAFT)
   requestedDate DateTime             @default(now())
   notes         String?              @db.Text
@@ -1157,21 +951,17 @@ model CrmFulfillmentRequest {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
-  tenant   Tenant?                     @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   lead     CrmLead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   customer CrmCustomer?                @relation(fields: [customerId], references: [id], onDelete: SetNull)
   lines    CrmFulfillmentRequestLine[]
 
-  @@unique([tenantId, requestNumber])
-  @@index([tenantId])
   @@index([leadId])
   @@index([customerId])
-  @@index([tenantId, status])
+  @@index([status])
 }
 
 model CrmFulfillmentRequestLine {
   id                   String   @id @default(cuid())
-  tenantId             String?
   fulfillmentRequestId String
   leadLineId           String?
   inventoryItemId      String
@@ -1182,14 +972,12 @@ model CrmFulfillmentRequestLine {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  tenant             Tenant?               @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   fulfillmentRequest CrmFulfillmentRequest @relation(fields: [fulfillmentRequestId], references: [id], onDelete: Cascade)
   leadLine           CrmLeadLine?          @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
   inventoryItem      InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
   warehouse          Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   reservedUnits      InventoryReservationUnit[]
 
-  @@index([tenantId])
   @@index([fulfillmentRequestId])
   @@index([leadLineId])
   @@index([inventoryItemId])
@@ -1197,51 +985,44 @@ model CrmFulfillmentRequestLine {
 }
 
 model InventoryItem {
-  id                     String                @id @default(cuid())
-  tenantId               String?
-  sku                    String                @db.VarChar(50)
-  name                   String                @db.VarChar(200)
-  description            String?               @db.Text
-  unitOfMeasure          String                @db.VarChar(30)
-  category               String?               @db.VarChar(100)
-  brand                  String?               @db.VarChar(100)
-  model                  String?               @db.VarChar(150)
-  manufacturerPartNumber String?               @db.VarChar(100)
-  barcode                String?               @db.VarChar(100)
-  technicalSpecs         String?               @db.Text
-  trackingMode           InventoryTrackingMode @default(QUANTITY)
-  usageType              InventoryUsageType    @default(BOTH)
-  isStockTracked         Boolean               @default(true)
-  minStock               Decimal               @default(0) @db.Decimal(15, 2)
-  reorderPoint           Decimal               @default(0) @db.Decimal(15, 2)
-  standardCost           Decimal?              @db.Decimal(15, 2)
-  inventoryCoaId         String?
-  temporaryAssetCoaId    String?
-  cogsCoaId              String?
-  isActive               Boolean               @default(true)
-  deletedAt              DateTime?
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
+  id                   String               @id @default(cuid())
+  sku                  String               @unique @db.VarChar(50)
+  name                 String               @db.VarChar(200)
+  description          String?              @db.Text
+  unitOfMeasure        String               @db.VarChar(30)
+  category             String?              @db.VarChar(100)
+  brand                String?               @db.VarChar(100)
+  model                String?               @db.VarChar(150)
+  manufacturerPartNumber String?             @db.VarChar(100)
+  barcode              String?               @db.VarChar(100)
+  technicalSpecs       String?               @db.Text
+  trackingMode         InventoryTrackingMode @default(QUANTITY)
+  usageType            InventoryUsageType   @default(BOTH)
+  isStockTracked       Boolean              @default(true)
+  minStock             Decimal              @default(0) @db.Decimal(15, 2)
+  reorderPoint         Decimal              @default(0) @db.Decimal(15, 2)
+  standardCost         Decimal?             @db.Decimal(15, 2)
+  inventoryCoaId       String?
+  temporaryAssetCoaId  String?
+  cogsCoaId            String?
+  isActive             Boolean              @default(true)
+  deletedAt            DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
-  tenant              Tenant?                     @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  inventoryCoa        ChartOfAccount?             @relation("InventoryItemStockCOA", fields: [inventoryCoaId], references: [id])
-  temporaryAssetCoa   ChartOfAccount?             @relation("InventoryItemTempAssetCOA", fields: [temporaryAssetCoaId], references: [id])
-  cogsCoa             ChartOfAccount?             @relation("InventoryItemCogsCOA", fields: [cogsCoaId], references: [id])
-  crmProducts         CrmProduct[]
-  leadLines           CrmLeadLine[]
-  fulfillmentLines    CrmFulfillmentRequestLine[]
-  balances            InventoryBalance[]
-  ledgerEntries       InventoryLedgerEntry[]
-  reservations        InventoryReservation[]
-  receiptBatches      InventoryReceiptBatch[]
-  units               InventoryItemUnit[]
+  inventoryCoa      ChartOfAccount?             @relation("InventoryItemStockCOA", fields: [inventoryCoaId], references: [id])
+  temporaryAssetCoa ChartOfAccount?             @relation("InventoryItemTempAssetCOA", fields: [temporaryAssetCoaId], references: [id])
+  cogsCoa           ChartOfAccount?             @relation("InventoryItemCogsCOA", fields: [cogsCoaId], references: [id])
+  crmProducts       CrmProduct[]
+  leadLines         CrmLeadLine[]
+  fulfillmentLines  CrmFulfillmentRequestLine[]
+  balances          InventoryBalance[]
+  ledgerEntries     InventoryLedgerEntry[]
+  reservations      InventoryReservation[]
+  units             InventoryItemUnit[]
+  receiptBatches    InventoryReceiptBatch[]
 
-  @@unique([tenantId, sku])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
-  @@index([trackingMode])
-  @@index([usageType])
-  @@index([brand])
+  @@index([isActive])
   @@index([inventoryCoaId])
   @@index([temporaryAssetCoaId])
   @@index([cogsCoaId])
@@ -1250,8 +1031,7 @@ model InventoryItem {
 
 model Warehouse {
   id          String    @id @default(cuid())
-  tenantId    String?
-  code        String    @db.VarChar(30)
+  code        String    @unique @db.VarChar(30)
   name        String    @db.VarChar(150)
   description String?   @db.Text
   isActive    Boolean   @default(true)
@@ -1259,7 +1039,6 @@ model Warehouse {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  tenant              Tenant?                     @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   balances            InventoryBalance[]
   ledgerEntries       InventoryLedgerEntry[]
   reservations        InventoryReservation[]
@@ -1268,15 +1047,12 @@ model Warehouse {
   receiptBatches      InventoryReceiptBatch[]
   units               InventoryItemUnit[]
 
-  @@unique([tenantId, code])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
+  @@index([isActive])
   @@index([deletedAt])
 }
 
 model InventoryItemUnit {
   id                String                 @id @default(cuid())
-  tenantId          String?
   inventoryItemId   String
   warehouseId       String?
   receiptBatchId    String?
@@ -1295,16 +1071,14 @@ model InventoryItemUnit {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
-  tenant           Tenant?               @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  inventoryItem    InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
-  warehouse        Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  inventoryItem    InventoryItem          @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  warehouse        Warehouse?             @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   receiptBatch     InventoryReceiptBatch? @relation(fields: [receiptBatchId], references: [id], onDelete: SetNull)
-  assignedToUser   User?                 @relation("InventoryUnitAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedToUser   User?                  @relation("InventoryUnitAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   reservationUnits InventoryReservationUnit[]
 
-  @@unique([tenantId, serialNumber])
-  @@unique([tenantId, assetTag])
-  @@index([tenantId])
+  @@unique([serialNumber])
+  @@unique([assetTag])
   @@index([inventoryItemId])
   @@index([warehouseId])
   @@index([receiptBatchId])
@@ -1315,30 +1089,27 @@ model InventoryItemUnit {
 }
 
 model InventoryReceiptBatch {
-  id            String              @id @default(cuid())
-  tenantId      String?
+  id              String              @id @default(cuid())
   inventoryItemId String
-  warehouseId   String
-  bucketType    InventoryBucketType @default(SALE_STOCK)
-  vendorName    String?             @db.VarChar(150)
-  vendorReference String?           @db.VarChar(100)
-  batchNumber   String?             @db.VarChar(100)
-  unitCost      Decimal?            @db.Decimal(15, 2)
-  receivedQty   Decimal             @default(0) @db.Decimal(15, 2)
-  remainingQty  Decimal             @default(0) @db.Decimal(15, 2)
-  receivedDate  DateTime            @default(now())
-  referenceType String?             @db.VarChar(50)
-  referenceId   String?             @db.VarChar(100)
-  notes         String?             @db.Text
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  warehouseId     String
+  bucketType      InventoryBucketType @default(SALE_STOCK)
+  vendorName      String?             @db.VarChar(150)
+  vendorReference String?             @db.VarChar(100)
+  batchNumber     String?             @db.VarChar(100)
+  unitCost        Decimal?            @db.Decimal(15, 2)
+  receivedQty     Decimal             @default(0) @db.Decimal(15, 2)
+  remainingQty    Decimal             @default(0) @db.Decimal(15, 2)
+  receivedDate    DateTime            @default(now())
+  referenceType   String?             @db.VarChar(50)
+  referenceId     String?             @db.VarChar(100)
+  notes           String?             @db.Text
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   warehouse     Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   units         InventoryItemUnit[]
 
-  @@index([tenantId])
   @@index([inventoryItemId])
   @@index([warehouseId])
   @@index([bucketType])
@@ -1348,72 +1119,63 @@ model InventoryReceiptBatch {
 }
 
 model InventoryReservationUnit {
-  id                     String                   @id @default(cuid())
-  tenantId               String?
-  reservationId          String
-  inventoryItemUnitId    String
+  id                      String                    @id @default(cuid())
+  reservationId           String
+  inventoryItemUnitId     String
   fulfillmentRequestLineId String?
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 
-  tenant               Tenant?                  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  reservation         InventoryReservation      @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  inventoryItemUnit   InventoryItemUnit         @relation(fields: [inventoryItemUnitId], references: [id], onDelete: Cascade)
+  reservation           InventoryReservation       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  inventoryItemUnit     InventoryItemUnit          @relation(fields: [inventoryItemUnitId], references: [id], onDelete: Cascade)
   fulfillmentRequestLine CrmFulfillmentRequestLine? @relation(fields: [fulfillmentRequestLineId], references: [id], onDelete: SetNull)
 
   @@unique([reservationId, inventoryItemUnitId])
-  @@index([tenantId])
   @@index([inventoryItemUnitId])
   @@index([fulfillmentRequestLineId])
 }
 
 model InventoryBalance {
-  id          String   @id @default(cuid())
-  tenantId    String?
+  id          String              @id @default(cuid())
   itemId      String
   warehouseId String
   bucketType  InventoryBucketType @default(SALE_STOCK)
-  qtyOnHand   Decimal  @default(0) @db.Decimal(15, 2)
-  qtyReserved Decimal  @default(0) @db.Decimal(15, 2)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  qtyOnHand   Decimal             @default(0) @db.Decimal(15, 2)
+  qtyReserved Decimal             @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
-  tenant    Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   warehouse Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
 
   @@unique([itemId, warehouseId, bucketType])
-  @@index([tenantId])
   @@index([warehouseId])
 }
 
 model InventoryLedgerEntry {
-  id             String                @id @default(cuid())
-  tenantId       String?
-  itemId         String
-  warehouseId    String
-  bucketType     InventoryBucketType   @default(SALE_STOCK)
-  movementType   InventoryMovementType
-  referenceType  String?               @db.VarChar(50)
-  referenceId    String?               @db.VarChar(100)
+  id               String                @id @default(cuid())
+  itemId           String
+  warehouseId      String
+  bucketType       InventoryBucketType   @default(SALE_STOCK)
+  movementType     InventoryMovementType
+  referenceType    String?               @db.VarChar(50)
+  referenceId      String?               @db.VarChar(100)
   chartOfAccountId String?
-  quantityBefore Decimal               @default(0) @db.Decimal(15, 2)
-  quantityChange Decimal               @default(0) @db.Decimal(15, 2)
-  quantityAfter  Decimal               @default(0) @db.Decimal(15, 2)
-  unitCost       Decimal?              @db.Decimal(15, 2)
-  totalCost      Decimal?              @db.Decimal(15, 2)
-  notes          String?               @db.Text
-  movementDate   DateTime              @default(now())
-  createdById    String?
-  createdAt      DateTime              @default(now())
+  quantityBefore   Decimal               @default(0) @db.Decimal(15, 2)
+  quantityChange   Decimal               @default(0) @db.Decimal(15, 2)
+  quantityAfter    Decimal               @default(0) @db.Decimal(15, 2)
+  unitCost         Decimal?              @db.Decimal(15, 2)
+  totalCost        Decimal?              @db.Decimal(15, 2)
+  notes            String?               @db.Text
+  movementDate     DateTime              @default(now())
+  createdById      String?
+  createdAt        DateTime              @default(now())
 
-  tenant          Tenant?         @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  item            InventoryItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  warehouse       Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  chartOfAccount  ChartOfAccount? @relation("InventoryLedgerChartOfAccount", fields: [chartOfAccountId], references: [id])
-  createdBy       User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  item           InventoryItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  chartOfAccount ChartOfAccount? @relation("InventoryLedgerChartOfAccount", fields: [chartOfAccountId], references: [id])
+  createdBy      User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@index([tenantId])
   @@index([itemId, warehouseId, movementDate])
   @@index([bucketType])
   @@index([referenceType, referenceId])
@@ -1423,7 +1185,6 @@ model InventoryLedgerEntry {
 
 model InventoryReservation {
   id           String                     @id @default(cuid())
-  tenantId     String?
   itemId       String
   warehouseId  String?
   leadLineId   String?
@@ -1437,13 +1198,11 @@ model InventoryReservation {
   createdAt    DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
 
-  tenant           Tenant?                    @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  item             InventoryItem              @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  warehouse        Warehouse?                 @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  leadLine         CrmLeadLine?               @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
+  item             InventoryItem             @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse        Warehouse?                @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  leadLine         CrmLeadLine?              @relation(fields: [leadLineId], references: [id], onDelete: SetNull)
   reservationUnits InventoryReservationUnit[]
 
-  @@index([tenantId])
   @@index([itemId])
   @@index([warehouseId])
   @@index([leadLineId])
@@ -1457,10 +1216,8 @@ model InventoryReservation {
 
 model TravelRequest {
   id            String  @id @default(cuid()) // -- ID unik permintaan perjalanan dinas ini.
-  tenantId      String? // -- ID tenant yang terkait dengan permintaan perjalanan dinas ini.
   requestNumber String  @db.VarChar(50) // -- Nomor pengajuan permintaan perjalanan dinas ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk permintaan perjalanan dinas ini.
 
   // Requester (must be SALES_EMPLOYEE or SALES_CHIEF)
   requesterId String // -- ID pengaju yang terkait dengan permintaan perjalanan dinas ini.
@@ -1498,11 +1255,8 @@ model TravelRequest {
   claims       Claim[] // -- Daftar klaim yang terkait dengan permintaan perjalanan dinas ini.
   bailouts     Bailout[] // -- Daftar dana talangan yang terkait dengan permintaan perjalanan dinas ini.
 
-  @@unique([tenantId, requestNumber])
+  @@unique([requestNumber])
   @@index([requesterId, status])
-  @@index([tenantId])
-  @@index([tenantId, status])
-  @@index([tenantId, createdAt])
   @@index([status, createdAt])
   @@index([requestNumber])
   @@index([travelType])
@@ -1512,11 +1266,9 @@ model TravelRequest {
 
 model TravelParticipant {
   id              String        @id @default(cuid()) // -- ID unik peserta perjalanan ini.
-  tenantId        String? // -- ID tenant yang terkait dengan peserta perjalanan ini.
   travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan peserta perjalanan ini.
   travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade) // -- Relasi ke permintaan perjalanan dinas untuk peserta perjalanan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk peserta perjalanan ini.
 
   userId String // -- ID pengguna yang terkait dengan peserta perjalanan ini.
   user   User   @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk peserta perjalanan ini.
@@ -1527,7 +1279,6 @@ model TravelParticipant {
   createdAt DateTime @default(now()) // -- Waktu pembuatan peserta perjalanan ini.
 
   @@unique([travelRequestId, userId])
-  @@index([tenantId])
   @@index([userId])
 }
 
@@ -1537,10 +1288,8 @@ model TravelParticipant {
 
 model Bailout {
   id            String  @id @default(cuid()) // -- ID unik dana talangan ini.
-  tenantId      String? // -- ID tenant yang terkait dengan dana talangan ini.
   bailoutNumber String  @db.VarChar(50) // -- Nomor dana talangan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk dana talangan ini.
 
   travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan dana talangan ini.
   travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id]) // -- Relasi ke permintaan perjalanan dinas untuk dana talangan ini.
@@ -1602,11 +1351,8 @@ model Bailout {
   journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan dana talangan ini.
   journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan dana talangan ini.
 
-  @@unique([tenantId, bailoutNumber])
+  @@unique([bailoutNumber])
   @@index([travelRequestId])
-  @@index([tenantId])
-  @@index([tenantId, status])
-  @@index([tenantId, createdAt])
   @@index([requesterId, status])
   @@index([status, createdAt])
   @@index([bailoutNumber])
@@ -1643,12 +1389,10 @@ model Bailout {
 
 model Approval {
   id       String  @id @default(cuid()) // -- ID unik persetujuan ini.
-  tenantId String? // -- ID tenant yang terkait dengan persetujuan ini.
 
   // Business approval number (e.g. APR-2026-00001)
   approvalNumber String @db.VarChar(50) // -- Nomor persetujuan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk persetujuan ini.
 
   // ── Entity links (exactly one must be set) ──────────────────────────────
   travelRequestId String? // -- ID permintaan perjalanan dinas yang terkait dengan persetujuan ini.
@@ -1678,11 +1422,8 @@ model Approval {
   createdAt  DateTime  @default(now()) // -- Waktu pembuatan persetujuan ini.
   updatedAt  DateTime  @updatedAt // -- Waktu terakhir pembaruan persetujuan ini.
 
-  @@unique([tenantId, approvalNumber])
+  @@unique([approvalNumber])
   @@index([approvalNumber])
-  @@index([tenantId])
-  @@index([tenantId, status])
-  @@index([tenantId, createdAt])
   @@index([travelRequestId, sequence])
   @@index([bailoutId, sequence])
   @@index([claimId, sequence])
@@ -1696,10 +1437,8 @@ model Approval {
 
 model Claim {
   id          String  @id @default(cuid()) // -- ID unik klaim ini.
-  tenantId    String? // -- ID tenant yang terkait dengan klaim ini.
   claimNumber String  @db.VarChar(50) // -- Nomor klaim ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk klaim ini.
 
   travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan klaim ini.
   travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id]) // -- Relasi ke permintaan perjalanan dinas untuk klaim ini.
@@ -1759,11 +1498,8 @@ model Claim {
   journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan klaim ini.
   journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan klaim ini.
 
-  @@unique([tenantId, claimNumber])
+  @@unique([claimNumber])
   @@index([travelRequestId])
-  @@index([tenantId])
-  @@index([tenantId, status])
-  @@index([tenantId, createdAt])
   @@index([submitterId, status])
   @@index([status, createdAt])
   @@index([claimNumber])
@@ -1774,11 +1510,9 @@ model Claim {
 
 model Attachment {
   id       String  @id @default(cuid()) // -- ID unik lampiran ini.
-  tenantId String? // -- ID tenant yang terkait dengan lampiran ini.
   claimId  String // -- ID klaim yang terkait dengan lampiran ini.
   claim    Claim   @relation(fields: [claimId], references: [id], onDelete: Cascade) // -- Relasi ke klaim untuk lampiran ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk lampiran ini.
 
   filename        String @db.VarChar(255) // -- Nama file lampiran ini.
   originalName    String @db.VarChar(255) // -- Nama file asli lampiran ini.
@@ -1793,8 +1527,6 @@ model Attachment {
 
   deletedAt DateTime? // -- Waktu penghapusan lunak lampiran ini.
   createdAt DateTime  @default(now()) // -- Waktu pembuatan lampiran ini.
-
-  @@index([tenantId])
   @@index([claimId])
 }
 
@@ -1804,11 +1536,9 @@ model Attachment {
 
 model Notification {
   id       String  @id @default(cuid()) // -- ID unik notifikasi ini.
-  tenantId String? // -- ID tenant yang terkait dengan notifikasi ini.
   userId   String // -- ID pengguna yang terkait dengan notifikasi ini.
   user     User    @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk notifikasi ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk notifikasi ini.
 
   // Notification content
   title   String              @db.VarChar(255) // -- Judul notifikasi ini.
@@ -1833,8 +1563,6 @@ model Notification {
   templateId String? @db.VarChar(100) // -- ID template yang terkait dengan notifikasi ini.
 
   createdAt DateTime @default(now()) // -- Waktu pembuatan notifikasi ini.
-
-  @@index([tenantId])
   @@index([userId, status])
   @@index([status, createdAt])
   @@index([channel])
@@ -1846,11 +1574,9 @@ model Notification {
 
 model AuditLog {
   id       String  @id @default(cuid()) // -- ID unik log audit ini.
-  tenantId String? // -- ID tenant yang terkait dengan log audit ini.
   userId   String // -- ID pengguna yang terkait dengan log audit ini.
   user     User    @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk log audit ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk log audit ini.
 
   // Action details
   action     AuditAction // -- Aksi log audit ini.
@@ -1870,8 +1596,6 @@ model AuditLog {
   userAgent String? @db.Text // -- Informasi user agent log audit ini.
 
   createdAt DateTime @default(now()) // -- Waktu pembuatan log audit ini.
-
-  @@index([tenantId])
   @@index([userId, createdAt])
   @@index([entityType, entityId])
   @@index([action, createdAt])
@@ -1884,11 +1608,9 @@ model AuditLog {
 
 model BalanceAccount {
   id       String  @id @default(cuid()) // -- ID unik akun saldo ini.
-  tenantId String? // -- ID tenant yang terkait dengan akun saldo ini.
   code     String  @db.VarChar(30) // -- Kode akun saldo ini.
   name     String  @db.VarChar(150) // -- Nama akun saldo ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk akun saldo ini.
 
   // Current running balance (positive = debit-normal, or as defined by usage)
   balance Decimal @default(0) @db.Decimal(19, 4) // -- Saldo akun saldo ini.
@@ -1907,20 +1629,16 @@ model BalanceAccount {
   journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan akun saldo ini.
   journalEntryLines   JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan akun saldo ini.
 
-  @@unique([tenantId, code])
+  @@unique([code])
   @@index([code])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
   @@index([isActive])
   @@index([defaultChartOfAccountId])
 }
 
 model JournalTransaction {
   id                String  @id @default(cuid()) // -- ID unik transaksi jurnal ini.
-  tenantId          String? // -- ID tenant yang terkait dengan transaksi jurnal ini.
   transactionNumber String  @db.VarChar(50) // -- Nomor transaksi jurnal ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk transaksi jurnal ini.
 
   // Date of the accounting entry (may differ from createdAt)
   transactionDate DateTime @db.Date // -- Tanggal transaksi jurnal ini.
@@ -1955,10 +1673,8 @@ model JournalTransaction {
   createdAt DateTime  @default(now()) // -- Waktu pembuatan transaksi jurnal ini.
   updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan transaksi jurnal ini.
 
-  @@unique([tenantId, transactionNumber])
+  @@unique([transactionNumber])
   @@index([transactionNumber])
-  @@index([tenantId])
-  @@index([tenantId, transactionDate])
   @@index([transactionDate])
   @@index([chartOfAccountId])
   @@index([balanceAccountId])
@@ -1969,10 +1685,8 @@ model JournalTransaction {
 
 model JournalEntry {
   id            String  @id @default(cuid()) // -- ID unik entri jurnal ini.
-  tenantId      String? // -- ID tenant yang terkait dengan entri jurnal ini.
   journalNumber String  @db.VarChar(50) // -- Nomor jurnal ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk entri jurnal ini.
 
   transactionDate DateTime           @db.Date // -- Tanggal transaksi entri jurnal ini.
   description     String             @db.Text // -- Deskripsi entri jurnal ini.
@@ -2002,10 +1716,8 @@ model JournalEntry {
 
   lines JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan entri jurnal ini.
 
-  @@unique([tenantId, journalNumber])
+  @@unique([journalNumber])
   @@index([journalNumber])
-  @@index([tenantId])
-  @@index([tenantId, transactionDate])
   @@index([transactionDate])
   @@index([sourceType, sourceId])
   @@index([status, transactionDate])
@@ -2040,3 +1752,4 @@ model JournalEntryLine {
   @@index([balanceAccountId])
   @@index([lineNumber])
 }
+

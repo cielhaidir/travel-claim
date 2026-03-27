@@ -339,7 +339,7 @@ export default function EmployeeAdvanceControlPage() {
 
   function exportExcel() {
     const summaryRows = [
-      { metric: "Tenant Aktif", value: activeTenantName },
+      { metric: "Cakupan Data", value: reportScopeLabel },
       { metric: "Outstanding Uang Muka", value: outstandingAdvanceAmountValue },
       { metric: "Piutang Karyawan", value: balances.receivable },
       { metric: "Hutang Karyawan", value: balances.payable },
@@ -429,8 +429,7 @@ export default function EmployeeAdvanceControlPage() {
     0,
   );
 
-  const activeTenantName =
-    session?.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const reportScopeLabel = "Semua Data";
 
   if (!session || !isAllowed) return null;
 
@@ -438,13 +437,13 @@ export default function EmployeeAdvanceControlPage() {
     <div className="space-y-6">
       <PageHeader
         title="Employee Advance & Settlement Control"
-        description="Dashboard kontrol uang muka perjalanan, piutang karyawan, dan hutang karyawan berdasarkan jurnal posted tenant aktif"
+        description="Dashboard kontrol uang muka perjalanan, piutang karyawan, dan hutang karyawan berdasarkan jurnal posted"
         primaryAction={{ label: "Export Excel", onClick: exportExcel }}
         secondaryAction={{ label: "Halaman Finance", href: "/finance" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant aktif" />
+        <SummaryCard label="Cakupan Data" value={reportScopeLabel} helper="Laporan mencakup seluruh data yang tersedia" />
         <SummaryCard label="Outstanding Uang Muka" value={formatCurrency(outstandingAdvanceAmountValue)} helper={`${filteredOutstandingBailouts.length} bailout belum settlement`} tone="amber" />
         <SummaryCard label="Piutang Karyawan" value={formatCurrency(balances.receivable)} helper="Saldo akun 1132 pada filter aktif" tone="blue" />
         <SummaryCard label="Hutang Karyawan" value={formatCurrency(balances.payable)} helper="Saldo akun 2110 pada filter aktif" tone="purple" />
@@ -536,7 +535,7 @@ export default function EmployeeAdvanceControlPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Panel title="Outstanding Advance per Bailout" description="Bailout disbursed yang belum memiliki settlement posted">
           {filteredOutstandingBailouts.length === 0 ? (
-            <EmptyLine text="Tidak ada bailout outstanding pada tenant aktif / filter aktif." />
+            <EmptyLine text="Tidak ada bailout outstanding pada filter aktif." />
           ) : (
             <div className="space-y-3">
               {filteredOutstandingBailouts.map((bailout) => (
@@ -611,7 +610,7 @@ export default function EmployeeAdvanceControlPage() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Mutasi Akun Kontrol</h2>
-          <p className="text-sm text-gray-500">Line jurnal untuk akun 1131, 1132, dan 2110 pada tenant aktif</p>
+          <p className="text-sm text-gray-500">Line jurnal untuk akun 1131, 1132, dan 2110 pada filter aktif</p>
         </div>
         {journalQuery.isLoading || bailoutQuery.isLoading ? (
           <div className="px-5 py-6 text-sm text-gray-500">Memuat data kontrol advance & settlement...</div>

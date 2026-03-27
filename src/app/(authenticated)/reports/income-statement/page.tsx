@@ -86,8 +86,7 @@ export default function IncomeStatementPage() {
     },
   );
 
-  const activeTenantName =
-    session?.user.memberships?.find((item) => item.tenantId === session.user.activeTenantId)?.tenantName ?? "-";
+  const dataScopeLabel = "Semua data";
 
   const coaAccounts = (coaQuery.data as CoaAccount[] | undefined) ?? [];
   const journals = ((journalQuery.data as { journalEntries: JournalEntry[] } | undefined)?.journalEntries ?? []);
@@ -154,13 +153,13 @@ export default function IncomeStatementPage() {
     <div className="space-y-6">
       <PageHeader
         title="Laporan Laba Rugi"
-        description="Ringkasan pendapatan, beban, dan laba rugi tenant aktif pada periode yang dipilih"
+        description="Ringkasan pendapatan, beban, dan laba rugi pada periode yang dipilih"
         primaryAction={{ label: "Muat Ulang", onClick: () => void journalQuery.refetch() }}
         secondaryAction={{ label: "Neraca", href: "/reports/balance-sheet" }}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Tenant Aktif" value={activeTenantName} helper="Data mengikuti tenant aktif" />
+        <SummaryCard label="Cakupan Data" value={dataScopeLabel} helper="Laporan mengikuti data global saat ini" />
         <SummaryCard label="Total Pendapatan" value={formatCurrency(statement.totalRevenue)} helper="Akumulasi akun REVENUE" tone="green" />
         <SummaryCard label="Total Beban" value={formatCurrency(statement.totalExpense)} helper="Akumulasi akun EXPENSE" tone="amber" />
         <SummaryCard
@@ -277,7 +276,7 @@ export default function IncomeStatementPage() {
         <EmptyState
           icon="📘"
           title="Belum ada data laba rugi"
-          description="Tidak ditemukan mutasi akun pendapatan atau beban pada tenant aktif untuk filter yang dipilih."
+          description="Tidak ditemukan mutasi akun pendapatan atau beban untuk filter yang dipilih."
         />
       ) : null}
     </div>

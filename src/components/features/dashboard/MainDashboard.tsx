@@ -84,15 +84,9 @@ type MyDashboardData = {
   }>;
 };
 
-export function TenantDashboard() {
+export function MainDashboard() {
   const { data: session } = useSession();
-
-  const currentMembership =
-    session?.user.memberships?.find(
-      (membership) =>
-        membership.status === "ACTIVE" &&
-        membership.tenantId === session.user.activeTenantId,
-    ) ?? null;
+  const dashboardScopeLabel = "Semua Data";
 
   const isRoot = session?.user.isRoot === true;
   const permissions = session?.user.permissions;
@@ -226,11 +220,11 @@ export function TenantDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Dashboard Tenant"
-        description={`Ringkasan operasional dan keuangan untuk tenant aktif ${currentMembership?.tenantName ?? "tanpa tenant"}`}
+        title="Dashboard"
+        description="Ringkasan operasional dan keuangan perusahaan"
         badge={
           <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            {currentMembership?.tenantName ?? "No Active Tenant"}
+            {dashboardScopeLabel}
           </span>
         }
       />
@@ -245,19 +239,19 @@ export function TenantDashboard() {
         <MetricCard
           label="Travel Requests Saya"
           value={(myDashboard?.travelRequests.total ?? 0).toString()}
-          helper="Total pengajuan perjalanan di tenant aktif"
+          helper="Total pengajuan perjalanan yang Anda buat"
           tone="default"
         />
         <MetricCard
           label="Klaim Saya"
           value={(myDashboard?.claims.total ?? 0).toString()}
-          helper="Total klaim di tenant aktif"
+          helper="Total klaim yang Anda buat"
           tone="warning"
         />
         <MetricCard
           label="Notifikasi Belum Dibaca"
           value={(myDashboard?.notifications.unread ?? 0).toString()}
-          helper="Notifikasi tenant aktif"
+          helper="Notifikasi yang masih memerlukan perhatian"
           tone="success"
         />
       </div>
@@ -274,13 +268,13 @@ export function TenantDashboard() {
             <MetricCard
               label="Balance Account Aktif"
               value={balanceSummary.active.toString()}
-              helper={`${balanceSummary.total} akun saldo tenant aktif`}
+              helper={`${balanceSummary.total} akun saldo aktif`}
               tone="success"
             />
             <MetricCard
               label="Total Saldo"
               value={formatCurrency(balanceSummary.amount)}
-              helper="Akumulasi seluruh balance account tenant aktif"
+              helper="Akumulasi seluruh balance account"
               tone="default"
             />
             <MetricCard
@@ -296,7 +290,7 @@ export function TenantDashboard() {
           <div className="grid gap-6 xl:grid-cols-3">
             <Panel
               title="Ringkasan Finance"
-              description="Posisi klaim dan pembayaran pada tenant aktif"
+              description="Posisi klaim dan pembayaran terkini"
             >
               <div className="grid gap-3 sm:grid-cols-3">
                 <MiniMetric
@@ -322,7 +316,7 @@ export function TenantDashboard() {
 
             <Panel
               title="Jurnal Terbaru"
-              description="10 jurnal terakhir tenant aktif"
+              description="10 jurnal terakhir"
             >
               <div className="mb-4 grid gap-3 sm:grid-cols-3">
                 <MiniMetric
@@ -340,7 +334,7 @@ export function TenantDashboard() {
               </div>
               <div className="space-y-3">
                 {journalSummary.recent.length === 0 ? (
-                  <EmptyLine text="Belum ada jurnal pada tenant ini." />
+                  <EmptyLine text="Belum ada jurnal yang tersedia." />
                 ) : (
                   journalSummary.recent.map((journal) => (
                     <ListRow
@@ -360,7 +354,7 @@ export function TenantDashboard() {
             >
               <div className="space-y-3">
                 {balanceSummary.topAccounts.length === 0 ? (
-                  <EmptyLine text="Belum ada akun saldo pada tenant ini." />
+                  <EmptyLine text="Belum ada akun saldo yang tersedia." />
                 ) : (
                   balanceSummary.topAccounts.map((account) => (
                     <ListRow
@@ -382,7 +376,7 @@ export function TenantDashboard() {
             >
               <div className="space-y-3">
                 {(financeDashboard?.recentPayments ?? []).length === 0 ? (
-                  <EmptyLine text="Belum ada pembayaran claim pada tenant ini." />
+                  <EmptyLine text="Belum ada pembayaran klaim yang tersedia." />
                 ) : (
                   (financeDashboard?.recentPayments ?? [])
                     .slice(0, 5)
@@ -400,7 +394,7 @@ export function TenantDashboard() {
               </div>
             </Panel>
 
-            <Panel title="Aksi Cepat" description="Navigasi cepat tenant aktif">
+            <Panel title="Aksi Cepat" description="Navigasi cepat ke modul utama">
               <div className="grid gap-3 sm:grid-cols-2">
                 <QuickLink
                   href="/finance"
@@ -410,27 +404,27 @@ export function TenantDashboard() {
                 <QuickLink
                   href="/journal"
                   label="Jurnal"
-                  description="Lihat jurnal tenant aktif"
+                  description="Lihat jurnal terbaru"
                 />
                 <QuickLink
                   href="/reports/journal"
                   label="Laporan Jurnal"
-                  description="Rekap jurnal tenant aktif"
+                  description="Rekap jurnal perusahaan"
                 />
                 <QuickLink
                   href="/reports/trial-balance"
                   label="Trial Balance"
-                  description="Neraca saldo tenant aktif"
+                  description="Neraca saldo perusahaan"
                 />
                 <QuickLink
                   href="/reports/general-ledger"
                   label="General Ledger"
-                  description="Buku besar per akun tenant aktif"
+                  description="Buku besar per akun"
                 />
                 <QuickLink
                   href="/reports/expense-summary"
                   label="Expense Summary"
-                  description="Ringkasan beban tenant aktif"
+                  description="Ringkasan beban perusahaan"
                 />
                 <QuickLink
                   href="/reports/employee-advance-control"
@@ -450,14 +444,14 @@ export function TenantDashboard() {
                 <QuickLink
                   href="/chart-of-accounts"
                   label="Bagan Akun"
-                  description="Kelola COA tenant aktif"
+                  description="Kelola COA perusahaan"
                 />
               </div>
             </Panel>
           </div>
         </>
       ) : (
-        <Panel title="Aksi Cepat" description="Akses utama untuk tenant aktif">
+        <Panel title="Aksi Cepat" description="Akses utama ke modul operasional">
           <div className="grid gap-3 sm:grid-cols-3">
             <QuickLink
               href="/travel"
@@ -472,14 +466,14 @@ export function TenantDashboard() {
             <QuickLink
               href="/approvals"
               label="Persetujuan"
-              description="Review approval tenant aktif"
+              description="Review approval yang menunggu tindakan"
             />
           </div>
         </Panel>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-gray-500">Memuat dashboard tenant...</p>
+        <p className="text-sm text-gray-500">Memuat dashboard...</p>
       ) : null}
     </div>
   );

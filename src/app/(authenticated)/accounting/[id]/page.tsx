@@ -102,7 +102,7 @@ export default function BalanceAccountDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={account ? `${account.code} · ${account.name}` : "Detail Akun Saldo"}
-        description="Lihat saldo, COA default, dan histori mutasi akun saldo tenant aktif"
+        description="Lihat saldo, COA default, dan histori mutasi akun saldo perusahaan"
         primaryAction={{
           label: "Muat Ulang",
           onClick: () => void refetch(),
@@ -131,7 +131,7 @@ export default function BalanceAccountDetailPage() {
           <EmptyState
             icon="🏦"
             title="Akun saldo tidak ditemukan"
-            description="Akun saldo ini tidak tersedia pada tenant aktif atau sudah dihapus."
+            description="Akun saldo ini tidak tersedia atau sudah dihapus."
             action={
               canReadAccounting
                 ? { label: "Kembali ke Accounting", href: "/accounting" }
@@ -145,13 +145,13 @@ export default function BalanceAccountDetailPage() {
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard label="Saldo Saat Ini" value={formatCurrency(Number(account.balance ?? 0))} helper="Posisi saldo akun saat ini" tone="blue" />
-            <SummaryCard label="Status" value={account.isActive ? "Aktif" : "Nonaktif"} helper="Status akun saldo pada tenant aktif" tone={account.isActive ? "green" : "amber"} />
+            <SummaryCard label="Status" value={account.isActive ? "Aktif" : "Nonaktif"} helper="Status akun saldo saat ini" tone={account.isActive ? "green" : "amber"} />
             <SummaryCard label="Mutasi Tercatat" value={summary.total.toString()} helper="20 transaksi terakhir yang terkait" />
             <SummaryCard label="COA Default" value={account.defaultChartOfAccount ? `${account.defaultChartOfAccount.code}` : "-"} helper={account.defaultChartOfAccount?.name ?? "Belum ada COA default"} tone="emerald" />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-3">
-            <Panel title="Informasi Akun" description="Metadata akun saldo tenant aktif">
+            <Panel title="Informasi Akun" description="Metadata akun saldo perusahaan">
               <InfoRow label="Kode" value={account.code} mono />
               <InfoRow label="Nama" value={account.name} />
               <InfoRow label="COA Default" value={account.defaultChartOfAccount ? `${account.defaultChartOfAccount.code} - ${account.defaultChartOfAccount.name}` : "-"} />
@@ -170,7 +170,7 @@ export default function BalanceAccountDetailPage() {
               <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
                 <p>• Histori di bawah diambil dari 20 journal transaction terakhir yang terhubung ke akun ini.</p>
                 <p>• Nilai DEBIT/KREDIT mengikuti entry type pada transaksi legacy balance account.</p>
-                <p>• Untuk analisa formal, kombinasikan dengan report jurnal dan general ledger tenant aktif.</p>
+                <p>• Untuk analisa formal, kombinasikan dengan report jurnal dan general ledger perusahaan.</p>
               </div>
             </Panel>
           </div>

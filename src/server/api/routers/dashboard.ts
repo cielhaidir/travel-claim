@@ -16,25 +16,10 @@ import {
 } from "@/server/api/trpc";
 import { hasPermissionMap } from "@/lib/auth/permissions";
 
-function getTenantScope(ctx: unknown): {
-  tenantId: string | null;
-  isRoot: boolean;
-} {
-  const typed = ctx as { tenantId?: string | null; isRoot?: boolean };
-  return {
-    tenantId: typed.tenantId ?? null,
-    isRoot: typed.isRoot ?? false,
-  };
-}
-
-function withTenantWhere<T extends Record<string, unknown>>(
-  ctx: unknown,
+function applyScope<T extends Record<string, unknown>>(
+  _ctx: unknown,
   where: T,
 ): T {
-  const { tenantId, isRoot } = getTenantScope(ctx);
-  if (!isRoot) {
-    (where as Record<string, unknown>).tenantId = tenantId;
-  }
   return where;
 }
 
@@ -66,7 +51,7 @@ export const dashboardRouter = createTRPCRouter({
         // My travel requests count by status
         ctx.db.travelRequest.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             requesterId: userId,
             deletedAt: null,
           }),
@@ -75,7 +60,7 @@ export const dashboardRouter = createTRPCRouter({
         // My claims count by status
         ctx.db.claim.groupBy({
           by: ["status"],
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             submitterId: userId,
             deletedAt: null,
           }),
@@ -83,21 +68,21 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Pending approvals for me
         ctx.db.approval.count({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             approverId: userId,
             status: ApprovalStatus.PENDING,
           }),
         }),
         // Unread notifications
         ctx.db.notification.count({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             userId,
             readAt: null,
           }),
         }),
         // Team travel requests (if supervisor)
         ctx.db.travelRequest.count({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             requester: {
               supervisorId: userId,
             },
@@ -112,7 +97,7 @@ export const dashboardRouter = createTRPCRouter({
       // Get recent travel requests
       const recentTravelRequests = await ctx.db.travelRequest.findMany({
         take: 5,
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           requesterId: userId,
           deletedAt: null,
         }),
@@ -137,7 +122,7 @@ export const dashboardRouter = createTRPCRouter({
       // Get recent claims
       const recentClaims = await ctx.db.claim.findMany({
         take: 5,
-        where: withTenantWhere(ctx, {
+        where: applyScope(ctx, {
           submitterId: userId,
           deletedAt: null,
         }),
@@ -201,7 +186,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.TravelRequestWhereInput = applyScope(ctx, {
         deletedAt: null,
       });
 
@@ -230,7 +215,7 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by status
         ctx.db.claim.groupBy({
           by: ["status"],
-          where: withTenantWhere(
+          where: applyScope(
             ctx,
             input?.departmentId
               ? {
@@ -245,7 +230,7 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Pending approvals count
         ctx.db.approval.count({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ApprovalStatus.PENDING,
           }),
         }),
@@ -274,7 +259,7 @@ export const dashboardRouter = createTRPCRouter({
         // Top spenders (users with highest total claims)
         ctx.db.claim.groupBy({
           by: ["submitterId"],
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.PAID,
             ...(input?.departmentId && {
               submitter: {
@@ -312,14 +297,6 @@ export const dashboardRouter = createTRPCRouter({
       const spenderUsers = await ctx.db.user.findMany({
         where: {
           id: { in: spenderIds },
-          memberships: getTenantScope(ctx).isRoot
-            ? undefined
-            : {
-                some: {
-                  tenantId: getTenantScope(ctx).tenantId ?? undefined,
-                  status: "ACTIVE",
-                },
-              },
         },
         select: {
           id: true,
@@ -472,7 +449,7 @@ export const dashboardRouter = createTRPCRouter({
         dateFilter.createdAt = createdAt;
       }
 
-      const claimBaseWhere: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
+      const claimBaseWhere: Prisma.ClaimWhereInput = applyScope(ctx, {
         deletedAt: null,
         ...dateFilter,
       });
@@ -498,7 +475,7 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Total approved amount
         ctx.db.claim.aggregate({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.APPROVED,
             deletedAt: null,
             ...dateFilter,
@@ -509,7 +486,7 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Total paid amount
         ctx.db.claim.aggregate({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
             ...dateFilter,
@@ -530,7 +507,7 @@ export const dashboardRouter = createTRPCRouter({
         // Claims by department
         ctx.db.claim.groupBy({
           by: ["submitterId"],
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
             ...dateFilter,
@@ -541,7 +518,7 @@ export const dashboardRouter = createTRPCRouter({
         }),
         // Pending payments
         ctx.db.claim.findMany({
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.APPROVED,
             deletedAt: null,
           }),
@@ -573,7 +550,7 @@ export const dashboardRouter = createTRPCRouter({
         // Recent paid claims
         ctx.db.claim.findMany({
           take: 10,
-          where: withTenantWhere(ctx, {
+          where: applyScope(ctx, {
             status: ClaimStatus.PAID,
             deletedAt: null,
           }),
@@ -604,14 +581,6 @@ export const dashboardRouter = createTRPCRouter({
       const submitters = await ctx.db.user.findMany({
         where: {
           id: { in: submitterIds },
-          memberships: getTenantScope(ctx).isRoot
-            ? undefined
-            : {
-                some: {
-                  tenantId: getTenantScope(ctx).tenantId ?? undefined,
-                  status: "ACTIVE",
-                },
-              },
         },
         select: {
           id: true,
@@ -705,7 +674,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.TravelRequestWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.TravelRequestWhereInput = applyScope(ctx, {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,
@@ -796,7 +765,7 @@ export const dashboardRouter = createTRPCRouter({
     )
     .output(z.any())
     .query(async ({ ctx, input }) => {
-      const where: Prisma.ClaimWhereInput = withTenantWhere(ctx, {
+      const where: Prisma.ClaimWhereInput = applyScope(ctx, {
         deletedAt: null,
         createdAt: {
           gte: input.startDate,
@@ -891,3 +860,4 @@ export const dashboardRouter = createTRPCRouter({
       };
     }),
 });
+

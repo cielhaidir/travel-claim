@@ -3,7 +3,6 @@ BEGIN;
 -- 1. Create InventoryReceiptBatch table if not exists
 CREATE TABLE IF NOT EXISTS "InventoryReceiptBatch" (
   "id" TEXT NOT NULL,
-  "tenantId" TEXT,
   "inventoryItemId" TEXT NOT NULL,
   "warehouseId" TEXT NOT NULL,
   "bucketType" "InventoryBucketType" NOT NULL DEFAULT 'SALE_STOCK',
@@ -28,9 +27,6 @@ ALTER TABLE "InventoryItemUnit"
 ADD COLUMN IF NOT EXISTS "receiptBatchId" TEXT;
 
 -- 3. Indexes for InventoryReceiptBatch
-CREATE INDEX IF NOT EXISTS "InventoryReceiptBatch_tenantId_idx"
-  ON "InventoryReceiptBatch" ("tenantId");
-
 CREATE INDEX IF NOT EXISTS "InventoryReceiptBatch_inventoryItemId_idx"
   ON "InventoryReceiptBatch" ("inventoryItemId");
 
@@ -54,22 +50,6 @@ CREATE INDEX IF NOT EXISTS "InventoryItemUnit_receiptBatchId_idx"
   ON "InventoryItemUnit" ("receiptBatchId");
 
 -- 5. Foreign keys (only create if not already there)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'InventoryReceiptBatch_tenantId_fkey'
-  ) THEN
-    ALTER TABLE "InventoryReceiptBatch"
-    ADD CONSTRAINT "InventoryReceiptBatch_tenantId_fkey"
-    FOREIGN KEY ("tenantId")
-    REFERENCES "Tenant"("id")
-    ON DELETE SET NULL
-    ON UPDATE CASCADE;
-  END IF;
-END $$;
-
 DO $$
 BEGIN
   IF NOT EXISTS (

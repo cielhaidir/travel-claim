@@ -852,7 +852,7 @@ export default function InventoryPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Total Item" value={summary.totalItems.toString()} helper="Seluruh SKU inventory tenant aktif" />
+        <MetricCard label="Total Item" value={summary.totalItems.toString()} helper="Seluruh SKU inventory yang terdaftar" />
         <MetricCard label="Tracked Item" value={summary.trackedItems.toString()} helper="Item yang dihitung dalam stok" tone="info" />
         <MetricCard label="Gudang" value={summary.totalWarehouses.toString()} helper="Lokasi penyimpanan aktif" tone="success" />
         <MetricCard label="Low Stock" value={summary.lowStockCount.toString()} helper="Baris saldo yang sudah di bawah reorder point" tone="warning" />

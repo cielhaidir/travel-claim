@@ -10,13 +10,6 @@ type SessionUserLike = {
   role?: string | null;
   isRoot?: boolean | null;
   permissions?: PermissionMap | null;
-  memberships?:
-    | Array<{
-        role?: string | null;
-        status?: string | null;
-        isRootTenant?: boolean | null;
-      }>
-    | null;
 };
 
 export function getSessionUserRoles(user: SessionUserLike): string[] {
@@ -34,12 +27,7 @@ function hasRootSessionAccess(user: SessionUserLike): boolean {
   if (getSessionUserRoles(user).includes("ROOT")) {
     return true;
   }
-
-  return (user.memberships ?? []).some(
-    (membership) =>
-      membership.status === "ACTIVE" &&
-      (membership.isRootTenant === true || membership.role === "ROOT"),
-  );
+  return false;
 }
 
 export function userHasAnyRole(

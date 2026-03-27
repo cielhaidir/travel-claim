@@ -41,13 +41,11 @@ function toBusinessNumber(prefix: string, year: number, seq: number): string {
  */
 export async function generateRequestNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("TR", year)}-`;
   const last = await db.travelRequest.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       requestNumber: { startsWith: prefix },
     },
     orderBy: { requestNumber: "desc" },
@@ -73,13 +71,11 @@ export async function generateRequestNumber(
  */
 export async function generateClaimNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("CLM", year)}-`;
   const last = await db.claim.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       claimNumber: { startsWith: prefix },
     },
     orderBy: { claimNumber: "desc" },
@@ -115,13 +111,11 @@ export async function generateClaimNumber(
  */
 export async function generateApprovalNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("APR", year)}-`;
   const last = await db.approval.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       approvalNumber: { startsWith: prefix },
     },
     orderBy: { approvalNumber: "desc" },
@@ -137,13 +131,11 @@ export async function generateApprovalNumber(
 
 export async function generateBailoutNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("BLT", year)}-`;
   const last = await db.bailout.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       bailoutNumber: { startsWith: prefix },
     },
     orderBy: { bailoutNumber: "desc" },
@@ -159,13 +151,11 @@ export async function generateBailoutNumber(
 
 export async function generateJournalTransactionNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("JRN", year)}-`;
   const last = await db.journalTransaction.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       transactionNumber: { startsWith: prefix },
     },
     orderBy: { transactionNumber: "desc" },
@@ -181,13 +171,11 @@ export async function generateJournalTransactionNumber(
 
 export async function generateJournalEntryNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("JE", year)}-`;
   const last = await db.journalEntry.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       journalNumber: { startsWith: prefix },
     },
     orderBy: { journalNumber: "desc" },
@@ -203,13 +191,11 @@ export async function generateJournalEntryNumber(
 
 export async function generateFulfillmentRequestNumber(
   db: PrismaClient,
-  tenantId: string | null,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("FUL", year)}-`;
   const last = await db.crmFulfillmentRequest.findFirst({
     where: {
-      ...(tenantId ? { tenantId } : {}),
       requestNumber: { startsWith: prefix },
     },
     orderBy: { requestNumber: "desc" },
