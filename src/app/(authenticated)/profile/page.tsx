@@ -94,11 +94,28 @@ export default function ProfilePage() {
   const activeTenant = memberships.find(
     (membership) => membership.tenantId === session?.user?.activeTenantId,
   );
-  const scopedRoles = useMemo(() => {
+  const scopedRoleLabels = useMemo(() => {
+    const labels = new Set<string>();
+
+    if (session?.user?.activeRoleLabel) {
+      labels.add(session.user.activeRoleLabel);
+    }
+
     const roles = ((session?.user?.roles ?? []) as string[]).filter(Boolean);
-    if (roles.length > 0) return roles;
-    return session?.user?.role ? [session.user.role] : [];
-  }, [session?.user?.role, session?.user?.roles]);
+    for (const role of roles) {
+      labels.add(ROLE_LABELS[role] ?? role);
+    }
+
+    if (labels.size === 0 && session?.user?.role) {
+      labels.add(ROLE_LABELS[session.user.role] ?? session.user.role);
+    }
+
+    return [...labels];
+  }, [
+    session?.user?.activeRoleLabel,
+    session?.user?.role,
+    session?.user?.roles,
+  ]);
 
   const [profileForm, setProfileForm] = useState({
     name: "",
@@ -120,7 +137,7 @@ export default function ProfilePage() {
       name: profile.name ?? "",
       phoneNumber: profile.phoneNumber ?? "",
     });
-  }, [profile?.id, profile?.name, profile?.phoneNumber]);
+  }, [profile]);
 
   const updateProfileMutation = api.user.updateMe.useMutation({
     onSuccess: async () => {
@@ -263,12 +280,12 @@ export default function ProfilePage() {
                   {profile.email ?? "-"}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {scopedRoles.map((role) => (
+                  {scopedRoleLabels.map((roleLabel) => (
                     <span
-                      key={role}
+                      key={roleLabel}
                       className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700"
                     >
-                      {ROLE_LABELS[role] ?? role}
+                      {roleLabel}
                     </span>
                   ))}
                 </div>

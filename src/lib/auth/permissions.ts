@@ -137,6 +137,12 @@ export const PERMISSION_MODULES: Record<string, PermissionModuleMeta> = {
     color: "bg-emerald-50 text-emerald-700 border-emerald-200",
     actions: ["read", "approve", "reject", "revision"],
   },
+  crm: {
+    label: "CRM",
+    description: "Customer, lead, activity, and pipeline management.",
+    color: "bg-red-50 text-red-700 border-red-200",
+    actions: ["read", "create", "update", "delete"],
+  },
   accounting: {
     label: "Akuntansi & Keuangan",
     description: "Menu utama akuntansi, keuangan, jurnal, dan laporan.",
@@ -238,11 +244,16 @@ export function mergePermissionMaps(
     }
   }
 
-  return Object.fromEntries(
-    [...merged.entries()]
-      .map(([moduleKey, actionSet]) => [moduleKey, [...actionSet].sort()])
-      .filter(([, actions]) => (actions?.length ?? 0) > 0),
-  );
+  const normalized: PermissionMap = {};
+
+  for (const [moduleKey, actionSet] of merged.entries()) {
+    const actions = [...actionSet].sort();
+    if (actions.length > 0) {
+      normalized[moduleKey] = actions;
+    }
+  }
+
+  return normalized;
 }
 
 const EMPLOYEE_PERMISSIONS: PermissionMap = {
@@ -252,6 +263,10 @@ const EMPLOYEE_PERMISSIONS: PermissionMap = {
   claims: ["read", "create", "update", "delete", "submit"],
   notifications: ["read"],
   profile: ["read", "update"],
+};
+
+const CRM_FULL_PERMISSIONS: PermissionMap = {
+  crm: ["read", "create", "update", "delete"],
 };
 
 const SUPERVISOR_PERMISSIONS: PermissionMap = mergePermissionMaps(
@@ -266,6 +281,7 @@ const SUPERVISOR_PERMISSIONS: PermissionMap = mergePermissionMaps(
 const MANAGER_PERMISSIONS: PermissionMap = mergePermissionMaps(
   SUPERVISOR_PERMISSIONS,
   {
+    ...CRM_FULL_PERMISSIONS,
     projects: ["read", "create", "update"],
     reports: ["read", "export"],
   },
@@ -302,10 +318,12 @@ export const DEFAULT_ROLE_PERMISSION_PRESETS: Record<Role, PermissionMap> = {
   }),
   [ROLES.MANAGER]: MANAGER_PERMISSIONS,
   [ROLES.SALES_CHIEF]: mergePermissionMaps(SUPERVISOR_PERMISSIONS, {
+    ...CRM_FULL_PERMISSIONS,
     projects: ["read", "create", "update"],
   }),
   [ROLES.SUPERVISOR]: SUPERVISOR_PERMISSIONS,
   [ROLES.SALES_EMPLOYEE]: mergePermissionMaps(EMPLOYEE_PERMISSIONS, {
+    ...CRM_FULL_PERMISSIONS,
     projects: ["read"],
   }),
   [ROLES.EMPLOYEE]: EMPLOYEE_PERMISSIONS,
@@ -329,12 +347,34 @@ export function sanitizePermissionMap(input: unknown): PermissionMap {
       knownModule.actions.includes(action as PermissionAction),
     );
 
+    if (rawActions.length === 0) {
+      normalized[moduleKey] = [];
+      continue;
+    }
+
     if (validActions.length > 0) {
       normalized[moduleKey] = [...new Set(validActions)].sort();
     }
   }
 
   return normalized;
+}
+
+export function mergeMissingPermissionModules(
+  permissions: unknown,
+  defaults: unknown,
+): PermissionMap {
+  const normalizedPermissions = sanitizePermissionMap(permissions);
+  const normalizedDefaults = sanitizePermissionMap(defaults);
+  const merged: PermissionMap = { ...normalizedPermissions };
+
+  for (const [moduleKey, actions] of Object.entries(normalizedDefaults)) {
+    if (!(moduleKey in merged)) {
+      merged[moduleKey] = [...actions];
+    }
+  }
+
+  return merged;
 }
 
 export function normalizePermissionMap(input: unknown): PermissionMap {

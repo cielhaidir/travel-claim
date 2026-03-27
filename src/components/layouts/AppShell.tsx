@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { PanelLeftClose } from "lucide-react";
 import { SidebarNav } from "@/components/navigation/SidebarNav";
 import { TopHeader } from "@/components/navigation/TopHeader";
+import { ToastProvider } from "@/components/ui/Toast";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -71,31 +72,32 @@ export function AppShell({ children, session }: AppShellProps) {
             </button>
           </div>
 
-          {/* Navigation */}
-          <SidebarNav
-            session={session}
-            currentPath={pathname}
-            onNavigate={() => setSidebarOpen(false)}
-          />
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top header */}
-        <TopHeader
-          session={session}
-          onMenuClick={handleMenuClick}
-        />
-
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="px-4 py-6 lg:px-8">
-            {/* <Breadcrumbs currentPath={pathname} /> */}
-            <div>{children}</div>
+            {/* Navigation */}
+            <SidebarNav
+              session={session}
+              currentPath={pathname}
+              onNavigate={() => setSidebarOpen(false)}
+            />
           </div>
-        </main>
+        </aside>
+
+        {/* Main content */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Top header */}
+          <TopHeader
+            session={session}
+            onMenuClick={handleMenuClick}
+          />
+
+          {/* Page content */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="px-4 py-6 lg:px-8">
+              {/* <Breadcrumbs currentPath={pathname} /> */}
+              <div>{children}</div>
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 }

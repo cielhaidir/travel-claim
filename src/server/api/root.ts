@@ -16,6 +16,7 @@ import { journalTransactionRouter } from "@/server/api/routers/journalTransactio
 import { journalEntryRouter } from "@/server/api/routers/journalEntry";
 import { balanceAccountRouter } from "@/server/api/routers/balanceAccount";
 import { tenantRouter } from "@/server/api/routers/tenant";
+import { crmRouter } from "@/server/api/routers/crm";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 /**
@@ -42,6 +43,7 @@ export const appRouter = createTRPCRouter({
   journalEntry: journalEntryRouter,
   balanceAccount: balanceAccountRouter,
   tenant: tenantRouter,
+  crm: crmRouter,
 });
 
 // export type definition of API

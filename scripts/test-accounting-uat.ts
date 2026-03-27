@@ -3,12 +3,16 @@ import { createCaller } from "../src/server/api/root";
 import { resolveEffectivePermissions } from "../src/server/auth/permission-store";
 import { db } from "../src/server/db";
 import { Role, MembershipStatus, JournalSourceType, JournalStatus } from "../generated/prisma";
+import { ROLE_LABELS } from "../src/lib/constants/roles";
 
 type SessionMembership = {
   tenantId: string;
   tenantName: string;
   tenantSlug: string;
   role: Role;
+  customRoleId: string | null;
+  customRoleName: string | null;
+  roleLabel: string;
   status: "ACTIVE" | "INVITED" | "SUSPENDED";
   isDefault: boolean;
   isRootTenant: boolean;
@@ -19,20 +23,51 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 async function getMemberships(userId: string): Promise<SessionMembership[]> {
-  return db.$queryRaw<SessionMembership[]>`
+  const memberships = await db.$queryRaw<
+    Array<{
+      tenantId: string;
+      tenantName: string;
+      tenantSlug: string;
+      role: string;
+      customRoleId: string | null;
+      customRoleName: string | null;
+      status: string;
+      isDefault: boolean;
+      isRootTenant: boolean;
+    }>
+  >`
     SELECT
       tm."tenantId" as "tenantId",
       t."name" as "tenantName",
       t."slug" as "tenantSlug",
       tm."role"::text as "role",
+      tm."customRoleId" as "customRoleId",
+      cr."displayName" as "customRoleName",
       tm."status"::text as "status",
       tm."isDefault" as "isDefault",
       t."isRoot" as "isRootTenant"
     FROM "TenantMembership" tm
     INNER JOIN "Tenant" t ON t."id" = tm."tenantId"
+    LEFT JOIN "TenantCustomRole" cr ON cr."id" = tm."customRoleId"
     WHERE tm."userId" = ${userId}
     ORDER BY tm."createdAt" ASC
   `;
+
+  return memberships.map((membership) => ({
+    tenantId: membership.tenantId,
+    tenantName: membership.tenantName,
+    tenantSlug: membership.tenantSlug,
+    role: membership.role as Role,
+    customRoleId: membership.customRoleId,
+    customRoleName: membership.customRoleName,
+    roleLabel:
+      membership.customRoleName ??
+      ROLE_LABELS[membership.role as Role] ??
+      membership.role,
+    status: membership.status as SessionMembership["status"],
+    isDefault: membership.isDefault,
+    isRootTenant: membership.isRootTenant,
+  }));
 }
 
 async function makeCaller(input: {
@@ -46,10 +81,21 @@ async function makeCaller(input: {
 }) {
   const memberships = await getMemberships(input.userId);
   const isRoot = input.isRoot ?? input.role === Role.ROOT;
+  const activeMembership =
+    memberships.find(
+      (membership) =>
+        membership.tenantId === input.activeTenantId &&
+        membership.status === "ACTIVE",
+    ) ??
+    memberships.find((membership) => membership.isDefault) ??
+    memberships.find((membership) => membership.status === "ACTIVE") ??
+    null;
+  const scopedRole = activeMembership?.role ?? input.role;
   const permissions = await resolveEffectivePermissions(db, {
     tenantId: input.activeTenantId,
-    roles: [input.role],
+    roles: [scopedRole],
     isRoot,
+    customRoleId: activeMembership?.customRoleId ?? null,
   });
   return createCaller({
     db,
@@ -62,8 +108,10 @@ async function makeCaller(input: {
         employeeId: input.employeeId,
         departmentId: null,
         role: input.role,
-        roles: [input.role],
+        roles: [scopedRole],
         activeTenantId: input.activeTenantId,
+        activeCustomRoleId: activeMembership?.customRoleId ?? null,
+        activeRoleLabel: activeMembership?.roleLabel ?? null,
         permissions,
         isRoot,
         memberships,

@@ -1085,9 +1085,10 @@ export const travelRequestRouter = createTRPCRouter({
       // race where two concurrent requests read the same MAX before either inserts.
       const year = new Date().getFullYear();
       const lastApproval = await ctx.db.approval.findFirst({
-        where: withTenantWhere(ctx, {
+        where: {
+          tenantId: request.tenantId,
           approvalNumber: { startsWith: `APR-${year}-` },
-        }),
+        },
         orderBy: { approvalNumber: "desc" },
         select: { approvalNumber: true },
       });
@@ -1100,6 +1101,7 @@ export const travelRequestRouter = createTRPCRouter({
 
       const approvalsWithNumbers = deduped.map((entry, idx) => ({
         ...entry,
+        tenantId: request.tenantId,
         approvalNumber: `APR-${year}-${String(nextSeq + idx).padStart(5, "0")}`,
       }));
 

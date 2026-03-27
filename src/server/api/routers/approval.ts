@@ -136,15 +136,33 @@ function getTenantContext(ctx: unknown): {
   };
 }
 
-function applyTenantFilter<T extends Record<string, unknown>>(
+function applyTenantFilter(
   ctx: unknown,
-  where: T,
-): T {
+  where: Prisma.ApprovalWhereInput,
+): Prisma.ApprovalWhereInput {
   const { isRoot, tenantId } = getTenantContext(ctx);
-  if (!isRoot && tenantId) {
-    (where as Record<string, unknown>).tenantId = tenantId;
+  if (isRoot || !tenantId) {
+    return where;
   }
-  return where;
+
+  return {
+    AND: [
+      where,
+      {
+        OR: [
+          { tenantId },
+          {
+            tenantId: null,
+            OR: [
+              { travelRequest: { is: { tenantId } } },
+              { claim: { is: { tenantId } } },
+              { bailout: { is: { tenantId } } },
+            ],
+          },
+        ],
+      },
+    ],
+  };
 }
 
 function assertTenantAccess(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
@@ -195,20 +195,12 @@ export default function ProjectsPage() {
     (session?.user?.isRoot ?? false) ||
     hasPermissionMap(session?.user?.permissions, "projects", "delete");
 
-  if (status === "loading") {
-    return (
-      <div className="content-section p-12 text-center text-gray-500">
-        Loading...
-      </div>
-    );
-  }
-
-  if (session && !canReadProjects) {
-    router.replace("/");
-    return null;
-  }
-
   const utils = api.useUtils();
+  useEffect(() => {
+    if (session && !canReadProjects) {
+      void router.replace("/");
+    }
+  }, [canReadProjects, router, session]);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
   const projectQuery = api.project.getAll.useQuery(
@@ -218,7 +210,7 @@ export default function ProjectsPage() {
       limit: 50,
     },
     {
-      enabled: canReadProjects,
+      enabled: status !== "loading" && canReadProjects,
     },
   );
   const isLoading: boolean = projectQuery.isLoading;
@@ -274,6 +266,18 @@ export default function ProjectsPage() {
     if (!deletingProject) return;
     deleteMutation.mutate({ id: deletingProject.id });
   };
+
+  if (status === "loading") {
+    return (
+      <div className="content-section p-12 text-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
+
+  if (session && !canReadProjects) {
+    return null;
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (

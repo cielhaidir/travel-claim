@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
 import { Button } from "@/components/ui/Button";
+import { hasPermissionMap } from "@/lib/auth/permissions";
 import type { EntertainmentType, NonEntertainmentCategory } from "../../../../generated/prisma";
 
 export type ClaimFormType = "ENTERTAINMENT" | "NON_ENTERTAINMENT";
@@ -95,6 +97,10 @@ export function ClaimForm({
     initialData?.claimType ?? initialType
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const { data: session } = useSession();
+  const canReadCoa =
+    (session?.user.isRoot ?? false) ||
+    hasPermissionMap(session?.user.permissions, "chart-of-accounts", "read");
 
   // Shared fields
   const [travelRequestId, setTravelRequestId] = useState(
@@ -107,7 +113,13 @@ export function ClaimForm({
 
   // Chart of Accounts
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-  const { data: rawCoas } = api.chartOfAccount.getAll.useQuery({ isActive: true });
+  const { data: rawCoas } = api.chartOfAccount.getAll.useQuery(
+    { isActive: true },
+    {
+      enabled: !!session?.user && canReadCoa,
+      refetchOnWindowFocus: false,
+    },
+  );
   const coas = (rawCoas as { accounts: Array<{ id: string; code: string; name: string }> } | undefined)?.accounts ?? [];
 
   // Entertainment fields
@@ -244,22 +256,23 @@ export function ClaimForm({
         {errors.travelRequestId && <p className={ERROR_CLS}>{errors.travelRequestId}</p>}
       </div>
 
-      {/* Chart of Account */}
-      <div>
-        <label className={LABEL_CLS}>Chart of Account (COA)</label>
-        <select
-          value={coaId}
-          onChange={(e) => setCoaId(e.target.value)}
-          className={FIELD_CLS}
-        >
-          <option value="">— Pilih COA (opsional) —</option>
-          {coas.map((coa) => (
-            <option key={coa.id} value={coa.id}>
-              [{coa.code}] {coa.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {canReadCoa ? (
+        <div>
+          <label className={LABEL_CLS}>Chart of Account (COA)</label>
+          <select
+            value={coaId}
+            onChange={(e) => setCoaId(e.target.value)}
+            className={FIELD_CLS}
+          >
+            <option value="">— Pilih COA (opsional) —</option>
+            {coas.map((coa) => (
+              <option key={coa.id} value={coa.id}>
+                [{coa.code}] {coa.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       {/* ── Entertainment specific fields ── */}
       {claimType === "ENTERTAINMENT" && (

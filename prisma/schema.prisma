@@ -185,148 +185,296 @@ enum MembershipStatus {
   SUSPENDED
 }
 
+enum CrmLeadStage {
+  NEW
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CrmLeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CrmGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum CrmIndustry {
+  TECHNOLOGY
+  FINANCE
+  HEALTHCARE
+  EDUCATION
+  MANUFACTURING
+  RETAIL
+  LOGISTICS
+  HOSPITALITY
+  GOVERNMENT
+  OTHER
+}
+
+enum CrmEmployeeRange {
+  ONE_TO_TEN
+  ELEVEN_TO_FIFTY
+  FIFTY_ONE_TO_TWO_HUNDRED
+  TWO_HUNDRED_ONE_TO_FIVE_HUNDRED
+  FIVE_HUNDRED_ONE_TO_ONE_THOUSAND
+  OVER_ONE_THOUSAND
+}
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  NURTURE
+  QUALIFIED
+  CONVERTED
+  UNQUALIFIED
+  JUNK
+}
+
+enum CrmDealStage {
+  DISCOVERY
+  PROPOSAL
+  NEGOTIATION
+  VERBAL_WON
+  WON
+  LOST
+  ON_HOLD
+}
+
+enum CrmDealStatus {
+  QUALIFICATION
+  DEMO_MAKING
+  PROPOSAL_QUOTATION
+  NEGOTIATION
+  READY_TO_CLOSE
+  WON
+  LOST
+}
+
+enum CrmLeadSource {
+  REFERRAL
+  WEBSITE
+  EVENT
+  OUTBOUND
+  PARTNER
+}
+
+enum CrmCustomerSegment {
+  ENTERPRISE
+  SMB
+  GOVERNMENT
+  EDUCATION
+}
+
+enum CrmCustomerStatus {
+  ACTIVE
+  INACTIVE
+  VIP
+}
+
+enum CrmActivityType {
+  CALL
+  MEETING
+  EMAIL
+  FOLLOW_UP
+  CHAT
+  STAGE_CHANGE
+  NOTE
+  TASK
+  ATTACHMENT
+  SYSTEM
+}
+
+enum CrmConversationStatus {
+  OPEN
+  WAITING_REPLY
+  CLOSED
+}
+
+enum CrmMessageStatus {
+  DRAFT
+  SENT
+  RECEIVED
+  NOTE
+}
+
+enum CrmTaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CrmTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 // ============================================================================
 // AUTHENTICATION MODELS (NextAuth.js)
 // ============================================================================
 
 model Tenant {
-  id        String    @id @default(cuid())
-  slug      String    @unique @db.VarChar(100)
-  name      String    @db.VarChar(200)
-  isRoot    Boolean   @default(false)
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id        String    @id @default(cuid()) // -- ID unik tenant ini.
+  slug      String    @unique @db.VarChar(100) // -- Slug tenant ini.
+  name      String    @db.VarChar(200) // -- Nama tenant ini.
+  isRoot    Boolean   @default(false) // -- Menandakan apakah tenant ini merupakan tenant root.
+  deletedAt DateTime? // -- Waktu penghapusan lunak tenant ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan tenant ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan tenant ini.
 
-  memberships         TenantMembership[]
-  rolePermissions     RolePermission[]
-  userRoles           UserRole[]
-  departments         Department[]
-  projects            Project[]
-  travelRequests      TravelRequest[]
-  travelParticipants  TravelParticipant[]
-  bailouts            Bailout[]
-  approvals           Approval[]
-  claims              Claim[]
-  attachments         Attachment[]
-  notifications       Notification[]
-  auditLogs           AuditLog[]
-  chartOfAccounts     ChartOfAccount[]
-  balanceAccounts     BalanceAccount[]
-  journalTransactions JournalTransaction[]
-  journalEntries      JournalEntry[]
+  memberships         TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan tenant ini.
+  rolePermissions     RolePermission[] // -- Daftar izin peran yang terkait dengan tenant ini.
+  userRoles           UserRole[] // -- Daftar peran pengguna yang terkait dengan tenant ini.
+  departments         Department[] // -- Daftar departemen yang terkait dengan tenant ini.
+  projects            Project[] // -- Daftar proyek yang terkait dengan tenant ini.
+  travelRequests      TravelRequest[] // -- Daftar permintaan perjalanan dinas yang terkait dengan tenant ini.
+  travelParticipants  TravelParticipant[] // -- Daftar peserta perjalanan yang terkait dengan tenant ini.
+  bailouts            Bailout[] // -- Daftar dana talangan yang terkait dengan tenant ini.
+  approvals           Approval[] // -- Daftar persetujuan yang terkait dengan tenant ini.
+  claims              Claim[] // -- Daftar klaim yang terkait dengan tenant ini.
+  attachments         Attachment[] // -- Daftar lampiran yang terkait dengan tenant ini.
+  notifications       Notification[] // -- Daftar notifikasi yang terkait dengan tenant ini.
+  auditLogs           AuditLog[] // -- Daftar log audit yang terkait dengan tenant ini.
+  chartOfAccounts     ChartOfAccount[] // -- Daftar akun COA yang terkait dengan tenant ini.
+  balanceAccounts     BalanceAccount[] // -- Daftar akun saldo yang terkait dengan tenant ini.
+  journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan tenant ini.
+  journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan tenant ini.
+  crmCustomers        CrmCustomer[] // -- Daftar pelanggan CRM yang terkait dengan tenant ini.
+  crmContacts         CrmContact[] // -- Daftar kontak CRM yang terkait dengan tenant ini.
+  crmLeads            CrmLead[] // -- Daftar prospek CRM yang terkait dengan tenant ini.
+  crmDeals            CrmDeal[] // -- Daftar deal CRM yang terkait dengan tenant ini.
+  crmTasks            CrmTask[]
+  crmNotes            CrmNote[]
+  crmRecordAttachments CrmRecordAttachment[]
+  crmActivities       CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan tenant ini.
+  crmConversations    CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan tenant ini.
+  crmMessages         CrmMessage[] // -- Daftar pesan CRM yang terkait dengan tenant ini.
+  customRoles         TenantCustomRole[] // -- Daftar peran kustom tenant yang terkait dengan tenant ini.
 
   @@index([isRoot])
 }
 
 model TenantMembership {
-  id              String           @id @default(cuid())
-  userId          String
-  tenantId        String
-  role            Role             @default(EMPLOYEE)
-  status          MembershipStatus @default(ACTIVE)
-  isDefault       Boolean          @default(false)
-  invitedAt       DateTime?
-  activatedAt     DateTime?
-  suspendedAt     DateTime?
-  suspendedReason String?          @db.Text
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id              String           @id @default(cuid()) // -- ID unik keanggotaan tenant ini.
+  userId          String // -- ID pengguna yang terkait dengan keanggotaan tenant ini.
+  tenantId        String // -- ID tenant yang terkait dengan keanggotaan tenant ini.
+  role            Role             @default(EMPLOYEE) // -- Peran keanggotaan tenant ini.
+  customRoleId    String? // -- ID peran kustom yang terkait dengan keanggotaan tenant ini.
+  status          MembershipStatus @default(ACTIVE) // -- Status keanggotaan tenant ini.
+  isDefault       Boolean          @default(false) // -- Menandakan apakah keanggotaan tenant ini menjadi pilihan default.
+  invitedAt       DateTime? // -- Waktu pengiriman undangan keanggotaan tenant ini.
+  activatedAt     DateTime? // -- Waktu aktivasi keanggotaan tenant ini.
+  suspendedAt     DateTime? // -- Waktu penangguhan keanggotaan tenant ini.
+  suspendedReason String?          @db.Text // -- Alasan penangguhan keanggotaan tenant ini.
+  createdAt       DateTime         @default(now()) // -- Waktu pembuatan keanggotaan tenant ini.
+  updatedAt       DateTime         @updatedAt // -- Waktu terakhir pembaruan keanggotaan tenant ini.
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk keanggotaan tenant ini.
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk keanggotaan tenant ini.
+  customRole TenantCustomRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull) // -- Relasi ke peran kustom tenant untuk keanggotaan tenant ini.
 
   @@unique([userId, tenantId])
   @@index([tenantId, role])
+  @@index([customRoleId])
+  @@index([tenantId, customRoleId])
   @@index([userId, isDefault])
   @@index([status])
 }
 
 // Necessary for Next auth
 model Account {
-  id                       String  @id @default(cuid())
-  userId                   String
-  type                     String
-  provider                 String
-  providerAccountId        String
-  refresh_token            String? // @db.Text
-  access_token             String? // @db.Text
-  expires_at               Int?
-  token_type               String?
-  scope                    String?
-  id_token                 String? // @db.Text
-  session_state            String?
-  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refresh_token_expires_in Int?
+  id                       String  @id @default(cuid()) // -- ID unik akun ini.
+  userId                   String // -- ID pengguna yang terkait dengan akun ini.
+  type                     String // -- Tipe akun ini.
+  provider                 String // -- Penyedia akun ini.
+  providerAccountId        String // -- ID akun penyedia yang terkait dengan akun ini.
+  refresh_token            String? @db.Text // -- Token refresh akun ini.
+  access_token             String? @db.Text // -- Token akses akun ini.
+  expires_at               Int? // -- Waktu kedaluwarsa token akun ini.
+  token_type               String? // -- Jenis token akun ini.
+  scope                    String? // -- Cakupan akses akun ini.
+  id_token                 String? @db.Text // -- ID token akun ini.
+  session_state            String? // -- Status sesi akun ini.
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk akun ini.
+  refresh_token_expires_in Int? // -- Durasi kedaluwarsa refresh token akun ini.
 
   @@unique([provider, providerAccountId])
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid()) // -- ID unik sesi ini.
+  sessionToken String   @unique // -- Token sesi ini.
+  userId       String // -- ID pengguna yang terkait dengan sesi ini.
+  expires      DateTime // -- Waktu kedaluwarsa sesi ini.
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk sesi ini.
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
+  id            String    @id @default(cuid()) // -- ID unik pengguna ini.
+  name          String? // -- Nama pengguna ini.
+  email         String?   @unique // -- Email pengguna ini.
+  emailVerified DateTime? // -- Waktu verifikasi email pengguna ini.
+  image         String? // -- Gambar pengguna ini.
+  accounts      Account[] // -- Daftar akun yang terkait dengan pengguna ini.
+  sessions      Session[] // -- Daftar sesi yang terkait dengan pengguna ini.
 
   // Extended user fields
-  employeeId   String?     @unique @db.VarChar(50)
-  role         Role        @default(EMPLOYEE)
-  userRoles    UserRole[]
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
+  employeeId   String?     @unique @db.VarChar(50) // -- ID pegawai yang terkait dengan pengguna ini.
+  role         Role        @default(EMPLOYEE) // -- Peran pengguna ini.
+  userRoles    UserRole[] // -- Daftar peran pengguna yang terkait dengan pengguna ini.
+  departmentId String? // -- ID departemen yang terkait dengan pengguna ini.
+  department   Department? @relation(fields: [departmentId], references: [id]) // -- Relasi ke departemen untuk pengguna ini.
 
   // Org hierarchy: every user points to their direct supervisor.
   // For a regular employee their supervisor is their dept chief.
   // For a dept chief their supervisor is the director above them.
-  supervisorId  String?
-  supervisor    User?   @relation("Supervision", fields: [supervisorId], references: [id])
-  directReports User[]  @relation("Supervision")
+  supervisorId  String? // -- ID atasan yang terkait dengan pengguna ini.
+  supervisor    User?   @relation("Supervision", fields: [supervisorId], references: [id]) // -- Relasi ke pengguna untuk pengguna ini.
+  directReports User[]  @relation("Supervision") // -- Daftar pengguna yang terkait dengan pengguna ini.
 
   // Phone for WhatsApp
-  phoneNumber String? @db.VarChar(20)
+  phoneNumber String? @db.VarChar(20) // -- Nomor telepon pengguna ini.
 
-  password String?
+  password String? // -- Kata sandi pengguna ini.
 
   // Soft delete
-  deletedAt DateTime?
+  deletedAt DateTime? // -- Waktu penghapusan lunak pengguna ini.
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) // -- Waktu pembuatan pengguna ini.
+  updatedAt DateTime @updatedAt // -- Waktu terakhir pembaruan pengguna ini.
 
   // Relations
-  travelRequests       TravelRequest[]     @relation("TravelRequester")
-  travelParticipations TravelParticipant[]
-  claims               Claim[]
-  bailoutsRequested    Bailout[]           @relation("BailoutRequester")
-  approvals            Approval[]
-  notifications        Notification[]
-  auditLogs            AuditLog[]
-  salesProjects        Project[]           @relation("SalesLead")
-  financeBailouts      Bailout[]           @relation("FinanceBailouts")
-  financeClaims        Claim[]             @relation("FinanceClaims")
+  travelRequests       TravelRequest[]     @relation("TravelRequester") // -- Daftar permintaan perjalanan dinas yang terkait dengan pengguna ini.
+  travelParticipations TravelParticipant[] // -- Daftar peserta perjalanan yang terkait dengan pengguna ini.
+  claims               Claim[] // -- Daftar klaim yang terkait dengan pengguna ini.
+  bailoutsRequested    Bailout[]           @relation("BailoutRequester") // -- Daftar dana talangan yang terkait dengan pengguna ini.
+  approvals            Approval[] // -- Daftar persetujuan yang terkait dengan pengguna ini.
+  notifications        Notification[] // -- Daftar notifikasi yang terkait dengan pengguna ini.
+  auditLogs            AuditLog[] // -- Daftar log audit yang terkait dengan pengguna ini.
+  salesProjects        Project[]           @relation("SalesLead") // -- Daftar proyek yang terkait dengan pengguna ini.
+  financeBailouts      Bailout[]           @relation("FinanceBailouts") // -- Daftar dana talangan yang terkait dengan pengguna ini.
+  financeClaims        Claim[]             @relation("FinanceClaims") // -- Daftar klaim yang terkait dengan pengguna ini.
 
   // Departments this user leads as chief
-  ledDepartments Department[] @relation("DepartmentChief")
+  ledDepartments Department[] @relation("DepartmentChief") // -- Daftar departemen yang terkait dengan pengguna ini.
 
   // Chart of Accounts relations
-  coaCreated ChartOfAccount[] @relation("COACreatedBy")
-  coaUpdated ChartOfAccount[] @relation("COAUpdatedBy")
+  coaCreated ChartOfAccount[] @relation("COACreatedBy") // -- Daftar akun COA yang terkait dengan pengguna ini.
+  coaUpdated ChartOfAccount[] @relation("COAUpdatedBy") // -- Daftar akun COA yang terkait dengan pengguna ini.
 
-  memberships TenantMembership[]
+  memberships TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan pengguna ini.
 
-  journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy")
-  journalEntriesPosted  JournalEntry[] @relation("JournalEntryPostedBy")
+  journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
+  journalEntriesPosted  JournalEntry[] @relation("JournalEntryPostedBy") // -- Daftar entri jurnal yang terkait dengan pengguna ini.
 
   @@index([employeeId])
   @@index([email])
@@ -336,14 +484,14 @@ model User {
 }
 
 model UserRole {
-  tenantId  String?
-  userId    String
-  role      Role
-  createdAt DateTime @default(now())
-  createdBy String?
+  tenantId  String? // -- ID tenant yang terkait dengan peran pengguna ini.
+  userId    String // -- ID pengguna yang terkait dengan peran pengguna ini.
+  role      Role // -- Peran pengguna ini.
+  createdAt DateTime @default(now()) // -- Waktu pembuatan peran pengguna ini.
+  createdBy String? // -- ID pengguna pembuat peran pengguna ini.
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade) // -- Relasi ke pengguna untuk peran pengguna ini.
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk peran pengguna ini.
 
   @@id([userId, role])
   @@index([role])
@@ -351,26 +499,49 @@ model UserRole {
 }
 
 model RolePermission {
-  id          String   @id @default(cuid())
-  tenantId    String
-  role        Role
-  displayName String?  @db.VarChar(100)
-  isArchived  Boolean  @default(false)
-  permissions Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String   @id @default(cuid()) // -- ID unik izin peran ini.
+  tenantId    String // -- ID tenant yang terkait dengan izin peran ini.
+  role        Role // -- Peran yang diatur dalam izin peran ini.
+  displayName String?  @db.VarChar(100) // -- Nama tampilan izin peran ini.
+  isArchived  Boolean  @default(false) // -- Menandakan apakah izin peran ini diarsipkan.
+  permissions Json // -- Daftar izin untuk izin peran ini.
+  createdAt   DateTime @default(now()) // -- Waktu pembuatan izin peran ini.
+  updatedAt   DateTime @updatedAt // -- Waktu terakhir pembaruan izin peran ini.
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk izin peran ini.
 
   @@unique([tenantId, role])
   @@index([role])
   @@index([tenantId])
 }
 
+model TenantCustomRole {
+  id          String   @id @default(cuid()) // -- ID unik peran kustom tenant ini.
+  tenantId    String // -- ID tenant yang terkait dengan peran kustom tenant ini.
+  baseRole    Role? // -- Peran dasar untuk peran kustom tenant ini.
+  isSystem    Boolean  @default(false) // -- Menandakan apakah peran kustom tenant ini dikelola oleh sistem.
+  slug        String   @db.VarChar(120) // -- Slug peran kustom tenant ini.
+  displayName String   @db.VarChar(100) // -- Nama tampilan peran kustom tenant ini.
+  isArchived  Boolean  @default(false) // -- Menandakan apakah peran kustom tenant ini diarsipkan.
+  permissions Json // -- Daftar izin peran kustom tenant ini.
+  defaultPermissions Json // -- Daftar izin bawaan peran kustom tenant ini.
+  createdAt   DateTime @default(now()) // -- Waktu pembuatan peran kustom tenant ini.
+  updatedAt   DateTime @updatedAt // -- Waktu terakhir pembaruan peran kustom tenant ini.
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade) // -- Relasi ke tenant untuk peran kustom tenant ini.
+  memberships  TenantMembership[] // -- Daftar keanggotaan tenant yang terkait dengan peran kustom tenant ini.
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, isArchived])
+  @@index([baseRole])
+  @@index([tenantId, isSystem])
+  @@index([tenantId])
+}
+
 model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
+  identifier String // -- Pengenal token verifikasi ini.
+  token      String   @unique // -- Token verifikasi ini.
+  expires    DateTime // -- Waktu kedaluwarsa token verifikasi ini.
 
   @@unique([identifier, token])
 }
@@ -380,29 +551,29 @@ model VerificationToken {
 // ============================================================================
 
 model Department {
-  id          String  @id @default(cuid())
-  tenantId    String?
-  name        String  @db.VarChar(100)
-  code        String  @db.VarChar(20)
-  description String? @db.Text
+  id          String  @id @default(cuid()) // -- ID unik departemen ini.
+  tenantId    String? // -- ID tenant yang terkait dengan departemen ini.
+  name        String  @db.VarChar(100) // -- Nama departemen ini.
+  code        String  @db.VarChar(20) // -- Kode departemen ini.
+  description String? @db.Text // -- Deskripsi departemen ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk departemen ini.
 
   // Department hierarchy
-  parentId String?
-  parent   Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
-  children Department[] @relation("DepartmentHierarchy")
+  parentId String? // -- ID induk yang terkait dengan departemen ini.
+  parent   Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id]) // -- Relasi ke departemen untuk departemen ini.
+  children Department[] @relation("DepartmentHierarchy") // -- Daftar departemen yang terkait dengan departemen ini.
 
   // The single chief / head of this department.
   // This user's own supervisorId points to the director above them.
-  chiefId String?
-  chief   User?   @relation("DepartmentChief", fields: [chiefId], references: [id])
+  chiefId String? // -- ID kepala departemen yang terkait dengan departemen ini.
+  chief   User?   @relation("DepartmentChief", fields: [chiefId], references: [id]) // -- Relasi ke pengguna untuk departemen ini.
 
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // -- Waktu penghapusan lunak departemen ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan departemen ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan departemen ini.
 
-  users User[]
+  users User[] // -- Daftar pengguna yang terkait dengan departemen ini.
 
   @@unique([tenantId, code])
   @@index([code])
@@ -417,39 +588,39 @@ model Department {
 // ============================================================================
 
 model ChartOfAccount {
-  id          String  @id @default(cuid())
-  tenantId    String?
-  code        String  @db.VarChar(20)
-  name        String  @db.VarChar(100)
-  accountType COAType
-  category    String  @db.VarChar(50)
-  subcategory String? @db.VarChar(50)
+  id          String  @id @default(cuid()) // -- ID unik akun COA ini.
+  tenantId    String? // -- ID tenant yang terkait dengan akun COA ini.
+  code        String  @db.VarChar(20) // -- Kode akun COA ini.
+  name        String  @db.VarChar(100) // -- Nama akun COA ini.
+  accountType COAType // -- Akun tipe akun COA ini.
+  category    String  @db.VarChar(50) // -- Kategori akun COA ini.
+  subcategory String? @db.VarChar(50) // -- Subkategori akun COA ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk akun COA ini.
 
   // Self-referential hierarchy
-  parentId String?
-  parent   ChartOfAccount?  @relation("COAParent", fields: [parentId], references: [id])
-  children ChartOfAccount[] @relation("COAParent")
+  parentId String? // -- ID induk yang terkait dengan akun COA ini.
+  parent   ChartOfAccount?  @relation("COAParent", fields: [parentId], references: [id]) // -- Relasi ke akun COA untuk akun COA ini.
+  children ChartOfAccount[] @relation("COAParent") // -- Daftar akun COA yang terkait dengan akun COA ini.
 
-  isActive    Boolean @default(true)
-  description String? @db.Text
+  isActive    Boolean @default(true) // -- Menandakan apakah akun COA ini aktif.
+  description String? @db.Text // -- Deskripsi akun COA ini.
 
   // Audit fields
-  createdById String
-  createdBy   User   @relation("COACreatedBy", fields: [createdById], references: [id])
-  updatedById String
-  updatedBy   User   @relation("COAUpdatedBy", fields: [updatedById], references: [id])
+  createdById String // -- ID pengguna pembuat yang terkait dengan akun COA ini.
+  createdBy   User   @relation("COACreatedBy", fields: [createdById], references: [id]) // -- Relasi ke pengguna untuk akun COA ini.
+  updatedById String // -- ID pengguna terakhir yang memperbarui yang terkait dengan akun COA ini.
+  updatedBy   User   @relation("COAUpdatedBy", fields: [updatedById], references: [id]) // -- Relasi ke pengguna untuk akun COA ini.
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) // -- Waktu pembuatan akun COA ini.
+  updatedAt DateTime @updatedAt // -- Waktu terakhir pembaruan akun COA ini.
 
   // Relations
-  claims                Claim[]
-  auditLogs             AuditLog[]           @relation("COAAuditLogs")
-  journalTransactions   JournalTransaction[]
-  journalEntryLines     JournalEntryLine[]
-  defaultForBalanceAccounts BalanceAccount[] @relation("BalanceAccountDefaultCOA")
+  claims                    Claim[] // -- Daftar klaim yang terkait dengan akun COA ini.
+  auditLogs                 AuditLog[]           @relation("COAAuditLogs") // -- Daftar log audit yang terkait dengan akun COA ini.
+  journalTransactions       JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan akun COA ini.
+  journalEntryLines         JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan akun COA ini.
+  defaultForBalanceAccounts BalanceAccount[]     @relation("BalanceAccountDefaultCOA") // -- Daftar akun saldo yang terkait dengan akun COA ini.
 
   @@unique([tenantId, code])
   @@index([code])
@@ -465,21 +636,21 @@ model ChartOfAccount {
 // ============================================================================
 
 model Project {
-  id          String    @id @default(cuid())
-  tenantId    String?
-  code        String    @db.VarChar(30)
-  name        String    @db.VarChar(200)
-  description String?   @db.Text
-  clientName  String?   @db.VarChar(200)
-  isActive    Boolean   @default(true)
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  salesId     String?   @db.VarChar(50) // e.g. employeeId of the sales lead
-  salesLead   User?     @relation("SalesLead", fields: [salesId], references: [employeeId])
-  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  id          String    @id @default(cuid()) // -- ID unik proyek ini.
+  tenantId    String? // -- ID tenant yang terkait dengan proyek ini.
+  code        String    @db.VarChar(30) // -- Kode proyek ini.
+  name        String    @db.VarChar(200) // -- Nama proyek ini.
+  description String?   @db.Text // -- Deskripsi proyek ini.
+  clientName  String?   @db.VarChar(200) // -- Nama klien proyek ini.
+  isActive    Boolean   @default(true) // -- Menandakan apakah proyek ini aktif.
+  deletedAt   DateTime? // -- Waktu penghapusan lunak proyek ini.
+  createdAt   DateTime  @default(now()) // -- Waktu pembuatan proyek ini.
+  updatedAt   DateTime  @updatedAt // -- Waktu terakhir pembaruan proyek ini.
+  salesId     String?   @db.VarChar(50) // -- ID pimpinan sales yang terkait dengan proyek ini.
+  salesLead   User?     @relation("SalesLead", fields: [salesId], references: [employeeId]) // -- Relasi ke pengguna untuk proyek ini.
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk proyek ini.
 
-  travelRequests TravelRequest[]
+  travelRequests TravelRequest[] // -- Daftar permintaan perjalanan dinas yang terkait dengan proyek ini.
 
   @@unique([tenantId, code])
   @@index([code])
@@ -489,51 +660,386 @@ model Project {
 }
 
 // ============================================================================
+// CRM
+// ============================================================================
+
+model CrmCustomer {
+  id            String             @id @default(cuid()) // -- ID unik organisasi CRM ini.
+  tenantId      String?
+  name          String?            @db.VarChar(150)
+  company       String             @db.VarChar(200)
+  email         String?            @db.VarChar(200)
+  phone         String?            @db.VarChar(30)
+  segment       CrmCustomerSegment @default(SMB)
+  city          String?            @db.VarChar(100)
+  ownerName     String?            @db.VarChar(150)
+  status        CrmCustomerStatus  @default(ACTIVE)
+  totalValue    Decimal            @default(0) @db.Decimal(15, 2)
+  website       String?            @db.VarChar(255)
+  annualRevenue Decimal?           @db.Decimal(15, 2)
+  employeeCount CrmEmployeeRange?
+  industry      CrmIndustry?
+  notes         String?            @db.Text
+  lastContactAt DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  contacts      CrmContact[]
+  leads         CrmLead[]
+  deals         CrmDeal[]
+  activities    CrmActivity[]
+  conversations CrmConversation[]
+
+  @@index([tenantId])
+  @@index([tenantId, company])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerName])
+  @@index([deletedAt])
+}
+
+model CrmContact {
+  id          String     @id @default(cuid())
+  tenantId    String?
+  customerId  String
+  name        String     @db.VarChar(150)
+  title       String?    @db.VarChar(150)
+  email       String?    @db.VarChar(200)
+  phone       String?    @db.VarChar(30)
+  department  String?    @db.VarChar(100)
+  firstName   String?    @db.VarChar(100)
+  lastName    String?    @db.VarChar(100)
+  gender      CrmGender?
+  designation String?    @db.VarChar(150)
+  address     String?    @db.Text
+  isPrimary   Boolean    @default(false)
+  isActive    Boolean    @default(true)
+  notes       String?    @db.Text
+  deletedAt   DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tenant   Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer CrmCustomer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deals    CrmDeal[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, isPrimary])
+  @@index([deletedAt])
+}
+
+model CrmLead {
+  id                String          @id @default(cuid()) // -- ID unik prospek CRM ini.
+  tenantId          String? // -- ID tenant yang terkait dengan prospek CRM ini.
+  customerId        String? // -- ID pelanggan yang terkait dengan prospek CRM ini.
+  name              String          @db.VarChar(150) // -- Nama prospek CRM ini.
+  company           String          @db.VarChar(200) // -- Nama perusahaan prospek CRM ini.
+  email             String          @db.VarChar(200) // -- Email prospek CRM ini.
+  phone             String?         @db.VarChar(30) // -- Nomor telepon prospek CRM ini.
+  firstName         String?         @db.VarChar(100)
+  lastName          String?         @db.VarChar(100)
+  mobileNo          String?         @db.VarChar(30)
+  gender            CrmGender?
+  status            CrmLeadStatus   @default(NEW)
+  website           String?         @db.VarChar(255)
+  employeeCount     CrmEmployeeRange?
+  annualRevenue     Decimal?        @db.Decimal(15, 2)
+  industry          CrmIndustry?
+  ownerId           String?
+  stage             CrmLeadStage    @default(NEW) // -- Tahap prospek CRM ini.
+  value             Decimal         @default(0) @db.Decimal(15, 2) // -- Nilai prospek CRM ini.
+  probability       Int             @default(0) // -- Probabilitas prospek CRM ini.
+  source            CrmLeadSource   @default(REFERRAL) // -- Sumber prospek CRM ini.
+  priority          CrmLeadPriority @default(MEDIUM) // -- Prioritas prospek CRM ini.
+  ownerName         String          @db.VarChar(150) // -- Nama pemilik prospek CRM ini.
+  expectedCloseDate DateTime? // -- Tanggal perkiraan penutupan prospek CRM ini.
+  lastActivityAt    DateTime? // -- Waktu aktivitas terakhir prospek CRM ini.
+  convertedToDealAt DateTime? // -- Waktu konversi prospek CRM ini menjadi deal.
+  notes             String?         @db.Text // -- Catatan prospek CRM ini.
+  deletedAt         DateTime? // -- Waktu penghapusan lunak prospek CRM ini.
+  createdAt         DateTime        @default(now()) // -- Waktu pembuatan prospek CRM ini.
+  updatedAt         DateTime        @updatedAt // -- Waktu terakhir pembaruan prospek CRM ini.
+
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk prospek CRM ini.
+  customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
+  deals         CrmDeal[] // -- Daftar deal CRM yang berasal dari prospek CRM ini.
+  tasks         CrmTask[]
+  notesList     CrmNote[]
+  attachments   CrmRecordAttachment[]
+  activities    CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
+  conversations CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan prospek CRM ini.
+
+  @@index([tenantId])
+  @@index([tenantId, stage])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerName])
+  @@index([customerId])
+  @@index([deletedAt])
+}
+
+model CrmDeal {
+  id                String          @id @default(cuid()) // -- ID unik deal CRM ini.
+  tenantId          String?
+  customerId        String?
+  contactId         String?
+  leadId            String?         @unique
+  title             String          @db.VarChar(200)
+  company           String          @db.VarChar(200)
+  ownerName         String          @db.VarChar(150)
+  ownerId           String?
+  status            CrmDealStatus   @default(QUALIFICATION)
+  website           String?         @db.VarChar(255)
+  employeeCount     CrmEmployeeRange?
+  annualRevenue     Decimal?        @db.Decimal(15, 2)
+  industry          CrmIndustry?
+  firstName         String?         @db.VarChar(100)
+  lastName          String?         @db.VarChar(100)
+  primaryEmail      String?         @db.VarChar(200)
+  primaryMobileNo   String?         @db.VarChar(30)
+  gender            CrmGender?
+  stage             CrmDealStage    @default(DISCOVERY)
+  value             Decimal         @default(0) @db.Decimal(15, 2)
+  probability       Int             @default(0)
+  source            CrmLeadSource   @default(REFERRAL)
+  expectedCloseDate DateTime?
+  closedAt          DateTime?
+  lostReason        String?         @db.Text
+  notes             String?         @db.Text
+  lastActivityAt    DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contact       CrmContact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead          CrmLead?            @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  tasks         CrmTask[]
+  notesList     CrmNote[]
+  attachments   CrmRecordAttachment[]
+  activities    CrmActivity[]
+  conversations CrmConversation[]
+
+  @@index([tenantId])
+  @@index([tenantId, stage])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerName])
+  @@index([customerId])
+  @@index([contactId])
+  @@index([deletedAt])
+}
+
+model CrmTask {
+  id           String          @id @default(cuid())
+  tenantId     String?
+  leadId       String?
+  dealId       String?
+  title        String          @db.VarChar(200)
+  description  String?         @db.Text
+  status       CrmTaskStatus   @default(OPEN)
+  assigneeId   String?
+  assigneeName String?         @db.VarChar(150)
+  dueDate      DateTime?
+  priority     CrmTaskPriority @default(MEDIUM)
+  deletedAt    DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([deletedAt])
+}
+
+model CrmNote {
+  id         String    @id @default(cuid())
+  tenantId   String?
+  leadId     String?
+  dealId     String?
+  title      String    @db.VarChar(200)
+  content    String    @db.Text
+  writerId   String?
+  writerName String?   @db.VarChar(150)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([deletedAt])
+}
+
+model CrmRecordAttachment {
+  id              String    @id @default(cuid())
+  tenantId        String?
+  leadId          String?
+  dealId          String?
+  filename        String    @db.VarChar(255)
+  originalName    String    @db.VarChar(255)
+  mimeType        String    @db.VarChar(100)
+  fileSize        Int
+  storageUrl      String    @db.Text
+  storageProvider String    @db.VarChar(50)
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([deletedAt])
+}
+
+model CrmActivity {
+  id          String          @id @default(cuid()) // -- ID unik aktivitas CRM ini.
+  tenantId    String? // -- ID tenant yang terkait dengan aktivitas CRM ini.
+  customerId  String? // -- ID pelanggan yang terkait dengan aktivitas CRM ini.
+  leadId      String? // -- ID prospek yang terkait dengan aktivitas CRM ini.
+  dealId      String? // -- ID deal yang terkait dengan aktivitas CRM ini.
+  conversationId String? // -- ID percakapan yang terkait dengan aktivitas CRM ini.
+  messageId   String? // -- ID pesan yang terkait dengan aktivitas CRM ini.
+  title       String          @db.VarChar(200) // -- Judul aktivitas CRM ini.
+  description String?         @db.Text // -- Deskripsi aktivitas CRM ini.
+  type        CrmActivityType @default(FOLLOW_UP) // -- Tipe aktivitas CRM ini.
+  ownerName   String          @db.VarChar(150) // -- Nama pemilik aktivitas CRM ini.
+  scheduledAt DateTime // -- Waktu jadwal aktivitas CRM ini.
+  completedAt DateTime? // -- Waktu penyelesaian aktivitas CRM ini.
+  deletedAt   DateTime? // -- Waktu penghapusan lunak aktivitas CRM ini.
+  createdAt   DateTime        @default(now()) // -- Waktu pembuatan aktivitas CRM ini.
+  updatedAt   DateTime        @updatedAt // -- Waktu terakhir pembaruan aktivitas CRM ini.
+
+  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk aktivitas CRM ini.
+  customer     CrmCustomer?      @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk aktivitas CRM ini.
+  lead         CrmLead?          @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke prospek CRM untuk aktivitas CRM ini.
+  deal         CrmDeal?          @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk aktivitas CRM ini.
+  conversation CrmConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull) // -- Relasi ke percakapan CRM untuk aktivitas CRM ini.
+  message      CrmMessage?       @relation(fields: [messageId], references: [id], onDelete: SetNull) // -- Relasi ke pesan CRM untuk aktivitas CRM ini.
+
+  @@index([tenantId])
+  @@index([tenantId, scheduledAt])
+  @@index([customerId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([deletedAt])
+}
+
+model CrmConversation {
+  id                 String                @id @default(cuid()) // -- ID unik percakapan CRM ini.
+  tenantId           String? // -- ID tenant yang terkait dengan percakapan CRM ini.
+  customerId         String? // -- ID customer yang terkait dengan percakapan CRM ini.
+  leadId             String? // -- ID lead yang terkait dengan percakapan CRM ini.
+  dealId             String? // -- ID deal yang terkait dengan percakapan CRM ini.
+  subject            String?               @db.VarChar(200) // -- Subjek percakapan CRM ini.
+  ownerName          String                @db.VarChar(150) // -- Nama pemilik percakapan CRM ini.
+  status             CrmConversationStatus @default(OPEN) // -- Status percakapan CRM ini.
+  lastMessageAt      DateTime? // -- Waktu pesan terakhir percakapan CRM ini.
+  lastMessagePreview String?               @db.VarChar(255) // -- Ringkasan pesan terakhir percakapan CRM ini.
+  deletedAt          DateTime? // -- Waktu penghapusan lunak percakapan CRM ini.
+  createdAt          DateTime              @default(now()) // -- Waktu pembuatan percakapan CRM ini.
+  updatedAt          DateTime              @updatedAt // -- Waktu terakhir pembaruan percakapan CRM ini.
+
+  tenant     Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk percakapan CRM ini.
+  customer   CrmCustomer?   @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke customer CRM untuk percakapan CRM ini.
+  lead       CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke lead CRM untuk percakapan CRM ini.
+  deal       CrmDeal?       @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk percakapan CRM ini.
+  messages   CrmMessage[] // -- Daftar pesan yang terkait dengan percakapan CRM ini.
+  activities CrmActivity[] // -- Daftar aktivitas yang terkait dengan percakapan CRM ini.
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([tenantId, status])
+  @@index([deletedAt])
+}
+
+model CrmMessage {
+  id             String           @id @default(cuid()) // -- ID unik pesan CRM ini.
+  tenantId       String? // -- ID tenant yang terkait dengan pesan CRM ini.
+  conversationId String // -- ID percakapan yang terkait dengan pesan CRM ini.
+  status         CrmMessageStatus @default(SENT) // -- Status pesan CRM ini.
+  senderName     String           @db.VarChar(150) // -- Nama pengirim pesan CRM ini.
+  body           String           @db.Text // -- Isi pesan CRM ini.
+  sentAt         DateTime         @default(now()) // -- Waktu pengiriman pesan CRM ini.
+  deletedAt      DateTime? // -- Waktu penghapusan lunak pesan CRM ini.
+  createdAt      DateTime         @default(now()) // -- Waktu pembuatan pesan CRM ini.
+  updatedAt      DateTime         @updatedAt // -- Waktu terakhir pembaruan pesan CRM ini.
+
+  tenant       Tenant?          @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk pesan CRM ini.
+  conversation CrmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade) // -- Relasi ke percakapan CRM untuk pesan CRM ini.
+  activities   CrmActivity[] // -- Daftar aktivitas yang terkait dengan pesan CRM ini.
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([tenantId, status])
+  @@index([deletedAt])
+}
+
+// ============================================================================
 // TRAVEL REQUEST SYSTEM
 // ============================================================================
 
 model TravelRequest {
-  id            String  @id @default(cuid())
-  tenantId      String?
-  requestNumber String  @db.VarChar(50)
+  id            String  @id @default(cuid()) // -- ID unik permintaan perjalanan dinas ini.
+  tenantId      String? // -- ID tenant yang terkait dengan permintaan perjalanan dinas ini.
+  requestNumber String  @db.VarChar(50) // -- Nomor pengajuan permintaan perjalanan dinas ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk permintaan perjalanan dinas ini.
 
   // Requester (must be SALES_EMPLOYEE or SALES_CHIEF)
-  requesterId String
-  requester   User   @relation("TravelRequester", fields: [requesterId], references: [id])
+  requesterId String // -- ID pengaju yang terkait dengan permintaan perjalanan dinas ini.
+  requester   User   @relation("TravelRequester", fields: [requesterId], references: [id]) // -- Relasi ke pengguna untuk permintaan perjalanan dinas ini.
 
   // Travel details
-  purpose     String     @db.Text
-  destination String     @db.VarChar(255)
-  travelType  TravelType
-  startDate   DateTime
-  endDate     DateTime
+  purpose     String     @db.Text // -- Keperluan permintaan perjalanan dinas ini.
+  destination String     @db.VarChar(255) // -- Destinasi permintaan perjalanan dinas ini.
+  travelType  TravelType // -- Jenis perjalanan permintaan perjalanan dinas ini.
+  startDate   DateTime // -- Tanggal mulai permintaan perjalanan dinas ini.
+  endDate     DateTime // -- Tanggal selesai permintaan perjalanan dinas ini.
 
   // SALES type — link to Project
-  projectId String?
-  project   Project? @relation(fields: [projectId], references: [id])
+  projectId String? // -- ID proyek yang terkait dengan permintaan perjalanan dinas ini.
+  project   Project? @relation(fields: [projectId], references: [id]) // -- Relasi ke proyek untuk permintaan perjalanan dinas ini.
 
   // Status
-  status TravelStatus @default(DRAFT)
+  status TravelStatus @default(DRAFT) // -- Status permintaan perjalanan dinas ini.
 
   // Financial (reimbursement tracking only, no estimatedBudget)
-  totalReimbursed Decimal? @db.Decimal(15, 2)
+  totalReimbursed Decimal? @db.Decimal(15, 2) // -- Total penggantian permintaan perjalanan dinas ini.
 
   // Lifecycle timestamps
-  submittedAt DateTime?
-  lockedAt    DateTime?
-  closedAt    DateTime?
-  deletedAt   DateTime?
+  submittedAt DateTime? // -- Waktu pengajuan permintaan perjalanan dinas ini.
+  lockedAt    DateTime? // -- Waktu penguncian permintaan perjalanan dinas ini.
+  closedAt    DateTime? // -- Waktu penutupan permintaan perjalanan dinas ini.
+  deletedAt   DateTime? // -- Waktu penghapusan lunak permintaan perjalanan dinas ini.
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) // -- Waktu pembuatan permintaan perjalanan dinas ini.
+  updatedAt DateTime @updatedAt // -- Waktu terakhir pembaruan permintaan perjalanan dinas ini.
 
   // Relations
-  participants TravelParticipant[]
-  approvals    Approval[]
-  claims       Claim[]
-  bailouts     Bailout[]
+  participants TravelParticipant[] // -- Daftar peserta perjalanan yang terkait dengan permintaan perjalanan dinas ini.
+  approvals    Approval[] // -- Daftar persetujuan yang terkait dengan permintaan perjalanan dinas ini.
+  claims       Claim[] // -- Daftar klaim yang terkait dengan permintaan perjalanan dinas ini.
+  bailouts     Bailout[] // -- Daftar dana talangan yang terkait dengan permintaan perjalanan dinas ini.
 
   @@unique([tenantId, requestNumber])
   @@index([requesterId, status])
@@ -548,20 +1054,20 @@ model TravelRequest {
 }
 
 model TravelParticipant {
-  id              String        @id @default(cuid())
-  tenantId        String?
-  travelRequestId String
-  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid()) // -- ID unik peserta perjalanan ini.
+  tenantId        String? // -- ID tenant yang terkait dengan peserta perjalanan ini.
+  travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan peserta perjalanan ini.
+  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id], onDelete: Cascade) // -- Relasi ke permintaan perjalanan dinas untuk peserta perjalanan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk peserta perjalanan ini.
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  userId String // -- ID pengguna yang terkait dengan peserta perjalanan ini.
+  user   User   @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk peserta perjalanan ini.
 
-  role  String? @db.VarChar(100) // e.g., "Presenter", "Observer"
-  notes String? @db.Text
+  role  String? @db.VarChar(100) // -- Peran peserta perjalanan ini.
+  notes String? @db.Text // -- Catatan peserta perjalanan ini.
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) // -- Waktu pembuatan peserta perjalanan ini.
 
   @@unique([travelRequestId, userId])
   @@index([tenantId])
@@ -573,71 +1079,71 @@ model TravelParticipant {
 // ============================================================================
 
 model Bailout {
-  id            String  @id @default(cuid())
-  tenantId      String?
-  bailoutNumber String  @db.VarChar(50)
+  id            String  @id @default(cuid()) // -- ID unik dana talangan ini.
+  tenantId      String? // -- ID tenant yang terkait dengan dana talangan ini.
+  bailoutNumber String  @db.VarChar(50) // -- Nomor dana talangan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk dana talangan ini.
 
-  travelRequestId String
-  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id])
+  travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan dana talangan ini.
+  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id]) // -- Relasi ke permintaan perjalanan dinas untuk dana talangan ini.
 
-  requesterId String
-  requester   User   @relation("BailoutRequester", fields: [requesterId], references: [id])
+  requesterId String // -- ID pengaju yang terkait dengan dana talangan ini.
+  requester   User   @relation("BailoutRequester", fields: [requesterId], references: [id]) // -- Relasi ke pengguna untuk dana talangan ini.
 
   // Category of spend
-  category BailoutCategory @default(OTHER)
+  category BailoutCategory @default(OTHER) // -- Kategori dana talangan ini.
 
   // General
-  description String  @db.Text
-  amount      Decimal @db.Decimal(15, 2)
+  description String  @db.Text // -- Deskripsi dana talangan ini.
+  amount      Decimal @db.Decimal(15, 2) // -- Nominal dana talangan ini.
 
   // Transport-specific fields
-  transportMode TransportMode?
-  carrier       String?        @db.VarChar(100)
-  departureFrom String?        @db.VarChar(100)
-  arrivalTo     String?        @db.VarChar(100)
-  departureAt   DateTime?
-  arrivalAt     DateTime?
-  flightNumber  String?        @db.VarChar(20)
-  seatClass     String?        @db.VarChar(50)
-  bookingRef    String?        @db.VarChar(100)
+  transportMode TransportMode? // -- Moda transportasi dana talangan ini.
+  carrier       String?        @db.VarChar(100) // -- Maskapai dana talangan ini.
+  departureFrom String?        @db.VarChar(100) // -- Lokasi keberangkatan dana talangan ini.
+  arrivalTo     String?        @db.VarChar(100) // -- Lokasi kedatangan dana talangan ini.
+  departureAt   DateTime? // -- Waktu keberangkatan dana talangan ini.
+  arrivalAt     DateTime? // -- Waktu kedatangan dana talangan ini.
+  flightNumber  String?        @db.VarChar(20) // -- Nomor penerbangan dana talangan ini.
+  seatClass     String?        @db.VarChar(50) // -- Kelas kursi dana talangan ini.
+  bookingRef    String?        @db.VarChar(100) // -- Referensi pemesanan dana talangan ini.
 
   // Hotel-specific fields
-  hotelName    String?   @db.VarChar(255)
-  hotelAddress String?   @db.Text
-  checkIn      DateTime?
-  checkOut     DateTime?
-  roomType     String?   @db.VarChar(100)
+  hotelName    String?   @db.VarChar(255) // -- Nama hotel dana talangan ini.
+  hotelAddress String?   @db.Text // -- Alamat hotel dana talangan ini.
+  checkIn      DateTime? // -- Waktu check-in dana talangan ini.
+  checkOut     DateTime? // -- Waktu check-out dana talangan ini.
+  roomType     String?   @db.VarChar(100) // -- Tipe kamar dana talangan ini.
 
   // Meal-specific fields
-  mealDate     DateTime?
-  mealLocation String?   @db.VarChar(255)
+  mealDate     DateTime? // -- Tanggal makan dana talangan ini.
+  mealLocation String?   @db.VarChar(255) // -- Lokasi makan dana talangan ini.
 
-  status BailoutStatus @default(DRAFT)
+  status BailoutStatus @default(DRAFT) // -- Status dana talangan ini.
 
   // Rejection / disbursement lifecycle
-  rejectedAt      DateTime?
-  rejectionReason String?   @db.Text
-  disbursedAt     DateTime?
-  disbursementRef String?   @db.VarChar(100)
+  rejectedAt      DateTime? // -- Waktu penolakan dana talangan ini.
+  rejectionReason String?   @db.Text // -- Alasan penolakan dana talangan ini.
+  disbursedAt     DateTime? // -- Waktu pencairan dana talangan ini.
+  disbursementRef String?   @db.VarChar(100) // -- Referensi pencairan dana talangan ini.
 
   // Timestamps
-  submittedAt DateTime?
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  submittedAt DateTime? // -- Waktu pengajuan dana talangan ini.
+  deletedAt   DateTime? // -- Waktu penghapusan lunak dana talangan ini.
+  createdAt   DateTime  @default(now()) // -- Waktu pembuatan dana talangan ini.
+  updatedAt   DateTime  @updatedAt // -- Waktu terakhir pembaruan dana talangan ini.
 
   // Approval chain (generic, same as TravelRequest & Claim)
-  approvals Approval[]
+  approvals Approval[] // -- Daftar persetujuan yang terkait dengan dana talangan ini.
 
-  storageUrl String? @db.Text // For any receipt images or documents
-  financeId  String? // FK to User (finance officer who processed this bailout)
-  finance    User?   @relation("FinanceBailouts", fields: [financeId], references: [id])
+  storageUrl String? @db.Text // -- URL penyimpanan dana talangan ini.
+  financeId  String? // -- ID petugas keuangan yang terkait dengan dana talangan ini.
+  finance    User?   @relation("FinanceBailouts", fields: [financeId], references: [id]) // -- Relasi ke pengguna untuk dana talangan ini.
 
   // Reverse relation for journal transactions
-  journalTransactions JournalTransaction[]
-  journalEntries      JournalEntry[]
+  journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan dana talangan ini.
+  journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan dana talangan ini.
 
   @@unique([tenantId, bailoutNumber])
   @@index([travelRequestId])
@@ -679,41 +1185,41 @@ model Bailout {
 //     → L2+: continue up the chain
 
 model Approval {
-  id       String  @id @default(cuid())
-  tenantId String?
+  id       String  @id @default(cuid()) // -- ID unik persetujuan ini.
+  tenantId String? // -- ID tenant yang terkait dengan persetujuan ini.
 
   // Business approval number (e.g. APR-2026-00001)
-  approvalNumber String @db.VarChar(50)
+  approvalNumber String @db.VarChar(50) // -- Nomor persetujuan ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk persetujuan ini.
 
   // ── Entity links (exactly one must be set) ──────────────────────────────
-  travelRequestId String?
-  travelRequest   TravelRequest? @relation(fields: [travelRequestId], references: [id], onDelete: Cascade)
+  travelRequestId String? // -- ID permintaan perjalanan dinas yang terkait dengan persetujuan ini.
+  travelRequest   TravelRequest? @relation(fields: [travelRequestId], references: [id], onDelete: Cascade) // -- Relasi ke permintaan perjalanan dinas untuk persetujuan ini.
 
-  bailoutId String?
-  bailout   Bailout? @relation(fields: [bailoutId], references: [id], onDelete: Cascade)
+  bailoutId String? // -- ID dana talangan yang terkait dengan persetujuan ini.
+  bailout   Bailout? @relation(fields: [bailoutId], references: [id], onDelete: Cascade) // -- Relasi ke dana talangan untuk persetujuan ini.
 
-  claimId String?
-  claim   Claim?  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId String? // -- ID klaim yang terkait dengan persetujuan ini.
+  claim   Claim?  @relation(fields: [claimId], references: [id], onDelete: Cascade) // -- Relasi ke klaim untuk persetujuan ini.
 
   // ── Approval details ────────────────────────────────────────────────────
   // sequence: 1 = first approver, 2 = second, etc.  Allows dynamic chains.
-  sequence Int            @default(1)
-  level    ApprovalLevel
-  status   ApprovalStatus @default(PENDING)
+  sequence Int            @default(1) // -- Urutan persetujuan ini.
+  level    ApprovalLevel // -- Level persetujuan ini.
+  status   ApprovalStatus @default(PENDING) // -- Status persetujuan ini.
 
-  approverId String
-  approver   User   @relation(fields: [approverId], references: [id])
+  approverId String // -- ID penyetuju yang terkait dengan persetujuan ini.
+  approver   User   @relation(fields: [approverId], references: [id]) // -- Relasi ke pengguna untuk persetujuan ini.
 
-  comments        String? @db.Text
-  rejectionReason String? @db.Text
+  comments        String? @db.Text // -- Komentar persetujuan ini.
+  rejectionReason String? @db.Text // -- Alasan penolakan persetujuan ini.
 
   // Timestamps
-  approvedAt DateTime?
-  rejectedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  approvedAt DateTime? // -- Waktu persetujuan ini.
+  rejectedAt DateTime? // -- Waktu penolakan persetujuan ini.
+  createdAt  DateTime  @default(now()) // -- Waktu pembuatan persetujuan ini.
+  updatedAt  DateTime  @updatedAt // -- Waktu terakhir pembaruan persetujuan ini.
 
   @@unique([tenantId, approvalNumber])
   @@index([approvalNumber])
@@ -732,69 +1238,69 @@ model Approval {
 // ============================================================================
 
 model Claim {
-  id          String  @id @default(cuid())
-  tenantId    String?
-  claimNumber String  @db.VarChar(50)
+  id          String  @id @default(cuid()) // -- ID unik klaim ini.
+  tenantId    String? // -- ID tenant yang terkait dengan klaim ini.
+  claimNumber String  @db.VarChar(50) // -- Nomor klaim ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk klaim ini.
 
-  travelRequestId String
-  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id])
+  travelRequestId String // -- ID permintaan perjalanan dinas yang terkait dengan klaim ini.
+  travelRequest   TravelRequest @relation(fields: [travelRequestId], references: [id]) // -- Relasi ke permintaan perjalanan dinas untuk klaim ini.
 
-  submitterId String
-  submitter   User   @relation(fields: [submitterId], references: [id])
+  submitterId String // -- ID pengirim yang terkait dengan klaim ini.
+  submitter   User   @relation(fields: [submitterId], references: [id]) // -- Relasi ke pengguna untuk klaim ini.
 
   // Claim type
-  claimType ClaimType
-  status    ClaimStatus @default(DRAFT)
+  claimType ClaimType // -- Jenis klaim ini.
+  status    ClaimStatus @default(DRAFT) // -- Status klaim ini.
 
   // Entertainment-specific fields
-  entertainmentType     EntertainmentType?
-  entertainmentDate     DateTime?
-  entertainmentLocation String?            @db.VarChar(255)
-  entertainmentAddress  String?            @db.Text
-  guestName             String?            @db.VarChar(255)
-  guestCompany          String?            @db.VarChar(255)
-  guestPosition         String?            @db.VarChar(100)
-  isGovernmentOfficial  Boolean?           @default(false)
+  entertainmentType     EntertainmentType? // -- Jenis jamuan klaim ini.
+  entertainmentDate     DateTime? // -- Tanggal jamuan klaim ini.
+  entertainmentLocation String?            @db.VarChar(255) // -- Lokasi jamuan klaim ini.
+  entertainmentAddress  String?            @db.Text // -- Alamat jamuan klaim ini.
+  guestName             String?            @db.VarChar(255) // -- Nama tamu klaim ini.
+  guestCompany          String?            @db.VarChar(255) // -- Perusahaan tamu klaim ini.
+  guestPosition         String?            @db.VarChar(100) // -- Jabatan tamu klaim ini.
+  isGovernmentOfficial  Boolean?           @default(false) // -- Menandakan apakah klaim ini merupakan pejabat pemerintah.
 
   // Non-entertainment-specific fields
-  expenseCategory    NonEntertainmentCategory?
-  expenseDate        DateTime?
-  expenseDestination String?                   @db.VarChar(255)
-  customerName       String?                   @db.VarChar(255)
+  expenseCategory    NonEntertainmentCategory? // -- Kategori pengeluaran klaim ini.
+  expenseDate        DateTime? // -- Tanggal pengeluaran klaim ini.
+  expenseDestination String?                   @db.VarChar(255) // -- Tujuan pengeluaran klaim ini.
+  customerName       String?                   @db.VarChar(255) // -- Nama pelanggan klaim ini.
 
   // Common fields
-  amount      Decimal @db.Decimal(15, 2)
-  description String  @db.Text
-  notes       String? @db.Text
+  amount      Decimal @db.Decimal(15, 2) // -- Nominal klaim ini.
+  description String  @db.Text // -- Deskripsi klaim ini.
+  notes       String? @db.Text // -- Catatan klaim ini.
 
   // Chart of Accounts
-  coaId          String?
-  chartOfAccount ChartOfAccount? @relation(fields: [coaId], references: [id])
+  coaId          String? // -- ID akun COA yang terkait dengan klaim ini.
+  chartOfAccount ChartOfAccount? @relation(fields: [coaId], references: [id]) // -- Relasi ke akun COA untuk klaim ini.
 
   // Payment
-  isPaid           Boolean   @default(false)
-  paidAt           DateTime?
-  paidBy           String?   @db.VarChar(100)
-  paymentReference String?   @db.VarChar(100)
+  isPaid           Boolean   @default(false) // -- Menandakan apakah klaim ini sudah dibayar.
+  paidAt           DateTime? // -- Waktu pembayaran klaim ini.
+  paidBy           String?   @db.VarChar(100) // -- Pihak pembayar klaim ini.
+  paymentReference String?   @db.VarChar(100) // -- Referensi pembayaran klaim ini.
 
   // Metadata
-  submittedVia String? @db.VarChar(50) // "web" or "whatsapp"
+  submittedVia String? @db.VarChar(50) // -- Sumber pengajuan klaim ini.
 
   // Finance officer who processed/paid this claim
-  financeId String?
-  finance   User?   @relation("FinanceClaims", fields: [financeId], references: [id])
+  financeId String? // -- ID petugas keuangan yang terkait dengan klaim ini.
+  finance   User?   @relation("FinanceClaims", fields: [financeId], references: [id]) // -- Relasi ke pengguna untuk klaim ini.
 
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // -- Waktu penghapusan lunak klaim ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan klaim ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan klaim ini.
 
   // Relations
-  attachments         Attachment[]
-  approvals           Approval[]
-  journalTransactions JournalTransaction[]
-  journalEntries      JournalEntry[]
+  attachments         Attachment[] // -- Daftar lampiran yang terkait dengan klaim ini.
+  approvals           Approval[] // -- Daftar persetujuan yang terkait dengan klaim ini.
+  journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan klaim ini.
+  journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan klaim ini.
 
   @@unique([tenantId, claimNumber])
   @@index([travelRequestId])
@@ -810,26 +1316,26 @@ model Claim {
 }
 
 model Attachment {
-  id       String  @id @default(cuid())
-  tenantId String?
-  claimId  String
-  claim    Claim   @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  id       String  @id @default(cuid()) // -- ID unik lampiran ini.
+  tenantId String? // -- ID tenant yang terkait dengan lampiran ini.
+  claimId  String // -- ID klaim yang terkait dengan lampiran ini.
+  claim    Claim   @relation(fields: [claimId], references: [id], onDelete: Cascade) // -- Relasi ke klaim untuk lampiran ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk lampiran ini.
 
-  filename        String @db.VarChar(255)
-  originalName    String @db.VarChar(255)
-  mimeType        String @db.VarChar(100)
-  fileSize        Int // bytes
-  storageUrl      String @db.Text
-  storageProvider String @db.VarChar(50) // "local", "r2", etc.
+  filename        String @db.VarChar(255) // -- Nama file lampiran ini.
+  originalName    String @db.VarChar(255) // -- Nama file asli lampiran ini.
+  mimeType        String @db.VarChar(100) // -- Tipe MIME lampiran ini.
+  fileSize        Int // -- Ukuran file lampiran ini.
+  storageUrl      String @db.Text // -- URL penyimpanan lampiran ini.
+  storageProvider String @db.VarChar(50) // -- Penyedia penyimpanan lampiran ini.
 
   // OCR/AI extracted data
-  ocrExtractedData Json?
-  ocrConfidence    Decimal? @db.Decimal(5, 2) // 0-100
+  ocrExtractedData Json? // -- Data hasil OCR lampiran ini.
+  ocrConfidence    Decimal? @db.Decimal(5, 2) // -- Tingkat keyakinan OCR lampiran ini.
 
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
+  deletedAt DateTime? // -- Waktu penghapusan lunak lampiran ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan lampiran ini.
 
   @@index([tenantId])
   @@index([claimId])
@@ -840,36 +1346,36 @@ model Attachment {
 // ============================================================================
 
 model Notification {
-  id       String  @id @default(cuid())
-  tenantId String?
-  userId   String
-  user     User    @relation(fields: [userId], references: [id])
+  id       String  @id @default(cuid()) // -- ID unik notifikasi ini.
+  tenantId String? // -- ID tenant yang terkait dengan notifikasi ini.
+  userId   String // -- ID pengguna yang terkait dengan notifikasi ini.
+  user     User    @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk notifikasi ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk notifikasi ini.
 
   // Notification content
-  title   String              @db.VarChar(255)
-  message String              @db.Text
-  channel NotificationChannel
-  status  NotificationStatus  @default(PENDING)
+  title   String              @db.VarChar(255) // -- Judul notifikasi ini.
+  message String              @db.Text // -- Pesan notifikasi ini.
+  channel NotificationChannel // -- Kanal notifikasi ini.
+  status  NotificationStatus  @default(PENDING) // -- Status notifikasi ini.
 
   // Links
-  entityType String? @db.VarChar(50) // "TravelRequest", "Claim", "Bailout"
-  entityId   String?
-  actionUrl  String? @db.Text
+  entityType String? @db.VarChar(50) // -- Tipe entitas notifikasi ini.
+  entityId   String? // -- ID entitas yang terkait dengan notifikasi ini.
+  actionUrl  String? @db.Text // -- URL aksi notifikasi ini.
 
   // Delivery
-  sentAt       DateTime?
-  deliveredAt  DateTime?
-  readAt       DateTime?
-  failedAt     DateTime?
-  errorMessage String?   @db.Text
+  sentAt       DateTime? // -- Waktu pengiriman notifikasi ini.
+  deliveredAt  DateTime? // -- Waktu penerimaan notifikasi ini.
+  readAt       DateTime? // -- Waktu pembacaan notifikasi ini.
+  failedAt     DateTime? // -- Waktu kegagalan notifikasi ini.
+  errorMessage String?   @db.Text // -- Pesan kesalahan notifikasi ini.
 
   // Metadata
-  priority   String  @default("NORMAL") @db.VarChar(20) // "LOW", "NORMAL", "HIGH"
-  templateId String? @db.VarChar(100)
+  priority   String  @default("NORMAL") @db.VarChar(20) // -- Prioritas notifikasi ini.
+  templateId String? @db.VarChar(100) // -- ID template yang terkait dengan notifikasi ini.
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) // -- Waktu pembuatan notifikasi ini.
 
   @@index([tenantId])
   @@index([userId, status])
@@ -882,31 +1388,31 @@ model Notification {
 // ============================================================================
 
 model AuditLog {
-  id       String  @id @default(cuid())
-  tenantId String?
-  userId   String
-  user     User    @relation(fields: [userId], references: [id])
+  id       String  @id @default(cuid()) // -- ID unik log audit ini.
+  tenantId String? // -- ID tenant yang terkait dengan log audit ini.
+  userId   String // -- ID pengguna yang terkait dengan log audit ini.
+  user     User    @relation(fields: [userId], references: [id]) // -- Relasi ke pengguna untuk log audit ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk log audit ini.
 
   // Action details
-  action     AuditAction
-  entityType String      @db.VarChar(50)
-  entityId   String
+  action     AuditAction // -- Aksi log audit ini.
+  entityType String      @db.VarChar(50) // -- Tipe entitas log audit ini.
+  entityId   String // -- ID entitas yang terkait dengan log audit ini.
 
   // Chart of Accounts relation (optional)
-  chartOfAccountId String?
-  chartOfAccount   ChartOfAccount? @relation("COAAuditLogs", fields: [chartOfAccountId], references: [id])
+  chartOfAccountId String? // -- ID akun COA yang terkait dengan log audit ini.
+  chartOfAccount   ChartOfAccount? @relation("COAAuditLogs", fields: [chartOfAccountId], references: [id]) // -- Relasi ke akun COA untuk log audit ini.
 
   // Changes
-  changes  Json? // Before/after snapshots
-  metadata Json? // Additional context
+  changes  Json? // -- Perubahan data log audit ini.
+  metadata Json? // -- Metadata log audit ini.
 
   // Request info
-  ipAddress String? @db.VarChar(45)
-  userAgent String? @db.Text
+  ipAddress String? @db.VarChar(45) // -- Alamat IP log audit ini.
+  userAgent String? @db.Text // -- Informasi user agent log audit ini.
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) // -- Waktu pembuatan log audit ini.
 
   @@index([tenantId])
   @@index([userId, createdAt])
@@ -920,29 +1426,29 @@ model AuditLog {
 // ============================================================================
 
 model BalanceAccount {
-  id       String  @id @default(cuid())
-  tenantId String?
-  code     String  @db.VarChar(30)
-  name     String  @db.VarChar(150)
+  id       String  @id @default(cuid()) // -- ID unik akun saldo ini.
+  tenantId String? // -- ID tenant yang terkait dengan akun saldo ini.
+  code     String  @db.VarChar(30) // -- Kode akun saldo ini.
+  name     String  @db.VarChar(150) // -- Nama akun saldo ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk akun saldo ini.
 
   // Current running balance (positive = debit-normal, or as defined by usage)
-  balance Decimal @default(0) @db.Decimal(19, 4)
+  balance Decimal @default(0) @db.Decimal(19, 4) // -- Saldo akun saldo ini.
 
-  defaultChartOfAccountId String?
-  defaultChartOfAccount   ChartOfAccount? @relation("BalanceAccountDefaultCOA", fields: [defaultChartOfAccountId], references: [id])
+  defaultChartOfAccountId String? // -- ID akun COA bawaan yang terkait dengan akun saldo ini.
+  defaultChartOfAccount   ChartOfAccount? @relation("BalanceAccountDefaultCOA", fields: [defaultChartOfAccountId], references: [id]) // -- Relasi ke akun COA untuk akun saldo ini.
 
-  isActive    Boolean @default(true)
-  description String? @db.Text
+  isActive    Boolean @default(true) // -- Menandakan apakah akun saldo ini aktif.
+  description String? @db.Text // -- Deskripsi akun saldo ini.
 
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // -- Waktu penghapusan lunak akun saldo ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan akun saldo ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan akun saldo ini.
 
   // Reverse relation
-  journalTransactions JournalTransaction[]
-  journalEntryLines   JournalEntryLine[]
+  journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan akun saldo ini.
+  journalEntryLines   JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan akun saldo ini.
 
   @@unique([tenantId, code])
   @@index([code])
@@ -953,44 +1459,44 @@ model BalanceAccount {
 }
 
 model JournalTransaction {
-  id                String  @id @default(cuid())
-  tenantId          String?
-  transactionNumber String  @db.VarChar(50) // e.g. JRN-2026-00001
+  id                String  @id @default(cuid()) // -- ID unik transaksi jurnal ini.
+  tenantId          String? // -- ID tenant yang terkait dengan transaksi jurnal ini.
+  transactionNumber String  @db.VarChar(50) // -- Nomor transaksi jurnal ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk transaksi jurnal ini.
 
   // Date of the accounting entry (may differ from createdAt)
-  transactionDate DateTime @db.Date
+  transactionDate DateTime @db.Date // -- Tanggal transaksi jurnal ini.
 
-  description String  @db.Text
-  amount      Decimal @db.Decimal(15, 2)
+  description String  @db.Text // -- Deskripsi transaksi jurnal ini.
+  amount      Decimal @db.Decimal(15, 2) // -- Nominal transaksi jurnal ini.
 
   // DEBIT increases the account balance; CREDIT decreases it (or vice-versa
   // depending on account type — the application layer enforces the rule).
-  entryType JournalEntryType
+  entryType JournalEntryType // -- Jenis entri transaksi jurnal ini.
 
   // ── Source document links (at most one set) ──────────────────────────────
-  bailoutId String?
-  bailout   Bailout? @relation(fields: [bailoutId], references: [id])
+  bailoutId String? // -- ID dana talangan yang terkait dengan transaksi jurnal ini.
+  bailout   Bailout? @relation(fields: [bailoutId], references: [id]) // -- Relasi ke dana talangan untuk transaksi jurnal ini.
 
-  claimId String?
-  claim   Claim?  @relation(fields: [claimId], references: [id])
+  claimId String? // -- ID klaim yang terkait dengan transaksi jurnal ini.
+  claim   Claim?  @relation(fields: [claimId], references: [id]) // -- Relasi ke klaim untuk transaksi jurnal ini.
 
   // ── Accounting links (both required) ─────────────────────────────────────
-  chartOfAccountId String
-  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id])
+  chartOfAccountId String // -- ID akun COA yang terkait dengan transaksi jurnal ini.
+  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id]) // -- Relasi ke akun COA untuk transaksi jurnal ini.
 
-  balanceAccountId String
-  balanceAccount   BalanceAccount @relation(fields: [balanceAccountId], references: [id])
+  balanceAccountId String // -- ID akun saldo yang terkait dengan transaksi jurnal ini.
+  balanceAccount   BalanceAccount @relation(fields: [balanceAccountId], references: [id]) // -- Relasi ke akun saldo untuk transaksi jurnal ini.
 
   // Optional reference / notes
-  referenceNumber String? @db.VarChar(100)
-  notes           String? @db.Text
+  referenceNumber String? @db.VarChar(100) // -- Nomor referensi transaksi jurnal ini.
+  notes           String? @db.Text // -- Catatan transaksi jurnal ini.
 
   // Soft-delete
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // -- Waktu penghapusan lunak transaksi jurnal ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan transaksi jurnal ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan transaksi jurnal ini.
 
   @@unique([tenantId, transactionNumber])
   @@index([transactionNumber])
@@ -1005,39 +1511,39 @@ model JournalTransaction {
 }
 
 model JournalEntry {
-  id            String  @id @default(cuid())
-  tenantId      String?
-  journalNumber String  @db.VarChar(50)
+  id            String  @id @default(cuid()) // -- ID unik entri jurnal ini.
+  tenantId      String? // -- ID tenant yang terkait dengan entri jurnal ini.
+  journalNumber String  @db.VarChar(50) // -- Nomor jurnal ini.
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk entri jurnal ini.
 
-  transactionDate DateTime           @db.Date
-  description     String             @db.Text
-  sourceType      JournalSourceType?
-  sourceId        String?
-  status          JournalStatus      @default(DRAFT)
+  transactionDate DateTime           @db.Date // -- Tanggal transaksi entri jurnal ini.
+  description     String             @db.Text // -- Deskripsi entri jurnal ini.
+  sourceType      JournalSourceType? // -- Tipe sumber entri jurnal ini.
+  sourceId        String? // -- ID sumber yang terkait dengan entri jurnal ini.
+  status          JournalStatus      @default(DRAFT) // -- Status entri jurnal ini.
 
-  bailoutId String?
-  bailout   Bailout? @relation(fields: [bailoutId], references: [id])
+  bailoutId String? // -- ID dana talangan yang terkait dengan entri jurnal ini.
+  bailout   Bailout? @relation(fields: [bailoutId], references: [id]) // -- Relasi ke dana talangan untuk entri jurnal ini.
 
-  claimId String?
-  claim   Claim?  @relation(fields: [claimId], references: [id])
+  claimId String? // -- ID klaim yang terkait dengan entri jurnal ini.
+  claim   Claim?  @relation(fields: [claimId], references: [id]) // -- Relasi ke klaim untuk entri jurnal ini.
 
-  referenceNumber String? @db.VarChar(100)
-  notes           String? @db.Text
+  referenceNumber String? @db.VarChar(100) // -- Nomor referensi entri jurnal ini.
+  notes           String? @db.Text // -- Catatan entri jurnal ini.
 
-  createdById String
-  createdBy   User   @relation("JournalEntryCreatedBy", fields: [createdById], references: [id])
+  createdById String // -- ID pengguna pembuat yang terkait dengan entri jurnal ini.
+  createdBy   User   @relation("JournalEntryCreatedBy", fields: [createdById], references: [id]) // -- Relasi ke pengguna untuk entri jurnal ini.
 
-  postedById String?
-  postedBy   User?     @relation("JournalEntryPostedBy", fields: [postedById], references: [id])
-  postedAt   DateTime?
+  postedById String? // -- ID pengguna yang melakukan posting untuk entri jurnal ini.
+  postedBy   User?     @relation("JournalEntryPostedBy", fields: [postedById], references: [id]) // -- Relasi ke pengguna untuk entri jurnal ini.
+  postedAt   DateTime? // -- Waktu posting entri jurnal ini.
 
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // -- Waktu penghapusan lunak entri jurnal ini.
+  createdAt DateTime  @default(now()) // -- Waktu pembuatan entri jurnal ini.
+  updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan entri jurnal ini.
 
-  lines JournalEntryLine[]
+  lines JournalEntryLine[] // -- Daftar baris entri jurnal yang terkait dengan entri jurnal ini.
 
   @@unique([tenantId, journalNumber])
   @@index([journalNumber])
@@ -1053,24 +1559,24 @@ model JournalEntry {
 }
 
 model JournalEntryLine {
-  id String @id @default(cuid())
+  id String @id @default(cuid()) // -- ID unik baris entri jurnal ini.
 
-  journalEntryId String
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  journalEntryId String // -- ID entri jurnal yang terkait dengan baris entri jurnal ini.
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade) // -- Relasi ke entri jurnal untuk baris entri jurnal ini.
 
-  chartOfAccountId String
-  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id])
+  chartOfAccountId String // -- ID akun COA yang terkait dengan baris entri jurnal ini.
+  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id]) // -- Relasi ke akun COA untuk baris entri jurnal ini.
 
-  balanceAccountId String?
-  balanceAccount   BalanceAccount? @relation(fields: [balanceAccountId], references: [id])
+  balanceAccountId String? // -- ID akun saldo yang terkait dengan baris entri jurnal ini.
+  balanceAccount   BalanceAccount? @relation(fields: [balanceAccountId], references: [id]) // -- Relasi ke akun saldo untuk baris entri jurnal ini.
 
-  description  String? @db.Text
-  debitAmount  Decimal @default(0) @db.Decimal(15, 2)
-  creditAmount Decimal @default(0) @db.Decimal(15, 2)
-  lineNumber   Int     @default(1)
+  description  String? @db.Text // -- Deskripsi baris entri jurnal ini.
+  debitAmount  Decimal @default(0) @db.Decimal(15, 2) // -- Nominal debit baris entri jurnal ini.
+  creditAmount Decimal @default(0) @db.Decimal(15, 2) // -- Nominal kredit baris entri jurnal ini.
+  lineNumber   Int     @default(1) // -- Nomor baris entri jurnal ini.
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) // -- Waktu pembuatan baris entri jurnal ini.
+  updatedAt DateTime @updatedAt // -- Waktu terakhir pembaruan baris entri jurnal ini.
 
   @@index([journalEntryId])
   @@index([chartOfAccountId])

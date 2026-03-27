@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { api } from "@/trpc/react";
@@ -142,7 +142,7 @@ export default function TravelRequestsPage() {
 // ─────────────── Tab 1: Pengajuan ───────────────
 
 function PengajuanTab() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const userId = session?.user?.id;
   const canReadTravel =
@@ -156,10 +156,11 @@ function PengajuanTab() {
     (session?.user?.isRoot ?? false) ||
     hasPermissionMap(session?.user?.permissions, "bailout", "read");
 
-  if (session && !canReadTravel) {
-    router.replace("/");
-    return null;
-  }
+  useEffect(() => {
+    if (status !== "loading" && session && !canReadTravel) {
+      void router.replace("/");
+    }
+  }, [canReadTravel, router, session, status]);
 
   const [statusFilter, setStatusFilter] = useState<TravelStatus | "ALL">("ALL");
   const [typeFilter, setTypeFilter] = useState<TravelType | "ALL">("ALL");
@@ -177,7 +178,10 @@ function PengajuanTab() {
       travelType: typeFilter === "ALL" ? undefined : typeFilter,
       limit: 50,
     },
-    { refetchOnWindowFocus: false, enabled: canReadTravel }
+    {
+      refetchOnWindowFocus: false,
+      enabled: status === "authenticated" && canReadTravel,
+    }
   );
   const data = rawData as { requests: TravelRequest[] } | undefined;
   const requests = data?.requests ?? [];
@@ -198,6 +202,18 @@ function PengajuanTab() {
     onSuccess: () => { void refetch(); setSubmittingRequest(null); },
     onError: (err) => alert(`Error: ${err.message}`),
   });
+
+  if (status === "loading") {
+    return (
+      <div className="content-section p-12 text-center text-gray-500">
+        Loading...
+      </div>
+    );
+  }
+
+  if (session && !canReadTravel) {
+    return null;
+  }
 
   const mapTravelFormToPayload = (formData: TravelRequestFormData) => ({
     purpose: formData.purpose,
