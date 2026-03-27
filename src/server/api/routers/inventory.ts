@@ -12,7 +12,10 @@ import {
   type Prisma,
 } from "../../../../generated/prisma";
 import { createTRPCRouter, permissionProcedure } from "@/server/api/trpc";
-import { generateJournalEntryNumber } from "@/lib/utils/numberGenerators";
+import {
+  generateFulfillmentRequestNumber,
+  generateJournalEntryNumber,
+} from "@/lib/utils/numberGenerators";
 
 function getTenantScope(ctx: unknown): {
   tenantId: string | null;
@@ -153,6 +156,17 @@ export const inventoryRouter = createTRPCRouter({
               },
             },
             orderBy: [{ warehouse: { name: "asc" } }],
+          },
+          crmProducts: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              type: true,
+              isActive: true,
+            },
+            orderBy: [{ name: "asc" }],
           },
           ledgerEntries: {
             orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
@@ -693,6 +707,52 @@ export const inventoryRouter = createTRPCRouter({
       return result;
     }),
 
+  fulfillmentSummary: permissionProcedure("inventory", "read")
+    .input(z.object({}).optional())
+    .output(z.any())
+    .query(async ({ ctx }) => {
+      const [requests, reservationCounts] = await Promise.all([
+        ctx.db.crmFulfillmentRequest.groupBy({
+          by: ["status"],
+          where: withTenantWhere(ctx, {}),
+          _count: { _all: true },
+        }),
+        ctx.db.inventoryReservation.groupBy({
+          by: ["status"],
+          where: withTenantWhere(ctx, {}),
+          _count: { _all: true },
+        }),
+      ]);
+
+      const requestMap = new Map<string, number>();
+      for (const row of requests) {
+        requestMap.set(row.status, row._count._all);
+      }
+
+      const reservationMap = new Map<string, number>();
+      for (const row of reservationCounts) {
+        reservationMap.set(row.status, row._count._all);
+      }
+
+      return {
+        requests: {
+          draft: requestMap.get(CrmFulfillmentStatus.DRAFT) ?? 0,
+          reserved: requestMap.get(CrmFulfillmentStatus.RESERVED) ?? 0,
+          partial: requestMap.get(CrmFulfillmentStatus.PARTIAL) ?? 0,
+          ready: requestMap.get(CrmFulfillmentStatus.READY) ?? 0,
+          delivered: requestMap.get(CrmFulfillmentStatus.DELIVERED) ?? 0,
+          canceled: requestMap.get(CrmFulfillmentStatus.CANCELED) ?? 0,
+        },
+        reservations: {
+          active: reservationMap.get(InventoryReservationStatus.ACTIVE) ?? 0,
+          partial: reservationMap.get(InventoryReservationStatus.PARTIAL) ?? 0,
+          fulfilled: reservationMap.get(InventoryReservationStatus.FULFILLED) ?? 0,
+          released: reservationMap.get(InventoryReservationStatus.RELEASED) ?? 0,
+          canceled: reservationMap.get(InventoryReservationStatus.CANCELED) ?? 0,
+        },
+      };
+    }),
+
   listFulfillmentRequests: permissionProcedure("inventory", "read")
     .input(
       z.object({
@@ -1196,11 +1256,6 @@ export const inventoryRouter = createTRPCRouter({
           },
         });
 
-        await tx.crmLead.update({
-          where: { id: request.lead.id },
-          data: { fulfillmentStatus: nextStatus },
-        });
-
         await tx.auditLog.create({
           data: {
             tenantId: scope.tenantId,
@@ -1364,11 +1419,6 @@ export const inventoryRouter = createTRPCRouter({
           },
         });
 
-        await tx.crmLead.update({
-          where: { id: request.lead.id },
-          data: { fulfillmentStatus: CrmFulfillmentStatus.CANCELED },
-        });
-
         await tx.auditLog.create({
           data: {
             tenantId: scope.tenantId,
@@ -1396,7 +1446,7 @@ export const inventoryRouter = createTRPCRouter({
       z.object({
         leadId: z.string(),
         customerId: z.string().optional(),
-        requestNumber: z.string().min(1).max(50),
+        requestNumber: z.string().min(1).max(50).optional(),
         requestedDate: z.coerce.date().optional(),
         notes: z.string().optional(),
         lines: z.array(
@@ -1421,14 +1471,67 @@ export const inventoryRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "CRM lead not found" });
       }
 
+      const requestNumber = input.requestNumber ?? await generateFulfillmentRequestNumber(ctx.db, scope.tenantId);
+
       const existing = await ctx.db.crmFulfillmentRequest.findFirst({
-        where: withTenantWhere(ctx, { requestNumber: input.requestNumber }),
+        where: withTenantWhere(ctx, { requestNumber }),
       });
       if (existing) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: `Fulfillment request \"${input.requestNumber}\" already exists`,
+          message: `Fulfillment request \"${requestNumber}\" already exists`,
         });
+      }
+
+      const activeStatuses = [
+        CrmFulfillmentStatus.DRAFT,
+        CrmFulfillmentStatus.RESERVED,
+        CrmFulfillmentStatus.PARTIAL,
+        CrmFulfillmentStatus.READY,
+      ];
+
+      const activeRequest = await ctx.db.crmFulfillmentRequest.findFirst({
+        where: withTenantWhere(ctx, {
+          leadId: lead.id,
+          status: { in: activeStatuses },
+        }),
+        select: { id: true, requestNumber: true, status: true },
+      });
+
+      if (activeRequest) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Lead already has active fulfillment request ${activeRequest.requestNumber} (${activeRequest.status})`,
+        });
+      }
+
+      const incomingLeadLineIds = input.lines
+        .map((line) => line.leadLineId)
+        .filter((value): value is string => Boolean(value));
+
+      if (incomingLeadLineIds.length > 0) {
+        const duplicateLine = await ctx.db.crmFulfillmentRequestLine.findFirst({
+          where: {
+            leadLineId: { in: incomingLeadLineIds },
+            fulfillmentRequest: {
+              is: withTenantWhere(ctx, {
+                status: { in: activeStatuses },
+              }),
+            },
+          },
+          include: {
+            fulfillmentRequest: {
+              select: { requestNumber: true, status: true },
+            },
+          },
+        });
+
+        if (duplicateLine) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `A selected line is already included in active fulfillment request ${duplicateLine.fulfillmentRequest.requestNumber} (${duplicateLine.fulfillmentRequest.status})`,
+          });
+        }
       }
 
       const request = await ctx.db.$transaction(async (tx) => {
@@ -1437,7 +1540,7 @@ export const inventoryRouter = createTRPCRouter({
             tenantId: scope.tenantId,
             leadId: lead.id,
             customerId: input.customerId ?? lead.customer?.id,
-            requestNumber: input.requestNumber,
+            requestNumber,
             requestedDate: input.requestedDate,
             notes: input.notes,
             status: CrmFulfillmentStatus.DRAFT,
@@ -1580,14 +1683,6 @@ export const inventoryRouter = createTRPCRouter({
             },
             lead: { select: { id: true, company: true, stage: true } },
             customer: { select: { id: true, company: true } },
-          },
-        });
-
-        await tx.crmLead.update({
-          where: { id: lead.id },
-          data: {
-            requiresInventory: true,
-            fulfillmentStatus: nextStatus,
           },
         });
 

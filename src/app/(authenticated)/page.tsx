@@ -53,23 +53,28 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === "unauthenticated") router.replace("/login");
+    if (status === "unauthenticated") {
+      void router.replace("/login");
+    }
   }, [status, router]);
-
-  if (!session?.user) return null;
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { data: rawData, isLoading } = api.dashboard.getMyDashboard.useQuery(
     {},
-    { refetchOnWindowFocus: false },
+    {
+      refetchOnWindowFocus: false,
+      enabled: status === "authenticated" && !!session?.user,
+    },
   );
   const data = rawData as DashboardData | undefined;
 
   const userRoles = normalizeRoles({
-    roles: session.user.roles,
-    role: session.user.role,
+    roles: session?.user?.roles,
+    role: session?.user?.role,
   });
   const isApprover = hasAnyRole(userRoles, APPROVER_ROLES);
+
+  if (status !== "authenticated" || !session?.user) return null;
 
   const totalTrips = data?.travelRequests.total ?? 0;
   const totalClaims = data?.claims.total ?? 0;

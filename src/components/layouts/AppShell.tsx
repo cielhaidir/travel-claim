@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Session } from "next-auth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { PanelLeftClose } from "lucide-react";
 import { SidebarNav } from "@/components/navigation/SidebarNav";
 import { TopHeader } from "@/components/navigation/TopHeader";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -15,66 +16,85 @@ interface AppShellProps {
 
 export function AppShell({ children, session }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true);
   const pathname = usePathname();
+  const handleMenuClick = () => {
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      setDesktopSidebarVisible((prev) => !prev);
+      return;
+    }
+
+    setSidebarOpen((prev) => !prev);
+  };
 
   return (
     <ToastProvider>
-      <div className="flex h-screen overflow-hidden bg-gray-50">
+      <div className="flex h-screen overflow-hidden bg-[#f7f7f8]">
+        {/* Mobile sidebar backdrop */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 z-40 bg-gray-900 bg-opacity-50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/25 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
+        {/* Sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-white transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-50 w-[250px] transform border-r border-gray-200 bg-white transition-transform duration-300 ease-in-out lg:transition-[width,opacity] lg:duration-300 lg:ease-in-out ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } ${
+            desktopSidebarVisible
+              ? "lg:static lg:w-[250px] lg:translate-x-0 lg:opacity-100"
+              : "lg:static lg:w-0 lg:translate-x-0 lg:border-r-0 lg:opacity-0 lg:overflow-hidden lg:pointer-events-none"
           }`}
         >
           <div className="flex h-full flex-col">
-            <div className="flex h-16 items-center border-b px-6">
-              <Link href="/" className="flex items-center space-x-2">
-                <div className="h-8 w-8 rounded-lg bg-blue-600" />
-                <span className="text-lg font-semibold text-gray-900">
-                  Travel & Claim
+            {/* Logo */}
+            <div className="flex h-[72px] items-center justify-between border-b border-gray-200 px-5">
+              <Link href="/" className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center text-blue-700">
+                  <img
+                    src="/svg/erp-icon.svg"
+                    alt="ERP Logo"
+                    className="h-5 w-5"
+                    draggable={false}
+                  />
+                </div>
+                <span className="text-[31px] font-semibold tracking-tight text-[#2f5ec7]">
+                  ERP
                 </span>
               </Link>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 lg:hidden"
+                aria-label="Close menu"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
             </div>
 
+            {/* Navigation */}
             <SidebarNav
               session={session}
               currentPath={pathname}
               onNavigate={() => setSidebarOpen(false)}
             />
-
-            <div className="border-t p-4">
-              <div className="flex items-center space-x-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 font-semibold text-white">
-                  {session.user.name?.charAt(0) ?? "U"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-gray-900">
-                    {session.user.name}
-                  </p>
-                  <p className="truncate text-xs text-gray-500">
-                    {session.user.email}
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
         </aside>
 
+        {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Top header */}
           <TopHeader
             session={session}
-            onMenuClick={() => setSidebarOpen(!sidebarOpen)}
+            onMenuClick={handleMenuClick}
           />
 
+          {/* Page content */}
           <main className="flex-1 overflow-y-auto">
-            <div className="container mx-auto px-4 py-6 lg:px-8">
-              <div className="mt-6">{children}</div>
+            <div className="px-4 py-6 lg:px-8">
+              {/* <Breadcrumbs currentPath={pathname} /> */}
+              <div>{children}</div>
             </div>
           </main>
         </div>

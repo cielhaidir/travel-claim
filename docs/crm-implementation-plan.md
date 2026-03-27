@@ -2,591 +2,429 @@
 
 ## Goal
 
-Introduce a sales-focused CRM module into `travel-claim` without breaking the existing travel, approval, claim, bailout, finance, and multi-tenant architecture.
+Implement CRM secara bertahap dengan scope yang kecil dan terkendali.
 
-The CRM in this project should manage:
+Target implementasi sekarang:
 
-- customers
-- customer contacts
-- sales opportunities
-- sales activities and visit history
-- conversion from opportunity to project
-- linkage between CRM activity and business travel
+- sederhanakan modul CRM
+- hilangkan chat / communication module dari fase aktif
+- jadikan follow up sebagai bagian dari detail deal
+- gunakan kanban yang stabil dan card yang bisa dikustomisasi
 
-## Recommended Direction
+## Keputusan Teknis Yang Dikunci
 
-Implement a lightweight CRM that fits the current system instead of adding a separate full enterprise CRM.
+### 1. Scope Aktif
 
-This is the best fit for the current codebase because:
-
-- `Project` already contains `clientName`
-- sales travel already depends on `Project`
-- claims already contain customer-like fields such as `customerName`, `guestName`, and `guestCompany`
-- the application is already a modular monolith with tenant-aware master data and workflow modules
-
-So the correct design is:
-
-1. add CRM as a new master-data and sales workflow layer
-2. integrate it with `Project`, `TravelRequest`, and `Claim`
-3. preserve current behavior during migration
-
-## Current Codebase Signals
-
-The current repository already shows where CRM should connect:
-
-- `Project.clientName` in `prisma/schema.prisma`
-- `Project.salesLead` in `prisma/schema.prisma`
-- sales travel currently requires `projectId`
-- claims still collect customer-related text manually
-- sidebar navigation is currently flat, not grouped
-
-This means CRM should unify customer data that is currently scattered across:
-
-- project records
-- travel sales context
-- claim forms
-
-## Scope for V1
-
-Include in V1:
-
-- customer master data
-- customer contacts
-- opportunity pipeline
-- activity log for calls, meetings, and visits
-- optional travel linkage for customer visits
-- project conversion from won opportunities
-- tenant-aware permissions and audit logging
-
-Do not include in V1:
-
-- marketing campaigns
-- email automation
-- customer support ticketing
-- invoicing
-- quotation builder
-- complex forecasting
-- drag-and-drop pipeline builder
-
-## Phase 0 - Decisions to Lock First
-
-Before coding, confirm these rules:
-
-1. CRM in this project means sales CRM, not support/helpdesk CRM.
-2. `Project` remains an execution entity, not the first CRM entity.
-3. `Opportunity` comes before `Project`.
-4. `CustomerContact` should be managed inside customer detail in V1, not as a separate top-level menu.
-5. All CRM records must be tenant-scoped like the rest of the business data.
-6. Existing text fields such as `Project.clientName` and `Claim.customerName` should stay during transition, then be deprecated later.
-
-## Target CRM Data Model
-
-### 1. `Customer`
-
-Purpose:
-
-- source of truth for company or account data
-
-Recommended fields:
-
-- `id`
-- `tenantId`
-- `code`
-- `name`
-- `legalName`
-- `industry`
-- `website`
-- `email`
-- `phone`
-- `address`
-- `city`
-- `country`
-- `notes`
-- `ownerId`
-- `status`
-- `deletedAt`
-- `createdAt`
-- `updatedAt`
-
-Recommended relations:
-
-- many `CustomerContact`
-- many `Opportunity`
-- many `Project`
-- many `CustomerActivity`
-
-### 2. `CustomerContact`
-
-Purpose:
-
-- store contact persons inside a customer account
-
-Recommended fields:
-
-- `id`
-- `tenantId`
-- `customerId`
-- `name`
-- `jobTitle`
-- `email`
-- `phone`
-- `isPrimary`
-- `notes`
-- `isActive`
-- `createdAt`
-- `updatedAt`
-
-### 3. `Opportunity`
-
-Purpose:
-
-- represent a potential deal or sales pipeline record before it becomes a project
-
-Recommended fields:
-
-- `id`
-- `tenantId`
-- `opportunityNumber`
-- `customerId`
-- `ownerId`
-- `title`
-- `description`
-- `stage`
-- `estimatedValue`
-- `probability`
-- `expectedCloseDate`
-- `nextAction`
-- `lostReason`
-- `wonAt`
-- `lostAt`
-- `projectId`
-- `deletedAt`
-- `createdAt`
-- `updatedAt`
-
-Recommended relation behavior:
-
-- one `Opportunity` belongs to one `Customer`
-- one `Opportunity` may convert to one `Project`
-
-### 4. `CustomerActivity`
-
-Purpose:
-
-- track every call, meeting, visit, follow-up, and customer-facing event
-
-Recommended fields:
-
-- `id`
-- `tenantId`
-- `customerId`
-- `contactId`
-- `opportunityId`
-- `projectId`
-- `travelRequestId`
-- `createdById`
-- `assignedToId`
-- `type`
-- `subject`
-- `notes`
-- `activityDate`
-- `nextFollowUpAt`
-- `status`
-- `outcome`
-- `createdAt`
-- `updatedAt`
-
-### 5. Extend Existing Models
-
-Recommended additions to current models:
-
-- `Project.customerId`
-- `Project.opportunityId` optional
-- `TravelRequest.customerId` optional
-- `TravelRequest.opportunityId` optional
-- `Claim.customerId` optional later, not required in first migration
-
-Important recommendation:
-
-Do not remove `Project.clientName` or `Claim.customerName` in V1. Keep them as transitional fields until CRM relations are stable.
-
-## Recommended Enums
-
-Add enums such as:
-
-- `CustomerStatus`
-  - `PROSPECT`
-  - `ACTIVE`
-  - `INACTIVE`
-  - `ARCHIVED`
-- `OpportunityStage`
-  - `LEAD`
-  - `QUALIFIED`
-  - `PROPOSAL`
-  - `NEGOTIATION`
-  - `WON`
-  - `LOST`
-  - `ON_HOLD`
-- `CustomerActivityType`
-  - `CALL`
-  - `MEETING`
-  - `VISIT`
-  - `EMAIL`
-  - `WHATSAPP`
-  - `FOLLOW_UP`
-  - `OTHER`
-- `CustomerActivityStatus`
-  - `PLANNED`
-  - `COMPLETED`
-  - `CANCELED`
-
-## Phase 1 - Prisma Schema Foundation
-
-1. Add the new CRM enums to `prisma/schema.prisma`.
-2. Add new models:
-   - `Customer`
-   - `CustomerContact`
-   - `Opportunity`
-   - `CustomerActivity`
-3. Add optional CRM foreign keys to:
-   - `Project`
-   - `TravelRequest`
-4. Add tenant-aware unique constraints:
-   - `Customer.code`
-   - `Opportunity.opportunityNumber`
-5. Add indexes for:
-   - `tenantId`
-   - `status`
-   - `ownerId`
-   - `customerId`
-   - `stage`
-   - `activityDate`
-6. Add `deletedAt` to CRM entities to match the current soft-delete style.
-
-## Phase 2 - Migration and Backfill Strategy
-
-1. Create the CRM tables and optional foreign keys first.
-2. Keep all new CRM relations nullable in the first migration.
-3. Backfill `Customer` records from distinct `Project.clientName` values.
-4. Link existing `Project` rows to the matching `Customer` where the client name is clear.
-5. Do not auto-backfill from `Claim.customerName` in the first pass unless the data quality is reviewed.
-6. Keep legacy text fields active while the UI transitions to relational CRM data.
-7. After the first release is stable, plan a second pass to reduce manual text entry.
-
-## Phase 3 - API Layer
-
-Add new routers under `src/server/api/routers`:
-
-- `customer.ts`
-- `opportunity.ts`
-- `customerActivity.ts`
-
-Recommended router responsibilities:
-
-### `customer.ts`
-
-- `getAll`
-- `getById`
-- `create`
-- `update`
-- `delete`
-- `getContacts`
-- `createContact`
-- `updateContact`
-- `deleteContact`
-
-### `opportunity.ts`
-
-- `getAll`
-- `getById`
-- `create`
-- `update`
-- `changeStage`
-- `convertToProject`
-- `delete`
-
-### `customerActivity.ts`
-
-- `getAll`
-- `getById`
-- `create`
-- `update`
-- `complete`
-- `cancel`
-- `delete`
-
-Required implementation rules:
-
-- apply tenant scoping exactly like other business routers
-- write `AuditLog` on create, update, delete, stage changes, and conversions
-- check cross-entity tenant ownership before linking any relation
-
-## Phase 4 - Permissions and Access Control
-
-Add CRM permissions in `src/lib/auth/permissions.ts`.
-
-Recommended permission keys:
-
-- `crm.read`
-- `customer.read`
-- `customer.manage`
-- `opportunity.read`
-- `opportunity.manage`
-- `opportunity.convert`
-- `activity.read`
-- `activity.manage`
-
-Recommended role access for V1:
-
-- `SALES_EMPLOYEE`
-  - read CRM records they own or are assigned
-  - manage their own opportunities and activities
-- `SALES_CHIEF`
-  - broader sales team access
-- `MANAGER`
-  - broader read and supervision access
-- `DIRECTOR`
-  - broader read access
-- `ADMIN`
-  - full management access
-
-Important note:
-
-Do not give `FINANCE` CRM management permissions by default unless there is a real operational need.
-
-## Phase 5 - Navigation and Menu Design
-
-Because the current sidebar is flat, the cleanest V1 menu is also flat.
-
-Recommended new menus:
+Hanya area berikut yang dikerjakan:
 
 - `CRM Dashboard`
 - `Customers`
-- `Opportunities`
-- `Activities`
+- `Leads`
+- `Deals`
+- `Deal Follow Up` di detail deal
 
-Keep existing:
+### 2. Scope Yang Ditunda
 
-- `Projects`
-- `Travel`
-- `Claims`
-- `Approvals`
+Ditunda ke fase berikutnya:
 
-Important recommendation:
+- communication module
+- conversation / message models
+- activities module sebagai menu terpisah
+- products / services
+- orders
+- support
+- marketing automation
+- reports lanjutan
 
-Do not build grouped or collapsible CRM navigation in V1 unless the sidebar is already being refactored. The current navigation component is simpler with flat items.
+### 3. Engine Kanban
 
-## Phase 6 - UI Pages and Components
+Primary choice:
 
-Recommended pages:
+- `@syncfusion/ej2-react-kanban`
 
-- `src/app/(authenticated)/crm/page.tsx`
-- `src/app/(authenticated)/customers/page.tsx`
-- `src/app/(authenticated)/opportunities/page.tsx`
-- `src/app/(authenticated)/activities/page.tsx`
+Fallback:
 
-Recommended component groups:
+- board manual jika ada blocker yang nyata
 
-- `src/components/features/crm/customers/*`
-- `src/components/features/crm/opportunities/*`
-- `src/components/features/crm/activities/*`
+### 4. Prinsip Penting
 
-Recommended V1 page behavior:
+- business flow tetap sederhana
+- route CRM aktif harus sedikit
+- schema minimum lebih penting daripada schema yang terlalu lengkap
+- custom card adalah requirement utama
 
-### Customers
+## Route Scope
 
-- customer list with search and status filter
-- create and edit modal
-- detail panel or detail page
-- embedded contacts section inside customer detail
+Route yang dipertahankan:
 
-### Opportunities
+- `/crm`
+- `/crm/customers`
+- `/crm/customers/[id]`
+- `/crm/leads`
+- `/crm/leads/[id]`
+- `/crm/deals`
+- `/crm/deals/[id]`
 
-- pipeline table or simple stage board
-- stage filter
-- owner filter
-- expected close date
-- convert-to-project action
+Route yang sebaiknya dihapus dari scope aktif:
 
-### Activities
+- `/crm/communication`
+- `/crm/activities`
+- `/crm/products-services`
+- `/crm/sales-orders`
+- `/crm/support-tickets`
+- `/crm/marketing-automation`
+- `/crm/reports`
 
-- list of planned and completed activities
-- due-today and overdue indicators
-- quick add for visit, call, meeting, follow-up
-- link to customer, opportunity, and optional travel request
+Catatan:
 
-### CRM Dashboard
+Kalau sebagian route sudah sempat ada di codebase, target akhirnya tetap harus kembali ke route minimum di atas.
 
-- total customers
-- active opportunities
-- won and lost summary
-- overdue activities
-- upcoming customer visits
+## Target Data Model Minimum
 
-## Phase 7 - Workflow Integration With Existing Modules
+### `CrmCustomer`
 
-This is the most important project-specific step.
+Minimum fields:
 
-### 1. Customer to Opportunity
+- `id`
+- `tenantId`
+- `name`
+- `company`
+- `email`
+- `phone`
+- `segment`
+- `city`
+- `ownerName`
+- `status`
+- `notes`
+- `createdAt`
+- `updatedAt`
 
-Recommended flow:
+### `CrmContact`
 
-1. sales creates `Customer`
-2. sales adds contact person
-3. sales creates `Opportunity`
-4. sales logs calls, meetings, and visits in `CustomerActivity`
+Minimum fields:
 
-### 2. Opportunity to Travel Request
+- `id`
+- `tenantId`
+- `customerId`
+- `name`
+- `title`
+- `email`
+- `phone`
+- `department`
+- `isPrimary`
+- `notes`
 
-Current problem:
+### `CrmLead`
 
-- sales travel currently requires `projectId`
+Minimum fields:
 
-That is too restrictive for CRM because many sales visits happen before a project exists.
+- `id`
+- `tenantId`
+- `customerId`
+- `name`
+- `company`
+- `email`
+- `phone`
+- `stage`
+- `value`
+- `probability`
+- `source`
+- `priority`
+- `ownerName`
+- `expectedCloseDate`
+- `convertedToDealAt`
+- `notes`
 
-Recommended rule change:
+### `CrmDeal`
 
-- for `TravelRequest.travelType = SALES`, require:
-  - `projectId`, or
-  - `opportunityId`
+Minimum fields:
 
-Optional enhancement:
+- `id`
+- `tenantId`
+- `customerId`
+- `leadId`
+- `title`
+- `company`
+- `ownerName`
+- `stage`
+- `value`
+- `probability`
+- `source`
+- `expectedCloseDate`
+- `closedAt`
+- `lostReason`
+- `notes`
 
-- auto-fill `customerId` from the chosen project or opportunity
+### `CrmDealNote`
 
-This allows pre-sales travel without forcing users to create a fake project first.
+Untuk follow up sederhana di detail deal.
 
-### 3. Opportunity to Project
+Minimum fields:
 
-Recommended conversion flow:
+- `id`
+- `tenantId`
+- `dealId`
+- `type`
+- `body`
+- `nextFollowUpAt`
+- `ownerName`
+- `createdAt`
+- `updatedAt`
 
-1. opportunity stage moves to `WON`
-2. user clicks `Convert to Project`
-3. system creates `Project`
-4. system links:
-   - `Project.customerId`
-   - `Project.opportunityId`
-5. system keeps the opportunity as historical CRM context
+## Enums Yang Direkomendasikan
 
-### 4. Travel Request to Activity History
+### Lead Stage
 
-Recommended behavior:
+- `NEW`
+- `QUALIFIED`
 
-- when a customer-facing travel request is submitted, the system may create or suggest a `CustomerActivity`
-- when the trip completes, sales updates the activity outcome and next follow-up
+### Deal Stage
 
-This makes travel history visible in CRM instead of staying isolated inside travel records only.
+- `DISCOVERY`
+- `PROPOSAL`
+- `NEGOTIATION`
+- `VERBAL_WON`
+- `WON`
+- `LOST`
+- `ON_HOLD`
 
-### 5. Claim Integration
+### Deal Note Type
 
-Recommended V1 behavior:
+- `NOTE`
+- `FOLLOW_UP`
+- `INTERNAL_UPDATE`
 
-- keep existing `Claim.customerName` input for compatibility
-- when a claim is linked to a travel request with `customerId`, show the linked customer in the UI
-- later, replace manual customer text entry with CRM-derived data where possible
+## Kanban Strategy
 
-## Phase 8 - Project Module Refactor
+Strategi default:
 
-The current `Project` module should become CRM-aware, not replaced.
+- pakai `@syncfusion/ej2-react-kanban` sebagai engine board
+- bungkus lewat component internal agar card dan perilaku board tetap dikendalikan aplikasi
+- siapkan fallback manual hanya jika ada blocker teknis yang nyata
 
-Recommended changes:
+## Syncfusion POC Checklist
 
-1. add `customerId` to `Project`
-2. keep `clientName` temporarily for migration compatibility
-3. update project forms to select a customer instead of free-typing client name
-4. display both customer and originating opportunity where available
-5. block duplicate or unclear project creation from the same opportunity
+Sebelum dipakai penuh, lakukan validasi berikut:
 
-## Phase 9 - Reporting and Dashboard Extensions
+1. install dependency `@syncfusion/ej2-react-kanban`
+2. pastikan stylesheet bisa diload tanpa merusak tema aplikasi
+3. pastikan board dapat render di halaman authenticated
+4. pastikan drag and drop bisa memicu mutation stage
+5. pastikan custom card bisa dirender dari component internal
+6. pastikan empty column dan long card tetap rapi
 
-Add CRM reporting after the base module is stable.
+## Custom Card Rules
 
-Recommended reports:
+Card harus dirender dari component internal project.
 
-- opportunities by stage
-- opportunities by owner
-- won and lost trend
-- customer visit count
-- overdue follow-ups
-- conversion from opportunity to project
+Contoh struktur abstraction:
 
-Recommended rule:
+- `CrmKanbanBoard`
+- `LeadKanbanCard`
+- `DealKanbanCard`
 
-Do not mix CRM dashboard metrics into finance dashboards immediately. Keep them separate first.
+Field minimum card:
 
-## Phase 10 - Testing and Validation
+- company / title
+- owner
+- value
+- probability
+- source
+- target close date
+- badge priority atau badge stage
 
-Add tests for:
+Engine board boleh dari Syncfusion, tetapi isi visual card tidak boleh terkunci ke template bawaan library.
 
-- tenant isolation for all CRM records
-- permission checks by role
-- customer and contact CRUD
-- opportunity stage transitions
-- project conversion from opportunity
-- sales travel with `opportunityId` and no `projectId`
-- no regression to existing travel submission flow
-- audit log creation for CRM mutations
+## Fase Implementasi Teknis
 
-Critical regression scenarios:
+### Phase 0 - Preflight
 
-1. existing project-based sales travel still works
-2. non-sales travel is unchanged
-3. claims remain valid for existing travel requests
-4. tenant filtering prevents cross-tenant CRM visibility
+Deliverables:
 
-## Recommended Build Order
+- [ ] Finalisasi dokumen scope
+- [ ] Finalisasi route aktif
+- [ ] Finalisasi keputusan no-chat
+- [ ] Finalisasi target schema minimum
+- [ ] Finalisasi keputusan Syncfusion sebagai primary kanban engine
 
-Implement in this order:
+Done jika:
 
-1. lock CRM scope and V1 rules
-2. add Prisma models and enums
-3. add migration and backfill scripts
-4. build customer router and pages
-5. build contacts inside customer detail
-6. build opportunity router and pages
-7. build activity router and pages
-8. integrate CRM permissions
-9. update project module to use `customerId`
-10. change sales travel rule from `project required` to `project or opportunity required`
-11. add conversion from opportunity to project
-12. add tests and regression validation
+- tim setuju bahwa CRM V1 hanya terdiri dari customer, lead, deal, dan follow up per deal
+
+### Phase 1 - Cleanup dan Isolation
+
+Backend:
+
+- [ ] rapikan router CRM agar hanya menyisakan prosedur yang relevan
+- [ ] keluarkan endpoint communication global
+- [ ] keluarkan endpoint activity global bila memang tidak dipakai
+
+Frontend:
+
+- [ ] rapikan sidebar CRM
+- [ ] hapus route placeholder CRM yang di luar scope
+- [ ] hapus page yang tidak lagi dipakai
+
+Done jika:
+
+- area `/app/(authenticated)/crm/` hanya berisi route aktif
+
+### Phase 2 - Schema Minimum
+
+Backend:
+
+- [ ] evaluasi ulang schema CRM yang sekarang
+- [ ] pertahankan hanya model minimum
+- [ ] hapus model chat bila memang belum dibutuhkan
+- [ ] tambahkan `CrmDealNote` bila follow up deal akan disimpan terpisah
+- [ ] update migration plan
+
+Done jika:
+
+- schema CRM sesuai scope kecil dan tidak memuat entity yang belum dipakai
+
+### Phase 3 - Customer Module
+
+Backend:
+
+- [ ] query customer list
+- [ ] query customer detail
+- [ ] embedded contact CRUD
+
+Frontend:
+
+- [ ] customer list page
+- [ ] customer detail page
+- [ ] contacts section di detail customer
+
+Done jika:
+
+- customer dan contacts bisa dipakai tanpa bergantung ke modul lain
+
+### Phase 4 - Syncfusion Kanban Foundation
+
+Backend:
+
+- [ ] siapkan mutation change stage untuk lead
+- [ ] siapkan mutation change stage untuk deal
+
+Frontend:
+
+- [ ] install dan setup Syncfusion kanban
+- [ ] buat wrapper `CrmKanbanBoard`
+- [ ] buat custom card API internal
+- [ ] pastikan drag and drop stabil
+
+Done jika:
+
+- board reusable bisa dipakai untuk lead dan deal dengan custom card
+
+### Phase 5 - Leads Kanban
+
+Backend:
+
+- [ ] query lead board
+- [ ] mutation update lead stage
+- [ ] mutation convert lead to deal
+
+Frontend:
+
+- [ ] page lead kanban
+- [ ] lead detail page
+- [ ] action convert to deal
+
+Done jika:
+
+- lead board berjalan penuh dengan dua stage sederhana
+
+### Phase 6 - Deals Kanban
+
+Backend:
+
+- [ ] query deal board
+- [ ] mutation update deal stage
+
+Frontend:
+
+- [ ] page deal kanban
+- [ ] deal detail page
+
+Done jika:
+
+- deal board berjalan penuh dengan stage pipeline aktif
+
+### Phase 7 - Deal Follow Up
+
+Backend:
+
+- [ ] tambah model dan router untuk deal note / follow up
+- [ ] query timeline note per deal
+- [ ] create note / follow up
+
+Frontend:
+
+- [ ] section follow up di detail deal
+- [ ] tampilkan timeline note
+- [ ] form tambah note
+- [ ] tampilkan next follow up date
+
+Done jika:
+
+- deal detail sudah cukup untuk mencatat tindak lanjut tanpa chat module
+
+### Phase 8 - Dashboard dan Hardening
+
+Backend:
+
+- [ ] dashboard summary query
+- [ ] reminder query untuk deal yang perlu follow up
+- [ ] audit log untuk perubahan penting
+
+Frontend:
+
+- [ ] dashboard summary cards
+- [ ] list deal yang perlu follow up
+- [ ] loading, empty state, dan error state
+
+Done jika:
+
+- dashboard ringkas sudah usable dan seluruh flow inti bisa dipantau
 
 ## Acceptance Criteria
 
-The CRM implementation is successful when:
+Implementasi dianggap siap bila:
 
-- sales users can create customers, contacts, opportunities, and activities
-- customer data is no longer only free-text inside project and claim records
-- sales travel can be linked to an opportunity before a project exists
-- a won opportunity can be converted into a project
-- CRM data is tenant-scoped and permission-protected
-- audit logging exists for all major CRM actions
-- existing travel, approval, claim, and finance flows still work
+- route CRM aktif sudah kecil dan rapi
+- kanban leads dan deals berjalan stabil
+- Syncfusion board sudah lolos validasi atau diganti fallback yang setara
+- card kanban bisa dikustomisasi dari component internal
+- follow up ada di detail deal, bukan chat module
+- schema CRM tidak memuat banyak entity yang belum dipakai
+- permission dan tenant scoping tetap aman
 
-## Recommended V1 User Flow
+## Urutan Kerja Yang Direkomendasikan
 
-Use this as the baseline business flow:
+Urutan paling aman:
 
-1. Create customer
-2. Add contact person
-3. Create opportunity
-4. Log first meeting or visit activity
-5. Create travel request linked to opportunity if a visit is needed
-6. Complete travel, approvals, bailout, and claims as usual
-7. Record visit result in customer activity
-8. Update opportunity stage
-9. If won, convert opportunity into project
+1. update dokumen dan lock scope
+2. cleanup route dan router
+3. rapikan schema minimum
+4. setup Syncfusion kanban foundation
+5. selesaikan lead board
+6. selesaikan deal board
+7. tambahkan deal follow up
+8. selesaikan dashboard
+9. lakukan hardening dan regression check
 
-## Final Recommendation
+## Catatan Akhir
 
-Do not implement CRM as a giant standalone subsystem first.
+Untuk repo ini, bahaya terbesar bukan kurang fitur, tetapi terlalu banyak scope aktif sekaligus.
 
-For this repository, the cleanest path is:
+Karena itu:
 
-- customer master data
-- opportunity pipeline
-- activity tracking
-- travel integration
-- project conversion
+- communication diparkir dulu
+- activities global diparkir dulu
+- follow up dipusatkan di detail deal
+- kanban dibuat reusable tetapi tetap sederhana
 
-That keeps the design aligned with how this system already works and avoids forcing the team to maintain two disconnected business processes.
+Pendekatan ini membuat CRM lebih realistis untuk diselesaikan dan lebih mudah dibersihkan bila nanti scope berubah lagi.

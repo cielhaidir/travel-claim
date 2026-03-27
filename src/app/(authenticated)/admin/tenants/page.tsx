@@ -25,6 +25,11 @@ type TenantMember = {
   id: string;
   userId: string;
   role: Role;
+  customRole: {
+    id: string;
+    displayName: string;
+    baseRole: Role | null;
+  } | null;
   status: MembershipStatus;
   isDefault: boolean;
   invitedAt: string | Date | null;
@@ -62,19 +67,19 @@ type SessionMembership = {
   isRootTenant: boolean;
 };
 
+type AssignableRoleOption = {
+  roleKey: string;
+  roleKind: "SYSTEM" | "CUSTOM";
+  displayName: string;
+  baseRole: Role | null;
+  systemRole: Role | null;
+  customRoleId: string | null;
+  tenantId: string;
+};
+
 const EMPTY_TENANTS: TenantSummary[] = [];
+const EMPTY_ASSIGNABLE_ROLES: AssignableRoleOption[] = [];
 const MEMBERSHIPS_PER_PAGE = 10;
-const ROLE_OPTIONS: Role[] = [
-  "ROOT",
-  "ADMIN",
-  "FINANCE",
-  "DIRECTOR",
-  "MANAGER",
-  "SALES_CHIEF",
-  "SUPERVISOR",
-  "SALES_EMPLOYEE",
-  "EMPLOYEE",
-];
 const STATUS_OPTIONS: MembershipStatus[] = ["ACTIVE", "INVITED", "SUSPENDED"];
 const ROLE_LABELS: Record<Role, string> = {
   ROOT: "Root",
@@ -109,6 +114,19 @@ function formatDateTime(value: string | Date) {
   }).format(new Date(value));
 }
 
+function getAssignableRoleValue(option: AssignableRoleOption) {
+  return option.customRoleId
+    ? `custom:${option.customRoleId}`
+    : `system:${option.systemRole ?? option.baseRole ?? "EMPLOYEE"}`;
+}
+
+function resolveAssignableRole(
+  option: AssignableRoleOption,
+  fallback: Role = "EMPLOYEE",
+) {
+  return option.baseRole ?? option.systemRole ?? fallback;
+}
+
 export default function MasterTenantPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
@@ -126,9 +144,16 @@ export default function MasterTenantPage() {
   const [membershipForm, setMembershipForm] = useState<{
     userId: string;
     role: Role;
+    customRoleId: string | null;
     status: MembershipStatus;
     isDefault: boolean;
-  }>({ userId: "", role: "EMPLOYEE", status: "ACTIVE", isDefault: false });
+  }>({
+    userId: "",
+    role: "EMPLOYEE",
+    customRoleId: null,
+    status: "ACTIVE",
+    isDefault: false,
+  });
 
   const isRoot = session?.user.isRoot ?? false;
   const canRead = isRoot || hasPermissionMap(session?.user.permissions, "tenants", "read");
@@ -147,7 +172,10 @@ export default function MasterTenantPage() {
     refetchOnWindowFocus: false,
   });
 
-  const memberships = (session?.user.memberships ?? []) as SessionMembership[];
+  const memberships = useMemo(
+    () => (session?.user.memberships ?? []) as SessionMembership[],
+    [session?.user.memberships],
+  );
   const tenants = useMemo(() => {
     if (!session?.user) return EMPTY_TENANTS;
     if (session.user.isRoot) {
@@ -187,8 +215,21 @@ export default function MasterTenantPage() {
     { tenantId: selectedTenantId },
     { enabled: !!selectedTenantId && canRead, refetchOnWindowFocus: false },
   );
+  const assignableRolesQuery = api.tenant.getAssignableRoles.useQuery(
+    { tenantId: selectedTenantId },
+    {
+      enabled: !!selectedTenantId && canReadUsers,
+      refetchOnWindowFocus: false,
+    },
+  );
   const tenantDetail =
     (tenantDetailQuery.data as TenantDetail | undefined) ?? null;
+  const assignableRoles = useMemo(
+    () =>
+      (assignableRolesQuery.data as AssignableRoleOption[] | undefined) ??
+      EMPTY_ASSIGNABLE_ROLES,
+    [assignableRolesQuery.data],
+  );
   const membershipPageCount = Math.max(
     1,
     Math.ceil((tenantDetail?.memberships.length ?? 0) / MEMBERSHIPS_PER_PAGE),
@@ -237,6 +278,7 @@ export default function MasterTenantPage() {
       setMembershipForm({
         userId: "",
         role: "EMPLOYEE",
+        customRoleId: null,
         status: "ACTIVE",
         isDefault: false,
       });
@@ -254,6 +296,7 @@ export default function MasterTenantPage() {
     setMembershipForm({
       userId: membership?.userId ?? "",
       role: selectedTenant.isRoot ? "ROOT" : (membership?.role ?? "EMPLOYEE"),
+      customRoleId: membership?.customRole?.id ?? null,
       status: membership?.status ?? "ACTIVE",
       isDefault: membership?.isDefault ?? false,
     });
@@ -264,6 +307,38 @@ export default function MasterTenantPage() {
   useEffect(() => {
     setMembershipPage(1);
   }, [selectedTenantId]);
+
+  useEffect(() => {
+    if (!isMembershipOpen || selectedTenant?.isRoot || assignableRoles.length === 0) {
+      return;
+    }
+
+    const currentKey = membershipForm.customRoleId
+      ? `custom:${membershipForm.customRoleId}`
+      : `system:${membershipForm.role}`;
+    const hasCurrentOption = assignableRoles.some((option) =>
+      getAssignableRoleValue(option) === currentKey,
+    );
+
+    if (!hasCurrentOption) {
+      const nextOption = assignableRoles[0];
+      if (!nextOption) {
+        return;
+      }
+
+      setMembershipForm((current) => ({
+        ...current,
+        role: resolveAssignableRole(nextOption, current.role),
+        customRoleId: nextOption.customRoleId,
+      }));
+    }
+  }, [
+    assignableRoles,
+    isMembershipOpen,
+    membershipForm.customRoleId,
+    membershipForm.role,
+    selectedTenant?.isRoot,
+  ]);
 
   useEffect(() => {
     setMembershipPage((currentPage) =>
@@ -385,7 +460,9 @@ export default function MasterTenantPage() {
                               {membership.user.employeeId ? ` • ${membership.user.employeeId}` : ""}
                             </p>
                           </td>
-                          <td className="px-6 py-4 text-gray-700">{ROLE_LABELS[membership.role]}</td>
+                          <td className="px-6 py-4 text-gray-700">
+                            {membership.customRole?.displayName ?? ROLE_LABELS[membership.role]}
+                          </td>
                           <td className="px-6 py-4 text-gray-700">{membership.status}</td>
                           <td className="px-6 py-4 text-gray-700">{membership.isDefault ? "Yes" : "No"}</td>
                           <td className="px-6 py-4 text-xs text-gray-500">
@@ -494,20 +571,51 @@ export default function MasterTenantPage() {
           </select>
           <div className="grid gap-4 md:grid-cols-3">
             <select
-              value={membershipForm.role}
-              onChange={(event) => setMembershipForm((current) => ({ ...current, role: event.target.value as Role }))}
+              value={
+                membershipForm.customRoleId
+                  ? `custom:${membershipForm.customRoleId}`
+                  : `system:${membershipForm.role}`
+              }
+              onChange={(event) => {
+                const selectedValue = event.target.value;
+                if (selectedValue === "system:ROOT") {
+                  setMembershipForm((current) => ({
+                    ...current,
+                    role: "ROOT",
+                    customRoleId: null,
+                  }));
+                  return;
+                }
+
+                const selectedOption = assignableRoles.find((option) =>
+                  getAssignableRoleValue(option) === selectedValue,
+                );
+
+                if (!selectedOption) {
+                  return;
+                }
+
+                setMembershipForm((current) => ({
+                  ...current,
+                  role: resolveAssignableRole(selectedOption, current.role),
+                  customRoleId: selectedOption.customRoleId,
+                }));
+              }}
               disabled={selectedTenant?.isRoot}
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             >
-              {(
-                selectedTenant?.isRoot
-                  ? (["ROOT"] as Role[])
-                  : ROLE_OPTIONS.filter((role) => role !== "ROOT")
-              ).map((role) => (
-                <option key={role} value={role}>
-                  {ROLE_LABELS[role]}
-                </option>
-              ))}
+              {selectedTenant?.isRoot ? (
+                <option value="system:ROOT">Root</option>
+              ) : (
+                assignableRoles.map((option) => (
+                  <option
+                    key={option.roleKey}
+                    value={getAssignableRoleValue(option)}
+                  >
+                    {option.displayName}
+                  </option>
+                ))
+              )}
             </select>
             <select
               value={membershipForm.status}
@@ -543,6 +651,8 @@ export default function MasterTenantPage() {
                   tenantId: selectedTenant.id,
                   userId: membershipForm.userId,
                   role: selectedTenant.isRoot ? "ROOT" : membershipForm.role,
+                  customRoleId:
+                    selectedTenant.isRoot ? undefined : (membershipForm.customRoleId ?? undefined),
                   status: membershipForm.status,
                   isDefault: membershipForm.isDefault,
                 });

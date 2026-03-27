@@ -13,6 +13,10 @@ import {
   protectedProcedure,
   permissionProcedure,
 } from "@/server/api/trpc";
+import {
+  ensureTenantRoleCatalog,
+  getTenantSystemRoleId,
+} from "@/server/auth/permission-store";
 import { userHasPermission } from "@/lib/auth/role-check";
 
 // Role precedence for deriving primary role from a set of roles
@@ -86,6 +90,7 @@ function buildCurrentUserLookup(input: {
 const tenantMembershipInput = z.object({
   tenantId: z.string(),
   role: z.nativeEnum(Role),
+  customRoleId: z.string().optional().nullable(),
   status: z.nativeEnum(MembershipStatus).default(MembershipStatus.ACTIVE),
   isDefault: z.boolean().default(false),
 });
@@ -138,6 +143,7 @@ function normalizeTenantMemberships(input: {
 
     return {
       ...membership,
+      customRoleId: membership.customRoleId ?? null,
       isDefault: membership.isDefault,
       status: membership.status ?? MembershipStatus.ACTIVE,
       role: membership.role,
@@ -150,6 +156,7 @@ function normalizeTenantMemberships(input: {
   const withDefault = normalized.map((membership, index) => ({
     tenantId: membership.tenantId,
     role: membership.role,
+    customRoleId: membership.customRoleId,
     status: membership.status,
     isDefault: hasDefault ? membership.isDefault : index === 0,
   }));
@@ -167,30 +174,130 @@ function normalizeTenantMemberships(input: {
   return withDefault;
 }
 
-function buildUserRoleRows(memberships: TenantMembershipInput[]) {
-  const rows = new Map<Role, { role: Role; tenantId: string }>();
-
-  for (const membership of memberships) {
-    if (membership.status !== MembershipStatus.ACTIVE) continue;
-    if (!rows.has(membership.role)) {
-      rows.set(membership.role, {
-        role: membership.role,
-        tenantId: membership.tenantId,
-      });
-    }
+async function resolveCustomRolesForMemberships(
+  db: PrismaClient,
+  memberships: TenantMembershipInput[],
+): Promise<TenantMembershipInput[]> {
+  const tenantIds = [...new Set(memberships.map((membership) => membership.tenantId))];
+  for (const tenantId of tenantIds) {
+    await ensureTenantRoleCatalog(db, tenantId);
   }
 
-  return [...rows.values()];
+  const customRoleIds = [
+    ...new Set(
+      memberships
+        .map((membership) => membership.customRoleId)
+        .filter((value): value is string => !!value),
+    ),
+  ];
+
+  if (customRoleIds.length === 0) {
+    const resolvedMemberships: TenantMembershipInput[] = [];
+
+    for (const membership of memberships) {
+      const systemRoleId = await getTenantSystemRoleId(
+        db,
+        membership.tenantId,
+        membership.role,
+      );
+
+      resolvedMemberships.push({
+        ...membership,
+        customRoleId: systemRoleId ?? null,
+      });
+    }
+
+    return resolvedMemberships;
+  }
+
+  const customRoles = await db.tenantCustomRole.findMany({
+    where: {
+      id: { in: customRoleIds },
+    },
+    select: {
+      id: true,
+      tenantId: true,
+      baseRole: true,
+      isArchived: true,
+    },
+  });
+
+  const customRoleById = new Map(customRoles.map((role) => [role.id, role]));
+
+  const resolvedMemberships: TenantMembershipInput[] = [];
+
+  for (const membership of memberships) {
+    if (!membership.customRoleId) {
+      const systemRoleId = await getTenantSystemRoleId(
+        db,
+        membership.tenantId,
+        membership.role,
+      );
+
+      resolvedMemberships.push({
+        ...membership,
+        customRoleId: systemRoleId ?? null,
+      });
+      continue;
+    }
+
+    const customRole = customRoleById.get(membership.customRoleId);
+    if (customRole?.tenantId !== membership.tenantId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Invalid custom role selection",
+      });
+    }
+
+    if (customRole.isArchived) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Archived custom roles cannot be assigned",
+      });
+    }
+
+    resolvedMemberships.push({
+      ...membership,
+      role: customRole.baseRole ?? membership.role,
+      customRoleId: customRole.id,
+    });
+  }
+
+  return resolvedMemberships;
+}
+
+function resolvePrimaryMembership(memberships: TenantMembershipInput[]) {
+  return (
+    memberships.find(
+      (membership) =>
+        membership.status === MembershipStatus.ACTIVE && membership.isDefault,
+    ) ??
+    memberships.find(
+      (membership) => membership.status === MembershipStatus.ACTIVE,
+    ) ??
+    memberships[0] ??
+    null
+  );
+}
+
+function buildUserRoleRows(memberships: TenantMembershipInput[]) {
+  const primaryMembership = resolvePrimaryMembership(memberships);
+  if (!primaryMembership) {
+    return [];
+  }
+
+  return [
+    {
+      role: primaryMembership.role,
+      tenantId: primaryMembership.tenantId,
+    },
+  ];
 }
 
 function derivePrimaryFromMemberships(
   memberships: TenantMembershipInput[],
 ): Role {
-  const activeRoles = memberships
-    .filter((membership) => membership.status === MembershipStatus.ACTIVE)
-    .map((membership) => membership.role);
-
-  return derivePrimary(activeRoles);
+  return resolvePrimaryMembership(memberships)?.role ?? Role.EMPLOYEE;
 }
 
 async function assertTenantRecordsExist(
@@ -472,6 +579,13 @@ export const userRouter = createTRPCRouter({
           },
           memberships: {
             include: {
+              customRole: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  baseRole: true,
+                },
+              },
               tenant: {
                 select: {
                   id: true,
@@ -732,8 +846,12 @@ export const userRouter = createTRPCRouter({
         ctx.db,
         tenantMemberships.map((membership) => membership.tenantId),
       );
-      const primaryRole = derivePrimaryFromMemberships(tenantMemberships);
-      const userRoleRows = buildUserRoleRows(tenantMemberships);
+      const resolvedMemberships = await resolveCustomRolesForMemberships(
+        ctx.db,
+        tenantMemberships,
+      );
+      const primaryRole = derivePrimaryFromMemberships(resolvedMemberships);
+      const userRoleRows = buildUserRoleRows(resolvedMemberships);
 
       return ctx.db.user.create({
         data: {
@@ -749,9 +867,10 @@ export const userRouter = createTRPCRouter({
             create: userRoleRows,
           },
           memberships: {
-            create: tenantMemberships.map((membership) => ({
+            create: resolvedMemberships.map((membership) => ({
               tenantId: membership.tenantId,
               role: membership.role,
+              customRoleId: membership.customRoleId,
               status: membership.status,
               isDefault: membership.isDefault,
               ...membershipTimestamps(membership.status),
@@ -813,6 +932,7 @@ export const userRouter = createTRPCRouter({
             select: {
               tenantId: true,
               role: true,
+              customRoleId: true,
               status: true,
               isDefault: true,
             },
@@ -891,7 +1011,11 @@ export const userRouter = createTRPCRouter({
         ctx.db,
         nextMemberships.map((membership) => membership.tenantId),
       );
-      updateData.role = derivePrimaryFromMemberships(nextMemberships);
+      const resolvedMemberships = await resolveCustomRolesForMemberships(
+        ctx.db,
+        nextMemberships,
+      );
+      updateData.role = derivePrimaryFromMemberships(resolvedMemberships);
 
       return ctx.db.$transaction(async (tx) => {
         await tx.tenantMembership.deleteMany({
@@ -899,10 +1023,11 @@ export const userRouter = createTRPCRouter({
         });
 
         await tx.tenantMembership.createMany({
-          data: nextMemberships.map((membership) => ({
+          data: resolvedMemberships.map((membership) => ({
             userId: id,
             tenantId: membership.tenantId,
             role: membership.role,
+            customRoleId: membership.customRoleId,
             status: membership.status,
             isDefault: membership.isDefault,
             ...membershipTimestamps(membership.status),
@@ -913,7 +1038,7 @@ export const userRouter = createTRPCRouter({
           where: { userId: id },
         });
 
-        const userRoleRows = buildUserRoleRows(nextMemberships);
+        const userRoleRows = buildUserRoleRows(resolvedMemberships);
         if (userRoleRows.length > 0) {
           await tx.userRole.createMany({
             data: userRoleRows.map((row) => ({
@@ -1198,6 +1323,12 @@ export const userRouter = createTRPCRouter({
         const hashedPassword = await bcrypt.hash(input.defaultPassword, 10);
 
         const tenantId = getTenantScope(ctx).tenantId;
+        if (tenantId) {
+          await ensureTenantRoleCatalog(ctx.db, tenantId);
+        }
+        const employeeRoleId = tenantId
+          ? await getTenantSystemRoleId(ctx.db, tenantId, Role.EMPLOYEE)
+          : null;
         await ctx.db.user.create({
           data: {
             name: row.displayName.trim(),
@@ -1210,6 +1341,7 @@ export const userRouter = createTRPCRouter({
                     {
                       tenantId,
                       role: Role.EMPLOYEE,
+                      customRoleId: employeeRoleId,
                       status: MembershipStatus.ACTIVE,
                       isDefault: true,
                       activatedAt: new Date(),

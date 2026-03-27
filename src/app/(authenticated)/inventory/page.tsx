@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -12,6 +13,7 @@ import { api } from "@/trpc/react";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 
 type InventoryTab = "items" | "warehouses" | "stock";
+type StockBucketFilter = "ALL" | "SALE_STOCK" | "TEMP_ASSET";
 
 const DEFAULT_ITEM_FORM = {
   sku: "",
@@ -65,6 +67,7 @@ export default function InventoryPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [warehouseSearch, setWarehouseSearch] = useState("");
   const [showCreateItem, setShowCreateItem] = useState(false);
+  const [showEditItem, setShowEditItem] = useState(false);
   const [showCreateWarehouse, setShowCreateWarehouse] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showReclassModal, setShowReclassModal] = useState(false);
@@ -75,6 +78,9 @@ export default function InventoryPage() {
   const [warehouseForm, setWarehouseForm] = useState(DEFAULT_WAREHOUSE_FORM);
   const [receiptForm, setReceiptForm] = useState(DEFAULT_RECEIPT_FORM);
   const [reclassForm, setReclassForm] = useState(DEFAULT_RECLASS_FORM);
+  const [stockWarehouseFilter, setStockWarehouseFilter] = useState("");
+  const [stockBucketFilter, setStockBucketFilter] = useState<StockBucketFilter>("ALL");
+  const [stockLowOnly, setStockLowOnly] = useState(false);
 
   const isRoot = session?.user?.isRoot ?? false;
   const permissions = session?.user?.permissions;
@@ -100,7 +106,15 @@ export default function InventoryPage() {
   );
 
   const stockOverviewQuery = api.inventory.stockOverview.useQuery(
-    { lowStockOnly: false },
+    {
+      lowStockOnly: stockLowOnly,
+      warehouseId: stockWarehouseFilter || undefined,
+    },
+    { enabled: canReadInventory, refetchOnWindowFocus: false },
+  );
+
+  const fulfillmentSummaryQuery = api.inventory.fulfillmentSummary.useQuery(
+    {},
     { enabled: canReadInventory, refetchOnWindowFocus: false },
   );
 
@@ -134,6 +148,21 @@ export default function InventoryPage() {
       showToast({ title: "Berhasil", message: "Gudang berhasil dibuat.", variant: "success" });
       await warehousesQuery.refetch();
       await stockOverviewQuery.refetch();
+    },
+    onError: (error) => {
+      showToast({ title: "Gagal", message: error.message, variant: "error" });
+    },
+  });
+
+  const updateItemMutation = api.inventory.updateItem.useMutation({
+    onSuccess: async () => {
+      setShowEditItem(false);
+      showToast({ title: "Berhasil", message: "Item inventory berhasil diperbarui.", variant: "success" });
+      await itemsQuery.refetch();
+      await stockOverviewQuery.refetch();
+      if (selectedItem?.id) {
+        await itemDetailQuery.refetch();
+      }
     },
     onError: (error) => {
       showToast({ title: "Gagal", message: error.message, variant: "error" });
@@ -180,11 +209,16 @@ export default function InventoryPage() {
     () => (stockOverviewQuery.data?.balances as Array<any> | undefined) ?? [],
     [stockOverviewQuery.data],
   );
+  const filteredBalances = useMemo(
+    () => balances.filter((balance: any) => stockBucketFilter === "ALL" || balance.bucketType === stockBucketFilter),
+    [balances, stockBucketFilter],
+  );
   const coaOptions = useMemo<Array<any>>(
     () => (coaOptionsQuery.data?.accounts as Array<any> | undefined) ?? [],
     [coaOptionsQuery.data],
   );
   const itemDetail = (itemDetailQuery.data as any) ?? null;
+  const fulfillmentSummary = fulfillmentSummaryQuery.data as any;
 
   const summary = useMemo(() => {
     const totalItems = items.length;
@@ -225,6 +259,26 @@ export default function InventoryPage() {
     });
   }
 
+  async function handleUpdateItem() {
+    if (!selectedItem?.id) return;
+
+    await updateItemMutation.mutateAsync({
+      id: selectedItem.id,
+      name: itemForm.name,
+      description: itemForm.description || null,
+      unitOfMeasure: itemForm.unitOfMeasure,
+      category: itemForm.category || null,
+      isStockTracked: itemForm.isStockTracked,
+      minStock: Number(itemForm.minStock || 0),
+      reorderPoint: Number(itemForm.reorderPoint || 0),
+      standardCost: itemForm.standardCost ? Number(itemForm.standardCost) : null,
+      inventoryCoaId: itemForm.inventoryCoaId || null,
+      temporaryAssetCoaId: itemForm.temporaryAssetCoaId || null,
+      cogsCoaId: itemForm.cogsCoaId || null,
+      isActive: itemForm.isActive,
+    });
+  }
+
   async function handleCreateReceipt() {
     await createReceiptMutation.mutateAsync({
       itemId: receiptForm.itemId,
@@ -261,6 +315,26 @@ export default function InventoryPage() {
     setShowReclassModal(true);
   }
 
+  function openEditItem(item: any) {
+    setSelectedItem(item);
+    setItemForm({
+      sku: item.sku ?? "",
+      name: item.name ?? "",
+      description: item.description ?? "",
+      unitOfMeasure: item.unitOfMeasure ?? "PCS",
+      category: item.category ?? "",
+      isStockTracked: item.isStockTracked ?? true,
+      minStock: String(item.minStock ?? 0),
+      reorderPoint: String(item.reorderPoint ?? 0),
+      standardCost: item.standardCost !== null && item.standardCost !== undefined ? String(item.standardCost) : "",
+      inventoryCoaId: item.inventoryCoaId ?? "",
+      temporaryAssetCoaId: item.temporaryAssetCoaId ?? "",
+      cogsCoaId: item.cogsCoaId ?? "",
+      isActive: item.isActive ?? true,
+    });
+    setShowEditItem(true);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -295,9 +369,44 @@ export default function InventoryPage() {
             void itemsQuery.refetch();
             void warehousesQuery.refetch();
             void stockOverviewQuery.refetch();
+            void fulfillmentSummaryQuery.refetch();
           },
         }}
       />
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Link
+          href="/inventory/fulfillment"
+          className="rounded-xl border border-blue-200 bg-blue-50 p-5 shadow-sm transition hover:border-blue-300 hover:bg-blue-100"
+        >
+          <p className="text-sm font-semibold text-blue-900">Fulfillment Requests</p>
+          <p className="mt-2 text-2xl font-bold text-blue-950">
+            {(fulfillmentSummary?.requests?.reserved ?? 0) + (fulfillmentSummary?.requests?.partial ?? 0)}
+          </p>
+          <p className="mt-2 text-sm text-blue-800">
+            Reserved + partial requests yang perlu dipantau delivery-nya.
+          </p>
+        </Link>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <p className="text-sm font-semibold text-emerald-900">Reservasi Aktif</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-950">
+            {(fulfillmentSummary?.reservations?.active ?? 0) + (fulfillmentSummary?.reservations?.partial ?? 0)}
+          </p>
+          <p className="mt-2 text-sm text-emerald-800">
+            Total reservation stock aktif yang sedang menahan ketersediaan item.
+          </p>
+        </div>
+        <Link
+          href="/crm/products-services"
+          className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm transition hover:border-violet-300 hover:bg-violet-100"
+        >
+          <p className="text-sm font-semibold text-violet-900">CRM Product Mapping</p>
+          <p className="mt-2 text-2xl font-bold text-violet-950">Sinkron</p>
+          <p className="mt-2 text-sm text-violet-800">
+            Kelola product/service CRM yang terhubung ke inventory item.
+          </p>
+        </Link>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Total Item" value={summary.totalItems.toString()} helper="Seluruh SKU inventory tenant aktif" />
@@ -396,9 +505,16 @@ export default function InventoryPage() {
                           <StatusPill label={item.isActive ? "Active" : "Inactive"} tone={item.isActive ? "green" : "gray"} />
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Button size="sm" variant="secondary" onClick={() => setSelectedItem(item)}>
-                            Detail
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => setSelectedItem(item)}>
+                              Detail
+                            </Button>
+                            {canCreateInventory ? (
+                              <Button size="sm" variant="secondary" onClick={() => openEditItem(item)}>
+                                Edit
+                              </Button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -464,6 +580,36 @@ export default function InventoryPage() {
 
       {activeTab === "stock" ? (
         <section className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <select
+              value={stockWarehouseFilter}
+              onChange={(event) => setStockWarehouseFilter(event.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Semua Gudang</option>
+              {warehouses.map((warehouse: any) => (
+                <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>
+              ))}
+            </select>
+            <select
+              value={stockBucketFilter}
+              onChange={(event) => setStockBucketFilter(event.target.value as StockBucketFilter)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="ALL">Semua Bucket</option>
+              <option value="SALE_STOCK">Sale Stock</option>
+              <option value="TEMP_ASSET">Temporary Asset</option>
+            </select>
+            <label className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={stockLowOnly}
+                onChange={(event) => setStockLowOnly(event.target.checked)}
+              />
+              Hanya tampilkan low stock
+            </label>
+          </div>
+
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
@@ -485,14 +631,14 @@ export default function InventoryPage() {
                       Memuat saldo stok...
                     </td>
                   </tr>
-                ) : balances.length === 0 ? (
+                ) : filteredBalances.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
-                      Belum ada saldo stok.
+                      Belum ada saldo stok yang sesuai filter.
                     </td>
                   </tr>
                 ) : (
-                  balances.map((balance: any) => {
+                  filteredBalances.map((balance: any) => {
                     const onHand = Number(balance.qtyOnHand ?? 0);
                     const reserved = Number(balance.qtyReserved ?? 0);
                     const available = onHand - reserved;
@@ -918,6 +1064,71 @@ export default function InventoryPage() {
                   <p className="font-semibold text-slate-900">Deskripsi</p>
                   <p className="mt-1">{itemDetail.description ?? "Tidak ada deskripsi."}</p>
                 </div>
+              </FormSection>
+
+              <FormSection title="CRM Linkage" description="Daftar product/service CRM yang memakai item inventory ini sebagai referensi fulfillment.">
+                {(itemDetail.crmProducts ?? []).length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    Item ini belum terhubung ke product/service CRM.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {itemDetail.crmProducts.map((product: any) => (
+                      <div key={product.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{product.name}</p>
+                            <p className="text-sm text-slate-500">{product.code}</p>
+                          </div>
+                          <StatusPill label={product.isActive ? "Active" : "Inactive"} tone={product.isActive ? "green" : "gray"} />
+                        </div>
+                        <p className="mt-2 text-sm text-slate-600">Tipe: {product.type}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </FormSection>
+
+              <FormSection title="Active Reservations" description="Reservasi aktif dari fulfillment request yang sedang menahan stok item ini.">
+                {(itemDetail.reservations ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-500">Tidak ada reservasi aktif untuk item ini.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {itemDetail.reservations.map((reservation: any) => (
+                      <div key={reservation.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {reservation.leadLine?.lead?.company ?? reservation.sourceType}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {reservation.warehouse?.code ?? "-"} · {reservation.sourceType} · {reservation.sourceId}
+                            </p>
+                          </div>
+                          <StatusPill
+                            label={reservation.status}
+                            tone={reservation.status === "ACTIVE" ? "green" : "amber"}
+                          />
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <MiniMetric label="Reserved" value={Number(reservation.qtyReserved ?? 0).toString()} />
+                          <MiniMetric label="Fulfilled" value={Number(reservation.qtyFulfilled ?? 0).toString()} />
+                          <MiniMetric label="Released" value={Number(reservation.qtyReleased ?? 0).toString()} />
+                        </div>
+                        {reservation.leadLine?.lead?.id ? (
+                          <div className="mt-3">
+                            <Link
+                              href={`/crm/leads/${reservation.leadLine.lead.id}`}
+                              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                            >
+                              Buka lead terkait
+                            </Link>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </FormSection>
 
               <FormSection title="Saldo per Gudang / Bucket" description="Ringkasan posisi stok item pada seluruh gudang.">

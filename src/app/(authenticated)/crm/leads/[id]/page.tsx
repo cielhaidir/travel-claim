@@ -1,41 +1,34 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { PageHeader } from "@/components/features/PageHeader";
-import { EmptyState } from "@/components/features/EmptyState";
-import { CRM_ROLES, hasAnyRole, normalizeRoles } from "@/lib/constants/roles";
-import { formatCurrency, formatDate, formatRelativeTime } from "@/lib/utils/format";
-import { api } from "@/trpc/react";
 import { useToast } from "@/components/ui/Toast";
+import { EmptyState } from "@/components/features/EmptyState";
+import { PageHeader } from "@/components/features/PageHeader";
+import {
+  CrmActivitySection,
+  CrmAttachmentsSection,
+  CrmNotesSection,
+  CrmTasksSection,
+} from "@/components/features/crm/detail-managers";
+import {
+  CrmInfoRow,
+  CrmMetricCard,
+  CrmPanel,
+  CrmTabs,
+} from "@/components/features/crm/shared";
+import { hasPermissionMap } from "@/lib/auth/permissions";
+import { userHasPermission } from "@/lib/auth/role-check";
+import { getCrmBadgeVariant, getCrmLabel } from "@/lib/constants/crm";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { api } from "@/trpc/react";
 
-const STAGE_VARIANT: Record<string, "default" | "info" | "warning" | "success" | "danger"> = {
-  NEW: "default",
-  QUALIFIED: "info",
-  PROPOSAL: "warning",
-  NEGOTIATION: "warning",
-  WON: "success",
-  LOST: "danger",
-};
-
-const PRIORITY_VARIANT: Record<string, "default" | "warning" | "danger"> = {
-  LOW: "default",
-  MEDIUM: "warning",
-  HIGH: "danger",
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  REFERRAL: "Referral",
-  WEBSITE: "Website",
-  EVENT: "Event",
-  OUTBOUND: "Outbound",
-  PARTNER: "Partner",
-};
+type LeadTab = "activity" | "data" | "tasks" | "notes" | "attachments";
 
 const DEFAULT_LINE_FORM = {
   crmProductId: "",
@@ -53,88 +46,71 @@ export default function CrmLeadDetailPage() {
   const { showToast } = useToast();
   const rawId = params?.id;
   const id = typeof rawId === "string" ? rawId : Array.isArray(rawId) ? rawId[0] : undefined;
+  const isAllowed = session?.user ? userHasPermission(session.user, "crm", "read") : false;
+  const canCreateInventory = session?.user
+    ? (session.user.isRoot === true || hasPermissionMap(session.user.permissions, "inventory", "create"))
+    : false;
+  const [activeTab, setActiveTab] = useState<LeadTab>("activity");
   const [showLineModal, setShowLineModal] = useState(false);
+  const [showFulfillmentModal, setShowFulfillmentModal] = useState(false);
   const [lineForm, setLineForm] = useState(DEFAULT_LINE_FORM);
 
-  const userRoles = normalizeRoles({
-    roles: session?.user?.roles,
-    role: session?.user?.role,
-  });
-  const isAllowed = session?.user?.isRoot === true || hasAnyRole(userRoles, CRM_ROLES);
-
+  const utils = api.useUtils();
   const { data, isLoading, refetch } = api.crm.getLeadById.useQuery(
     { id: id ?? "" },
-    {
-      enabled: !!id && isAllowed,
-      refetchOnWindowFocus: false,
-    },
+    { enabled: !!id && isAllowed, refetchOnWindowFocus: false },
   );
-
-  const crmProductsQuery = api.crm.listProducts.useQuery(
-    {},
+  const lead = data as any;
+  const { data: options } = api.crm.formOptions.useQuery(undefined, {
+    enabled: isAllowed,
+    refetchOnWindowFocus: false,
+  });
+  const productsQuery = api.crm.listProducts.useQuery(
+    { isActive: true },
     { enabled: isAllowed, refetchOnWindowFocus: false },
   );
   const inventoryItemsQuery = api.inventory.listItems.useQuery(
-    { limit: 100 },
+    { isActive: true, limit: 200 },
     { enabled: isAllowed, refetchOnWindowFocus: false },
   );
   const warehousesQuery = api.inventory.listWarehouses.useQuery(
-    {},
+    { isActive: true },
     { enabled: isAllowed, refetchOnWindowFocus: false },
   );
-
+  const convertMutation = api.crm.createDealFromLead.useMutation({
+    onSuccess: async () => {
+      await utils.crm.getLeadById.invalidate({ id: id ?? "" });
+      await utils.crm.listLeads.invalidate();
+      await utils.crm.listDeals.invalidate();
+      await utils.crm.dashboard.invalidate();
+    },
+  });
   const addLeadLineMutation = api.crm.createLeadLine.useMutation({
     onSuccess: async () => {
       setShowLineModal(false);
       setLineForm(DEFAULT_LINE_FORM);
-      showToast({ title: "Berhasil", message: "Line item lead berhasil ditambahkan.", variant: "success" });
-      await refetch();
+      showToast({ title: "Lead line created", message: "Line item berhasil ditambahkan ke lead.", variant: "success" });
+      await utils.crm.getLeadById.invalidate({ id: id ?? "" });
+      await utils.crm.listLeads.invalidate();
     },
     onError: (error) => {
-      showToast({ title: "Gagal", message: error.message, variant: "error" });
+      showToast({ title: "Failed to add line", message: error.message, variant: "error" });
     },
   });
-
   const createFulfillmentMutation = api.inventory.createFulfillmentRequest.useMutation({
     onSuccess: async () => {
-      showToast({ title: "Berhasil", message: "Fulfillment request berhasil dibuat dari lead ini.", variant: "success" });
-      await refetch();
+      setShowFulfillmentModal(false);
+      showToast({ title: "Fulfillment created", message: "Fulfillment request berhasil dibuat.", variant: "success" });
+      await utils.crm.getLeadById.invalidate({ id: id ?? "" });
     },
     onError: (error) => {
-      showToast({ title: "Gagal", message: error.message, variant: "error" });
+      showToast({ title: "Failed to create fulfillment", message: error.message, variant: "error" });
     },
   });
 
-  const deliverFulfillmentMutation = api.inventory.deliverFulfillmentRequest.useMutation({
-    onSuccess: async (result) => {
-      showToast({
-        title: "Berhasil",
-        message: result?.cogsJournal?.journalNumber
-          ? `Stock issue / delivery berhasil diproses. Jurnal COGS: ${result.cogsJournal.journalNumber}`
-          : "Stock issue / delivery berhasil diproses.",
-        variant: "success",
-      });
-      await refetch();
-    },
-    onError: (error) => {
-      showToast({ title: "Gagal", message: error.message, variant: "error" });
-    },
-  });
-
-  const cancelFulfillmentMutation = api.inventory.cancelFulfillmentRequest.useMutation({
-    onSuccess: async () => {
-      showToast({ title: "Berhasil", message: "Reservation berhasil dilepas dan fulfillment dibatalkan.", variant: "success" });
-      await refetch();
-    },
-    onError: (error) => {
-      showToast({ title: "Gagal", message: error.message, variant: "error" });
-    },
-  });
-
-  const lead = data as any;
   const crmProducts = useMemo<Array<any>>(
-    () => (crmProductsQuery.data?.products as Array<any> | undefined) ?? [],
-    [crmProductsQuery.data],
+    () => (productsQuery.data?.products as Array<any> | undefined) ?? [],
+    [productsQuery.data],
   );
   const inventoryItems = useMemo<Array<any>>(
     () => (inventoryItemsQuery.data?.items as Array<any> | undefined) ?? [],
@@ -144,18 +120,34 @@ export default function CrmLeadDetailPage() {
     () => (warehousesQuery.data?.warehouses as Array<any> | undefined) ?? [],
     [warehousesQuery.data],
   );
+  const activeFulfillmentStatuses = ["DRAFT", "RESERVED", "PARTIAL", "READY"];
+  const activeFulfillmentRequests = useMemo(
+    () => (lead?.fulfillmentRequests ?? []).filter((request: any) => activeFulfillmentStatuses.includes(request.status)),
+    [lead?.fulfillmentRequests],
+  );
+  const activeFulfillmentLineIds = useMemo(
+    () => new Set(activeFulfillmentRequests.flatMap((request: any) => (request.lines ?? []).map((line: any) => line.leadLineId).filter(Boolean))),
+    [activeFulfillmentRequests],
+  );
+  const eligibleFulfillmentLines = useMemo(
+    () => (lead?.leadLines ?? []).filter((line: any) => line.requiresInventory && line.inventoryItem && !activeFulfillmentLineIds.has(line.id)),
+    [lead?.leadLines, activeFulfillmentLineIds],
+  );
 
-  const lineSummary = useMemo(() => {
-    const lines = lead?.lines ?? [];
-    const inventoryLines = lines.filter((line: any) => line.requiresInventory);
-    return {
-      totalLines: lines.length,
-      inventoryLines: inventoryLines.length,
-      totalQuoted: lines.reduce((sum: number, line: any) => sum + Number(line.totalPrice ?? 0), 0),
-    };
-  }, [lead]);
+  async function handleConvert() {
+    if (!id) return;
 
-  if (!session || !isAllowed) return null;
+    try {
+      await convertMutation.mutateAsync({ id });
+      showToast({ title: "Deal created from lead", message: "The lead has been converted into a deal.", variant: "success" });
+    } catch (error) {
+      showToast({
+        title: "Failed to convert lead",
+        message: error instanceof Error ? error.message : "Unexpected error",
+        variant: "error",
+      });
+    }
+  }
 
   async function handleAddLine() {
     if (!id) return;
@@ -184,10 +176,9 @@ export default function CrmLeadDetailPage() {
   }
 
   async function handleCreateFulfillment() {
-    if (!lead) return;
+    if (!lead?.id) return;
 
-    const lines = (lead.lines ?? [])
-      .filter((line: any) => line.requiresInventory && line.inventoryItem)
+    const lines = eligibleFulfillmentLines
       .map((line: any) => ({
         leadLineId: line.id,
         inventoryItemId: line.inventoryItem.id,
@@ -207,309 +198,219 @@ export default function CrmLeadDetailPage() {
     await createFulfillmentMutation.mutateAsync({
       leadId: lead.id,
       customerId: lead.customer?.id,
-      requestNumber: `FUL-${Date.now()}`,
       notes: `Generated from CRM lead ${lead.company}`,
       lines,
     });
   }
 
-  async function handleDeliverFulfillment(requestId: string) {
-    await deliverFulfillmentMutation.mutateAsync({
-      fulfillmentRequestId: requestId,
-      notes: `Delivered from CRM lead ${lead?.company ?? "-"}`,
-    });
-  }
-
-  async function handleCancelFulfillment(requestId: string) {
-    await cancelFulfillmentMutation.mutateAsync({
-      fulfillmentRequestId: requestId,
-      notes: `Canceled from CRM lead ${lead?.company ?? "-"}`,
-    });
-  }
+  if (!session || !isAllowed) return null;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={lead ? lead.company : "Detail Lead CRM"}
-        description="Lihat profil lead, item yang ditawarkan, stock availability, dan fulfillment inventory."
-        primaryAction={{ label: "Tambah Line Item", onClick: () => setShowLineModal(true) }}
-        secondaryAction={{ label: "Kembali ke CRM", href: "/crm" }}
+        title={lead ? `${lead.firstName ?? ""} ${lead.lastName ?? ""}`.trim() || lead.company : "Lead Detail"}
+        description="Lead detail page with activity log, data, tasks, notes, and attachments."
+        primaryAction={{ label: "Refresh", onClick: () => void refetch() }}
+        secondaryAction={{ label: "Back to Leads", href: "/crm/leads" }}
       />
 
       {isLoading ? (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-          Memuat detail lead...
+          Loading lead detail...
         </div>
-      ) : !lead ? (
+      ) : !data ? (
         <div className="rounded-lg border bg-white">
           <EmptyState
-            icon="🎯"
-            title="Lead tidak ditemukan"
-            description="Lead CRM ini tidak tersedia pada tenant aktif atau sudah dihapus."
-            action={{ label: "Kembali ke CRM", href: "/crm" }}
+            title="Lead not found"
+            description="This CRM lead is unavailable in the active tenant."
+            action={{ label: "Back to Leads", href: "/crm/leads" }}
           />
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard label="Stage" value={lead.stage} helper="Posisi lead saat ini" />
-            <SummaryCard label="Value" value={formatCurrency(Number(lead.value ?? 0))} helper="Nilai opportunity" />
-            <SummaryCard label="Line Items" value={String(lineSummary.totalLines)} helper={`${lineSummary.inventoryLines} line butuh inventory`} />
-            <SummaryCard label="Fulfillment" value={String((lead.fulfillmentRequests ?? []).length)} helper={lead.fulfillmentStatus ?? "Belum ada fulfillment"} />
+          <div className="grid gap-4 md:grid-cols-4">
+            <CrmMetricCard label="Status" value={getCrmLabel(lead.status)} />
+            <CrmMetricCard label="Organization" value={lead.company} />
+            <CrmMetricCard
+              label="Annual Revenue"
+              value={lead.annualRevenue ? formatCurrency(Number(lead.annualRevenue)) : "-"}
+            />
+            <CrmMetricCard label="Deals" value={String(lead.deals?.length ?? 0)} />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-3">
-            <Panel title="Informasi Lead" description="Profil dan owner lead CRM">
-              <InfoRow label="Company" value={lead.company} />
-              <InfoRow label="PIC" value={lead.name} />
-              <InfoRow label="Email" value={lead.email} />
-              <InfoRow label="Telepon" value={lead.phone ?? "-"} />
-              <InfoRow label="Owner" value={lead.ownerName} />
-              <InfoRow label="Source" value={SOURCE_LABELS[lead.source] ?? lead.source} />
-              <InfoRow label="Target Close" value={lead.expectedCloseDate ? formatDate(lead.expectedCloseDate) : "-"} />
-              <InfoRow label="Aktivitas Terakhir" value={lead.lastActivityAt ? formatRelativeTime(lead.lastActivityAt) : "-"} />
-            </Panel>
-
-            <Panel title="Status Opportunity" description="Stage, prioritas, dan readiness inventory">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant={STAGE_VARIANT[lead.stage] ?? "default"}>{lead.stage}</Badge>
-                <Badge variant={PRIORITY_VARIANT[lead.priority] ?? "default"}>{lead.priority}</Badge>
-                {lead.requiresInventory ? <Badge variant="info">Inventory Needed</Badge> : null}
-                {lead.fulfillmentStatus ? <Badge variant="success">{lead.fulfillmentStatus}</Badge> : null}
-              </div>
-              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-                {lead.notes ?? "Belum ada catatan untuk lead ini."}
-              </div>
-              <Button
-                onClick={() => void handleCreateFulfillment()}
-                disabled={lead.stage !== "WON"}
-                isLoading={createFulfillmentMutation.isPending}
-              >
-                Create Fulfillment Request
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <CrmTabs
+              value={activeTab}
+              onChange={setActiveTab}
+              items={[
+                { id: "activity", label: "Activity Log", count: lead.activities?.length ?? 0 },
+                { id: "data", label: "Data" },
+                { id: "tasks", label: "Tasks", count: lead.tasks?.length ?? 0 },
+                { id: "notes", label: "Notes", count: lead.notesList?.length ?? 0 },
+                { id: "attachments", label: "Attachments", count: lead.attachments?.length ?? 0 },
+              ]}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setShowLineModal(true)}>
+                Add Line Item
               </Button>
-              {lead.stage !== "WON" ? (
-                <p className="text-xs text-gray-500">Fulfillment request hanya bisa dibuat setelah lead menjadi WON.</p>
+              <Button
+                variant="secondary"
+                onClick={() => setShowFulfillmentModal(true)}
+                disabled={!canCreateInventory || activeFulfillmentRequests.length > 0}
+              >
+                Create Fulfillment
+              </Button>
+              {lead.status !== "CONVERTED" ? (
+                <Button onClick={() => void handleConvert()} isLoading={convertMutation.isPending}>
+                  Create Deal
+                </Button>
               ) : null}
-            </Panel>
+            </div>
+          </div>
 
-            <Panel title="Customer Terkait" description="Lead dapat dikaitkan ke customer eksisting">
-              {lead.customer ? (
-                <div className="rounded-lg border border-gray-200 p-4">
-                  <p className="font-semibold text-gray-900">{lead.customer.company}</p>
-                  <Link href={`/crm/customers/${lead.customer.id}`} className="mt-2 inline-block text-sm font-medium text-blue-600 hover:text-blue-700">
-                    Lihat detail customer
+          {activeTab === "data" ? (
+            <div className="grid gap-6 xl:grid-cols-3">
+              <CrmPanel title="Lead Data">
+                <CrmInfoRow label="First Name" value={lead.firstName ?? "-"} />
+                <CrmInfoRow label="Last Name" value={lead.lastName ?? "-"} />
+                <CrmInfoRow label="Email" value={lead.email} />
+                <CrmInfoRow label="Mobile No." value={lead.mobileNo ?? "-"} />
+                <CrmInfoRow label="Gender" value={getCrmLabel(lead.gender)} />
+                <CrmInfoRow
+                  label="Status"
+                  value={<Badge variant={getCrmBadgeVariant(lead.status)}>{getCrmLabel(lead.status)}</Badge>}
+                />
+                <CrmInfoRow label="Lead Owner" value={lead.ownerName} />
+              </CrmPanel>
+
+              <CrmPanel title="Organization Snapshot">
+                <CrmInfoRow label="Organization" value={lead.company} />
+                <CrmInfoRow label="Website" value={lead.website ?? "-"} />
+                <CrmInfoRow label="Employees" value={getCrmLabel(lead.employeeCount)} />
+                <CrmInfoRow
+                  label="Annual Revenue"
+                  value={lead.annualRevenue ? formatCurrency(Number(lead.annualRevenue)) : "-"}
+                />
+                <CrmInfoRow label="Industry" value={getCrmLabel(lead.industry)} />
+                {lead.customer ? (
+                  <Link href={`/crm/organizations/${lead.customer.id}`} className="inline-block text-sm font-medium text-blue-600 hover:text-blue-700">
+                    View linked organization
                   </Link>
+                ) : null}
+              </CrmPanel>
+
+              <CrmPanel title="Meta">
+                <CrmInfoRow label="Expected Close Date" value={lead.expectedCloseDate ? formatDate(lead.expectedCloseDate) : "-"} />
+                <CrmInfoRow label="Last Modified" value={formatDate(lead.updatedAt)} />
+                <CrmInfoRow label="Converted To Deal" value={lead.convertedToDealAt ? formatDate(lead.convertedToDealAt) : "-"} />
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                  {lead.notes ?? "No lead notes in the data section."}
                 </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-                  Lead ini belum terhubung ke customer.
-                </div>
-              )}
-            </Panel>
-          </div>
+              </CrmPanel>
 
-          <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Lead Items & Stock Availability</h2>
-                <p className="text-sm text-gray-500">Produk/jasa yang ditawarkan pada lead ini dan keterkaitannya ke inventory</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">{formatCurrency(lineSummary.totalQuoted)}</p>
-                <p className="text-xs text-gray-500">Total quoted value</p>
-              </div>
-            </div>
-            {lead.lines.length === 0 ? (
-              <EmptyState icon="📦" title="Belum ada line item" description="Tambahkan produk atau jasa ke lead ini untuk mulai menghubungkan CRM ke inventory." />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Produk / Jasa</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Inventory Link</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Qty</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Harga</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Stock</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Gudang Preferensi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
-                    {lead.lines.map((line: any) => {
-                      const totalOnHand = (line.inventoryItem?.balances ?? []).reduce(
-                        (sum: number, balance: any) => sum + Number(balance.qtyOnHand ?? 0),
-                        0,
-                      );
-                      const totalReserved = (line.inventoryItem?.balances ?? []).reduce(
-                        (sum: number, balance: any) => sum + Number(balance.qtyReserved ?? 0),
-                        0,
-                      );
-                      const available = totalOnHand - totalReserved;
-                      const enough = available >= Number(line.qty ?? 0);
+              <CrmPanel title="Lead Line Items" description="Item, product/service, dan kebutuhan inventory untuk lead ini." className="xl:col-span-3">
+                {lead.leadLines?.length ? (
+                  <div className="space-y-3">
+                    {lead.leadLines.map((line: any) => (
+                      <div key={line.id} className="rounded-lg border border-gray-200 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-gray-900">{line.description ?? line.crmProduct?.name ?? line.inventoryItem?.name ?? "Lead item"}</p>
+                            <p className="mt-1 text-sm text-gray-500">
+                              {line.crmProduct ? `${line.crmProduct.code} · ${line.crmProduct.name}` : "No CRM product"}
+                              {line.inventoryItem ? ` · ${line.inventoryItem.sku} · ${line.inventoryItem.name}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="info">Qty {Number(line.qty ?? 0)}</Badge>
+                            <Badge variant="default">{formatCurrency(Number(line.totalPrice ?? 0))}</Badge>
+                            <Badge variant={line.requiresInventory ? "warning" : "success"}>
+                              {line.requiresInventory ? "Needs inventory" : "No inventory"}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <CrmInfoRow label="Warehouse preference" value={line.warehousePreference ? `${line.warehousePreference.code} · ${line.warehousePreference.name}` : "-"} />
+                          <CrmInfoRow label="Unit price" value={formatCurrency(Number(line.unitPrice ?? 0))} />
+                          <CrmInfoRow label="Available stock" value={line.inventoryItem ? String((line.inventoryItem.balances ?? []).reduce((sum: number, balance: any) => sum + (Number(balance.qtyOnHand ?? 0) - Number(balance.qtyReserved ?? 0)), 0)) : "-"} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Belum ada line item pada lead ini.</p>
+                )}
+              </CrmPanel>
 
-                      return (
-                        <tr key={line.id}>
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-gray-900">{line.crmProduct?.name ?? line.description ?? "Line Item"}</p>
-                            <p className="text-xs text-gray-500">{line.crmProduct?.code ?? "Manual line"}</p>
-                            {line.requiresInventory ? <Badge variant="info" className="mt-2">Inventory Required</Badge> : <Badge className="mt-2">Service / Non-stock</Badge>}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {line.inventoryItem ? `${line.inventoryItem.sku} · ${line.inventoryItem.name}` : "Tidak terhubung"}
-                          </td>
-                          <td className="px-4 py-3 text-right text-gray-700">{Number(line.qty ?? 0)}</td>
-                          <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(Number(line.totalPrice ?? 0))}</td>
-                          <td className="px-4 py-3 text-right">
-                            {line.inventoryItem ? (
-                              <div>
-                                <p className={`font-semibold ${enough ? "text-green-700" : "text-amber-700"}`}>{available}</p>
-                                <p className="text-xs text-gray-500">On hand {totalOnHand} · reserved {totalReserved}</p>
-                              </div>
-                            ) : (
-                              <span className="text-gray-400">-</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">{line.warehousePreference?.name ?? "-"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-gray-900">Fulfillment Requests</h2>
-              <p className="text-sm text-gray-500">Permintaan fulfillment yang dibuat dari lead ini</p>
-            </div>
-            {(lead.fulfillmentRequests ?? []).length === 0 ? (
-              <EmptyState icon="🚚" title="Belum ada fulfillment request" description="Buat fulfillment request setelah lead berhasil WON." />
-            ) : (
-              <div className="space-y-4 p-5">
-                {lead.fulfillmentRequests.map((request: any) => {
-                  const canDeliver = request.status === "RESERVED" || request.status === "PARTIAL";
-                  const canCancel = request.status !== "DELIVERED" && request.status !== "CANCELED";
-                  return (
-                    <div key={request.id} className="rounded-xl border border-gray-200 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-gray-900">{request.requestNumber}</p>
-                          <p className="text-sm text-gray-500">Requested {formatDate(request.requestedDate)}</p>
-                          {request.deliveredAt ? (
-                            <p className="text-xs text-gray-400">Delivered {formatDate(request.deliveredAt)}</p>
+              <CrmPanel title="Fulfillment Requests" description="Request fulfillment yang dibuat dari lead ini." className="xl:col-span-3">
+                {lead.fulfillmentRequests?.length ? (
+                  <div className="space-y-3">
+                    {lead.fulfillmentRequests.map((request: any) => (
+                      <div key={request.id} className="rounded-lg border border-gray-200 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-gray-900">{request.requestNumber}</p>
+                            <p className="mt-1 text-sm text-gray-500">
+                              Requested {formatDate(request.requestedDate)}
+                              {request.deliveredAt ? ` · Delivered ${formatDate(request.deliveredAt)}` : ""}
+                            </p>
+                          </div>
+                          <Badge variant={request.status === "DELIVERED" ? "success" : request.status === "CANCELED" ? "danger" : "warning"}>
+                            {request.status}
+                          </Badge>
+                        </div>
+                        {request.notes ? <p className="mt-3 text-sm text-gray-600">{request.notes}</p> : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Link href="/inventory/fulfillment" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                            Open fulfillment dashboard
+                          </Link>
+                          {request.cogsJournal ? (
+                            <span className="text-sm text-emerald-700">COGS journal: {request.cogsJournal.journalNumber}</span>
                           ) : null}
                         </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <Badge variant={request.status === "DELIVERED" ? "success" : request.status === "CANCELED" ? "danger" : request.status === "PARTIAL" ? "warning" : "info"}>{request.status}</Badge>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => void handleCancelFulfillment(request.id)}
-                            disabled={!canCancel}
-                            isLoading={cancelFulfillmentMutation.isPending}
-                          >
-                            Cancel / Release
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => void handleDeliverFulfillment(request.id)}
-                            disabled={!canDeliver}
-                            isLoading={deliverFulfillmentMutation.isPending}
-                          >
-                            Deliver / Issue Stock
-                          </Button>
-                        </div>
                       </div>
-                      {request.cogsJournal ? (
-                        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-                          <p className="font-semibold text-emerald-900">Jurnal COGS Otomatis</p>
-                          <p className="mt-1 text-emerald-800">
-                            {request.cogsJournal.journalNumber} · {request.cogsJournal.description}
-                          </p>
-                          <p className="mt-1 text-xs text-emerald-700">
-                            Diposting pada {formatDate(request.cogsJournal.transactionDate)}
-                          </p>
-
-                          <div className="mt-3 overflow-x-auto rounded-lg border border-emerald-200 bg-white">
-                            <table className="min-w-full divide-y divide-emerald-100 text-sm">
-                              <thead className="bg-emerald-50">
-                                <tr>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">Line</th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">COA</th>
-                                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">Deskripsi</th>
-                                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-emerald-700">Debit</th>
-                                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-emerald-700">Credit</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-emerald-100 bg-white">
-                                {(request.cogsJournal.lines ?? []).map((line: any) => (
-                                  <tr key={line.id}>
-                                    <td className="px-4 py-3 text-gray-700">#{line.lineNumber}</td>
-                                    <td className="px-4 py-3 text-gray-700">
-                                      {line.chartOfAccount?.code} · {line.chartOfAccount?.name}
-                                    </td>
-                                    <td className="px-4 py-3 text-gray-600">{line.description ?? "-"}</td>
-                                    <td className="px-4 py-3 text-right font-medium text-emerald-700">{formatCurrency(Number(line.debitAmount ?? 0))}</td>
-                                    <td className="px-4 py-3 text-right font-medium text-red-600">{formatCurrency(Number(line.creditAmount ?? 0))}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ) : null}
-                      <div className="mt-4 space-y-2">
-                        {request.lines.map((line: any) => (
-                          <div key={line.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
-                            {line.inventoryItem.sku} · {line.inventoryItem.name} — req {Number(line.qtyRequested)} / reserved {Number(line.qtyReserved)} / delivered {Number(line.qtyDelivered)}
-                            {line.warehouse ? ` · wh ${line.warehouse.code}` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-gray-900">Aktivitas Lead</h2>
-              <p className="text-sm text-gray-500">Riwayat follow-up dan engagement yang terkait</p>
-            </div>
-            {lead.activities.length === 0 ? (
-              <EmptyState icon="🗓️" title="Belum ada aktivitas" description="Belum ada aktivitas yang tercatat untuk lead ini." />
-            ) : (
-              <div className="space-y-3 p-5">
-                {lead.activities.map((activity: any) => (
-                  <div key={activity.id} className="rounded-xl border border-gray-200 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-gray-900">{activity.title}</p>
-                        <p className="mt-1 text-sm text-gray-500">{activity.description ?? "-"}</p>
-                      </div>
-                      <Badge variant={activity.completedAt ? "success" : "info"}>
-                        {activity.completedAt ? "Completed" : "Open"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 grid gap-3 text-sm text-gray-600 sm:grid-cols-2 xl:grid-cols-4">
-                      <InfoChip label="Type" value={activity.type} />
-                      <InfoChip label="Owner" value={activity.ownerName} />
-                      <InfoChip label="Scheduled" value={formatDate(activity.scheduledAt)} />
-                      <InfoChip label="Customer" value={activity.customer?.company ?? "-"} />
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Belum ada fulfillment request untuk lead ini.</p>
+                )}
+              </CrmPanel>
+
+              <CrmPanel title="Related Deals" description="Deals created from this lead." className="xl:col-span-3">
+                {lead.deals?.length ? (
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {lead.deals.map((deal: any) => (
+                      <div key={deal.id} className="rounded-lg border border-gray-200 p-4">
+                        <p className="font-semibold text-gray-900">{deal.title}</p>
+                        <p className="mt-1 text-sm text-gray-500">{getCrmLabel(deal.status)}</p>
+                        <Link href={`/crm/deals/${deal.id}`} className="mt-3 inline-block text-sm font-medium text-blue-600 hover:text-blue-700">
+                          View deal
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No deals created from this lead yet.</p>
+                )}
+              </CrmPanel>
+            </div>
+          ) : null}
+
+          {activeTab === "activity" ? <CrmActivitySection items={lead.activities ?? []} /> : null}
+          {activeTab === "tasks" ? (
+            <CrmTasksSection subjectId={lead.id} subjectType="lead" items={lead.tasks ?? []} users={options?.users ?? []} />
+          ) : null}
+          {activeTab === "notes" ? (
+            <CrmNotesSection subjectId={lead.id} subjectType="lead" items={lead.notesList ?? []} users={options?.users ?? []} />
+          ) : null}
+          {activeTab === "attachments" ? (
+            <CrmAttachmentsSection subjectId={lead.id} subjectType="lead" items={lead.attachments ?? []} />
+          ) : null}
         </>
       )}
 
-      <Modal isOpen={showLineModal} onClose={() => setShowLineModal(false)} title="Tambah Lead Line Item">
+      <Modal isOpen={showLineModal} onClose={() => setShowLineModal(false)} title="Tambah Lead Line Item" size="lg">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="CRM Product / Service">
             <select value={lineForm.crmProductId} onChange={(e) => setLineForm((prev) => ({ ...prev, crmProductId: e.target.value }))} className="input">
@@ -554,44 +455,55 @@ export default function CrmLeadDetailPage() {
           <Button onClick={() => void handleAddLine()} isLoading={addLeadLineMutation.isPending}>Simpan Line</Button>
         </div>
       </Modal>
-    </div>
-  );
-}
 
-function SummaryCard({ label, value, helper }: { label: string; value: string; helper: string }) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
-      <p className="mt-2 text-xs text-gray-500">{helper}</p>
-    </div>
-  );
-}
-
-function Panel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-      <p className="mt-1 text-sm text-gray-500">{description}</p>
-      <div className="mt-4 space-y-3">{children}</div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-sm text-gray-700">{value}</p>
-    </div>
-  );
-}
-
-function InfoChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-gray-50 px-3 py-2">
-      <p className="text-xs uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-sm font-medium text-gray-700">{value}</p>
+      <Modal isOpen={showFulfillmentModal} onClose={() => setShowFulfillmentModal(false)} title="Create Fulfillment Request" size="lg">
+        <div className="space-y-4">
+          {activeFulfillmentRequests.length > 0 ? (
+            <p className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">
+              Lead ini sudah memiliki fulfillment request aktif: {activeFulfillmentRequests.map((request: any) => `${request.requestNumber} (${request.status})`).join(", ")}. Selesaikan atau cancel request aktif sebelum membuat request baru.
+            </p>
+          ) : (
+            <p className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+              Sistem akan membuat fulfillment request dari lead line yang membutuhkan inventory, terhubung ke inventory item, dan belum masuk request aktif lain.
+            </p>
+          )}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-900">Lead</p>
+              <p className="mt-1 text-sm text-gray-600">{lead?.company ?? "-"}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-900">Eligible lines</p>
+              <p className="mt-1 text-sm text-gray-600">
+                {String(eligibleFulfillmentLines.length)} line(s)
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <p className="text-sm font-semibold text-gray-900">Line items that will be included</p>
+            <div className="mt-3 space-y-2">
+              {eligibleFulfillmentLines.map((line: any) => (
+                <div key={line.id} className="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  {line.inventoryItem.sku} · {line.inventoryItem.name} · Qty {Number(line.qty ?? 0)}
+                </div>
+              ))}
+              {eligibleFulfillmentLines.length === 0 ? (
+                <p className="text-sm text-gray-500">Belum ada line yang siap dibuat fulfillment.</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="secondary" onClick={() => setShowFulfillmentModal(false)}>Batal</Button>
+          <Button
+            onClick={() => void handleCreateFulfillment()}
+            isLoading={createFulfillmentMutation.isPending}
+            disabled={eligibleFulfillmentLines.length === 0 || activeFulfillmentRequests.length > 0}
+          >
+            Buat Fulfillment
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

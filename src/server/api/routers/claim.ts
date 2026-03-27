@@ -912,9 +912,10 @@ export const claimRouter = createTRPCRouter({
       const approvalsWithNumbers = await Promise.all(
         deduped.map(async (entry) => ({
           ...entry,
+          tenantId: claim.tenantId,
           approvalNumber: await generateApprovalNumber(
             ctx.db,
-            getTenantScope(ctx).tenantId,
+            claim.tenantId,
           ),
         })),
       );
