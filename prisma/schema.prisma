@@ -200,6 +200,64 @@ enum CrmLeadPriority {
   HIGH
 }
 
+enum CrmGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum CrmIndustry {
+  TECHNOLOGY
+  FINANCE
+  HEALTHCARE
+  EDUCATION
+  MANUFACTURING
+  RETAIL
+  LOGISTICS
+  HOSPITALITY
+  GOVERNMENT
+  OTHER
+}
+
+enum CrmEmployeeRange {
+  ONE_TO_TEN
+  ELEVEN_TO_FIFTY
+  FIFTY_ONE_TO_TWO_HUNDRED
+  TWO_HUNDRED_ONE_TO_FIVE_HUNDRED
+  FIVE_HUNDRED_ONE_TO_ONE_THOUSAND
+  OVER_ONE_THOUSAND
+}
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  NURTURE
+  QUALIFIED
+  CONVERTED
+  UNQUALIFIED
+  JUNK
+}
+
+enum CrmDealStage {
+  DISCOVERY
+  PROPOSAL
+  NEGOTIATION
+  VERBAL_WON
+  WON
+  LOST
+  ON_HOLD
+}
+
+enum CrmDealStatus {
+  QUALIFICATION
+  DEMO_MAKING
+  PROPOSAL_QUOTATION
+  NEGOTIATION
+  READY_TO_CLOSE
+  WON
+  LOST
+}
+
 enum CrmLeadSource {
   REFERRAL
   WEBSITE
@@ -226,6 +284,38 @@ enum CrmActivityType {
   MEETING
   EMAIL
   FOLLOW_UP
+  CHAT
+  STAGE_CHANGE
+  NOTE
+  TASK
+  ATTACHMENT
+  SYSTEM
+}
+
+enum CrmConversationStatus {
+  OPEN
+  WAITING_REPLY
+  CLOSED
+}
+
+enum CrmMessageStatus {
+  DRAFT
+  SENT
+  RECEIVED
+  NOTE
+}
+
+enum CrmTaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CrmTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 // ============================================================================
@@ -259,8 +349,15 @@ model Tenant {
   journalTransactions JournalTransaction[] // -- Daftar transaksi jurnal yang terkait dengan tenant ini.
   journalEntries      JournalEntry[] // -- Daftar entri jurnal yang terkait dengan tenant ini.
   crmCustomers        CrmCustomer[] // -- Daftar pelanggan CRM yang terkait dengan tenant ini.
+  crmContacts         CrmContact[] // -- Daftar kontak CRM yang terkait dengan tenant ini.
   crmLeads            CrmLead[] // -- Daftar prospek CRM yang terkait dengan tenant ini.
+  crmDeals            CrmDeal[] // -- Daftar deal CRM yang terkait dengan tenant ini.
+  crmTasks            CrmTask[]
+  crmNotes            CrmNote[]
+  crmRecordAttachments CrmRecordAttachment[]
   crmActivities       CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan tenant ini.
+  crmConversations    CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan tenant ini.
+  crmMessages         CrmMessage[] // -- Daftar pesan CRM yang terkait dengan tenant ini.
   customRoles         TenantCustomRole[] // -- Daftar peran kustom tenant yang terkait dengan tenant ini.
 
   @@index([isRoot])
@@ -567,31 +664,69 @@ model Project {
 // ============================================================================
 
 model CrmCustomer {
-  id            String             @id @default(cuid()) // -- ID unik pelanggan CRM ini.
-  tenantId      String? // -- ID tenant yang terkait dengan pelanggan CRM ini.
-  name          String             @db.VarChar(150) // -- Nama pelanggan CRM ini.
-  company       String             @db.VarChar(200) // -- Nama perusahaan pelanggan CRM ini.
-  email         String             @db.VarChar(200) // -- Email pelanggan CRM ini.
-  phone         String?            @db.VarChar(30) // -- Nomor telepon pelanggan CRM ini.
-  segment       CrmCustomerSegment // -- Segment pelanggan CRM ini.
-  city          String?            @db.VarChar(100) // -- Kota pelanggan CRM ini.
-  ownerName     String             @db.VarChar(150) // -- Nama pemilik pelanggan CRM ini.
-  status        CrmCustomerStatus  @default(ACTIVE) // -- Status pelanggan CRM ini.
-  totalValue    Decimal            @default(0) @db.Decimal(15, 2) // -- Total nilai pelanggan CRM ini.
-  notes         String?            @db.Text // -- Catatan pelanggan CRM ini.
-  lastContactAt DateTime? // -- Waktu kontak terakhir pelanggan CRM ini.
-  deletedAt     DateTime? // -- Waktu penghapusan lunak pelanggan CRM ini.
-  createdAt     DateTime           @default(now()) // -- Waktu pembuatan pelanggan CRM ini.
-  updatedAt     DateTime           @updatedAt // -- Waktu terakhir pembaruan pelanggan CRM ini.
+  id            String             @id @default(cuid()) // -- ID unik organisasi CRM ini.
+  tenantId      String?
+  name          String?            @db.VarChar(150)
+  company       String             @db.VarChar(200)
+  email         String?            @db.VarChar(200)
+  phone         String?            @db.VarChar(30)
+  segment       CrmCustomerSegment @default(SMB)
+  city          String?            @db.VarChar(100)
+  ownerName     String?            @db.VarChar(150)
+  status        CrmCustomerStatus  @default(ACTIVE)
+  totalValue    Decimal            @default(0) @db.Decimal(15, 2)
+  website       String?            @db.VarChar(255)
+  annualRevenue Decimal?           @db.Decimal(15, 2)
+  employeeCount CrmEmployeeRange?
+  industry      CrmIndustry?
+  notes         String?            @db.Text
+  lastContactAt DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
-  tenant     Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk pelanggan CRM ini.
-  leads      CrmLead[] // -- Daftar prospek CRM yang terkait dengan pelanggan CRM ini.
-  activities CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan pelanggan CRM ini.
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  contacts      CrmContact[]
+  leads         CrmLead[]
+  deals         CrmDeal[]
+  activities    CrmActivity[]
+  conversations CrmConversation[]
 
   @@index([tenantId])
   @@index([tenantId, company])
   @@index([tenantId, status])
   @@index([tenantId, ownerName])
+  @@index([deletedAt])
+}
+
+model CrmContact {
+  id          String     @id @default(cuid())
+  tenantId    String?
+  customerId  String
+  name        String     @db.VarChar(150)
+  title       String?    @db.VarChar(150)
+  email       String?    @db.VarChar(200)
+  phone       String?    @db.VarChar(30)
+  department  String?    @db.VarChar(100)
+  firstName   String?    @db.VarChar(100)
+  lastName    String?    @db.VarChar(100)
+  gender      CrmGender?
+  designation String?    @db.VarChar(150)
+  address     String?    @db.Text
+  isPrimary   Boolean    @default(false)
+  isActive    Boolean    @default(true)
+  notes       String?    @db.Text
+  deletedAt   DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tenant   Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer CrmCustomer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deals    CrmDeal[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, isPrimary])
   @@index([deletedAt])
 }
 
@@ -603,6 +738,16 @@ model CrmLead {
   company           String          @db.VarChar(200) // -- Nama perusahaan prospek CRM ini.
   email             String          @db.VarChar(200) // -- Email prospek CRM ini.
   phone             String?         @db.VarChar(30) // -- Nomor telepon prospek CRM ini.
+  firstName         String?         @db.VarChar(100)
+  lastName          String?         @db.VarChar(100)
+  mobileNo          String?         @db.VarChar(30)
+  gender            CrmGender?
+  status            CrmLeadStatus   @default(NEW)
+  website           String?         @db.VarChar(255)
+  employeeCount     CrmEmployeeRange?
+  annualRevenue     Decimal?        @db.Decimal(15, 2)
+  industry          CrmIndustry?
+  ownerId           String?
   stage             CrmLeadStage    @default(NEW) // -- Tahap prospek CRM ini.
   value             Decimal         @default(0) @db.Decimal(15, 2) // -- Nilai prospek CRM ini.
   probability       Int             @default(0) // -- Probabilitas prospek CRM ini.
@@ -611,19 +756,154 @@ model CrmLead {
   ownerName         String          @db.VarChar(150) // -- Nama pemilik prospek CRM ini.
   expectedCloseDate DateTime? // -- Tanggal perkiraan penutupan prospek CRM ini.
   lastActivityAt    DateTime? // -- Waktu aktivitas terakhir prospek CRM ini.
+  convertedToDealAt DateTime? // -- Waktu konversi prospek CRM ini menjadi deal.
   notes             String?         @db.Text // -- Catatan prospek CRM ini.
   deletedAt         DateTime? // -- Waktu penghapusan lunak prospek CRM ini.
   createdAt         DateTime        @default(now()) // -- Waktu pembuatan prospek CRM ini.
   updatedAt         DateTime        @updatedAt // -- Waktu terakhir pembaruan prospek CRM ini.
 
-  tenant     Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk prospek CRM ini.
-  customer   CrmCustomer?  @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
-  activities CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk prospek CRM ini.
+  customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk prospek CRM ini.
+  deals         CrmDeal[] // -- Daftar deal CRM yang berasal dari prospek CRM ini.
+  tasks         CrmTask[]
+  notesList     CrmNote[]
+  attachments   CrmRecordAttachment[]
+  activities    CrmActivity[] // -- Daftar aktivitas CRM yang terkait dengan prospek CRM ini.
+  conversations CrmConversation[] // -- Daftar percakapan CRM yang terkait dengan prospek CRM ini.
 
   @@index([tenantId])
   @@index([tenantId, stage])
+  @@index([tenantId, status])
   @@index([tenantId, ownerName])
   @@index([customerId])
+  @@index([deletedAt])
+}
+
+model CrmDeal {
+  id                String          @id @default(cuid()) // -- ID unik deal CRM ini.
+  tenantId          String?
+  customerId        String?
+  contactId         String?
+  leadId            String?         @unique
+  title             String          @db.VarChar(200)
+  company           String          @db.VarChar(200)
+  ownerName         String          @db.VarChar(150)
+  ownerId           String?
+  status            CrmDealStatus   @default(QUALIFICATION)
+  website           String?         @db.VarChar(255)
+  employeeCount     CrmEmployeeRange?
+  annualRevenue     Decimal?        @db.Decimal(15, 2)
+  industry          CrmIndustry?
+  firstName         String?         @db.VarChar(100)
+  lastName          String?         @db.VarChar(100)
+  primaryEmail      String?         @db.VarChar(200)
+  primaryMobileNo   String?         @db.VarChar(30)
+  gender            CrmGender?
+  stage             CrmDealStage    @default(DISCOVERY)
+  value             Decimal         @default(0) @db.Decimal(15, 2)
+  probability       Int             @default(0)
+  source            CrmLeadSource   @default(REFERRAL)
+  expectedCloseDate DateTime?
+  closedAt          DateTime?
+  lostReason        String?         @db.Text
+  notes             String?         @db.Text
+  lastActivityAt    DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  customer      CrmCustomer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contact       CrmContact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead          CrmLead?            @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  tasks         CrmTask[]
+  notesList     CrmNote[]
+  attachments   CrmRecordAttachment[]
+  activities    CrmActivity[]
+  conversations CrmConversation[]
+
+  @@index([tenantId])
+  @@index([tenantId, stage])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerName])
+  @@index([customerId])
+  @@index([contactId])
+  @@index([deletedAt])
+}
+
+model CrmTask {
+  id           String          @id @default(cuid())
+  tenantId     String?
+  leadId       String?
+  dealId       String?
+  title        String          @db.VarChar(200)
+  description  String?         @db.Text
+  status       CrmTaskStatus   @default(OPEN)
+  assigneeId   String?
+  assigneeName String?         @db.VarChar(150)
+  dueDate      DateTime?
+  priority     CrmTaskPriority @default(MEDIUM)
+  deletedAt    DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([deletedAt])
+}
+
+model CrmNote {
+  id         String    @id @default(cuid())
+  tenantId   String?
+  leadId     String?
+  dealId     String?
+  title      String    @db.VarChar(200)
+  content    String    @db.Text
+  writerId   String?
+  writerName String?   @db.VarChar(150)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([deletedAt])
+}
+
+model CrmRecordAttachment {
+  id              String    @id @default(cuid())
+  tenantId        String?
+  leadId          String?
+  dealId          String?
+  filename        String    @db.VarChar(255)
+  originalName    String    @db.VarChar(255)
+  mimeType        String    @db.VarChar(100)
+  fileSize        Int
+  storageUrl      String    @db.Text
+  storageProvider String    @db.VarChar(50)
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal   CrmDeal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([dealId])
   @@index([deletedAt])
 }
 
@@ -632,6 +912,9 @@ model CrmActivity {
   tenantId    String? // -- ID tenant yang terkait dengan aktivitas CRM ini.
   customerId  String? // -- ID pelanggan yang terkait dengan aktivitas CRM ini.
   leadId      String? // -- ID prospek yang terkait dengan aktivitas CRM ini.
+  dealId      String? // -- ID deal yang terkait dengan aktivitas CRM ini.
+  conversationId String? // -- ID percakapan yang terkait dengan aktivitas CRM ini.
+  messageId   String? // -- ID pesan yang terkait dengan aktivitas CRM ini.
   title       String          @db.VarChar(200) // -- Judul aktivitas CRM ini.
   description String?         @db.Text // -- Deskripsi aktivitas CRM ini.
   type        CrmActivityType @default(FOLLOW_UP) // -- Tipe aktivitas CRM ini.
@@ -642,14 +925,72 @@ model CrmActivity {
   createdAt   DateTime        @default(now()) // -- Waktu pembuatan aktivitas CRM ini.
   updatedAt   DateTime        @updatedAt // -- Waktu terakhir pembaruan aktivitas CRM ini.
 
-  tenant   Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk aktivitas CRM ini.
-  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk aktivitas CRM ini.
-  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke prospek CRM untuk aktivitas CRM ini.
+  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk aktivitas CRM ini.
+  customer     CrmCustomer?      @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke pelanggan CRM untuk aktivitas CRM ini.
+  lead         CrmLead?          @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke prospek CRM untuk aktivitas CRM ini.
+  deal         CrmDeal?          @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk aktivitas CRM ini.
+  conversation CrmConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull) // -- Relasi ke percakapan CRM untuk aktivitas CRM ini.
+  message      CrmMessage?       @relation(fields: [messageId], references: [id], onDelete: SetNull) // -- Relasi ke pesan CRM untuk aktivitas CRM ini.
 
   @@index([tenantId])
   @@index([tenantId, scheduledAt])
   @@index([customerId])
   @@index([leadId])
+  @@index([dealId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([deletedAt])
+}
+
+model CrmConversation {
+  id                 String                @id @default(cuid()) // -- ID unik percakapan CRM ini.
+  tenantId           String? // -- ID tenant yang terkait dengan percakapan CRM ini.
+  customerId         String? // -- ID customer yang terkait dengan percakapan CRM ini.
+  leadId             String? // -- ID lead yang terkait dengan percakapan CRM ini.
+  dealId             String? // -- ID deal yang terkait dengan percakapan CRM ini.
+  subject            String?               @db.VarChar(200) // -- Subjek percakapan CRM ini.
+  ownerName          String                @db.VarChar(150) // -- Nama pemilik percakapan CRM ini.
+  status             CrmConversationStatus @default(OPEN) // -- Status percakapan CRM ini.
+  lastMessageAt      DateTime? // -- Waktu pesan terakhir percakapan CRM ini.
+  lastMessagePreview String?               @db.VarChar(255) // -- Ringkasan pesan terakhir percakapan CRM ini.
+  deletedAt          DateTime? // -- Waktu penghapusan lunak percakapan CRM ini.
+  createdAt          DateTime              @default(now()) // -- Waktu pembuatan percakapan CRM ini.
+  updatedAt          DateTime              @updatedAt // -- Waktu terakhir pembaruan percakapan CRM ini.
+
+  tenant     Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk percakapan CRM ini.
+  customer   CrmCustomer?   @relation(fields: [customerId], references: [id], onDelete: SetNull) // -- Relasi ke customer CRM untuk percakapan CRM ini.
+  lead       CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull) // -- Relasi ke lead CRM untuk percakapan CRM ini.
+  deal       CrmDeal?       @relation(fields: [dealId], references: [id], onDelete: SetNull) // -- Relasi ke deal CRM untuk percakapan CRM ini.
+  messages   CrmMessage[] // -- Daftar pesan yang terkait dengan percakapan CRM ini.
+  activities CrmActivity[] // -- Daftar aktivitas yang terkait dengan percakapan CRM ini.
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([tenantId, status])
+  @@index([deletedAt])
+}
+
+model CrmMessage {
+  id             String           @id @default(cuid()) // -- ID unik pesan CRM ini.
+  tenantId       String? // -- ID tenant yang terkait dengan pesan CRM ini.
+  conversationId String // -- ID percakapan yang terkait dengan pesan CRM ini.
+  status         CrmMessageStatus @default(SENT) // -- Status pesan CRM ini.
+  senderName     String           @db.VarChar(150) // -- Nama pengirim pesan CRM ini.
+  body           String           @db.Text // -- Isi pesan CRM ini.
+  sentAt         DateTime         @default(now()) // -- Waktu pengiriman pesan CRM ini.
+  deletedAt      DateTime? // -- Waktu penghapusan lunak pesan CRM ini.
+  createdAt      DateTime         @default(now()) // -- Waktu pembuatan pesan CRM ini.
+  updatedAt      DateTime         @updatedAt // -- Waktu terakhir pembaruan pesan CRM ini.
+
+  tenant       Tenant?          @relation(fields: [tenantId], references: [id], onDelete: SetNull) // -- Relasi ke tenant untuk pesan CRM ini.
+  conversation CrmConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade) // -- Relasi ke percakapan CRM untuk pesan CRM ini.
+  activities   CrmActivity[] // -- Daftar aktivitas yang terkait dengan pesan CRM ini.
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([tenantId, status])
   @@index([deletedAt])
 }
 

@@ -11,6 +11,7 @@ import {
   normalizeRoles,
   type Role,
 } from "@/lib/constants/roles";
+import { CRM_ACTIVE_MODULES } from "@/lib/constants/crm";
 
 type NavAccessContext = {
   isRoot: boolean;
@@ -34,27 +35,10 @@ type ResolvedNavItem = NavItem & {
   children: NavItem[];
 };
 
-const crmChildren: NavItem[] = [
-  { label: "CRM Dashboard", href: "/crm" },
-  { label: "Customers", href: "/crm/customers" },
-  { label: "Leads", href: "/crm/leads" },
-  { label: "Deals", href: "/crm/deals" },
-  { label: "Activities", href: "/crm/activities" },
-  { label: "Communication", href: "/crm/communication", comingSoon: true },
-  { label: "Sales / Orders", href: "/crm/sales-orders", comingSoon: true },
-  { label: "Reports", href: "/crm/reports" },
-  { label: "Support Tickets", href: "/crm/support-tickets", comingSoon: true },
-  {
-    label: "Marketing Automation",
-    href: "/crm/marketing-automation",
-    comingSoon: true,
-  },
-  {
-    label: "Products / Services",
-    href: "/crm/products-services",
-    comingSoon: true,
-  },
-];
+const crmChildren: NavItem[] = CRM_ACTIVE_MODULES.map((item) => ({
+  label: item.label,
+  href: item.href,
+}));
 
 function canAccessFinanceDashboard(
   permissions: Session["user"]["permissions"] | null | undefined,
