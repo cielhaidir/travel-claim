@@ -5,6 +5,7 @@ import { Geist } from "next/font/google";
 
 import { TRPCReactProvider } from "@/trpc/react";
 import { SessionProvider } from "next-auth/react";
+import { ShadcnProviders } from "@/components/shadcn/providers";
 
 export const metadata: Metadata = {
   title: {
@@ -36,10 +37,10 @@ export default function RootLayout({
     <html lang="en" className={`${geist.variable}`}>
       <body>
         <TRPCReactProvider>
-              <SessionProvider>
-          {children}
-      </SessionProvider>
-          </TRPCReactProvider>
+          <SessionProvider>
+            <ShadcnProviders>{children}</ShadcnProviders>
+          </SessionProvider>
+        </TRPCReactProvider>
       </body>
     </html>
   );
