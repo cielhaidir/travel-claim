@@ -22,7 +22,8 @@
 
 /* Global styles */
 body {
-  @apply bg-gray-50 text-gray-900 antialiased;
+  background-color: #fbfbfb;
+  @apply text-gray-900 antialiased;
 }
 
 @layer components {

@@ -27,7 +27,7 @@ export function AppShell({ children, session }: AppShellProps) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f7f7f8]">
+    <div className="flex h-screen overflow-hidden bg-[#FBFBFB]">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
@@ -38,7 +38,7 @@ export function AppShell({ children, session }: AppShellProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[250px] transform border-r border-gray-200 bg-white transition-transform duration-300 ease-in-out lg:transition-[width,opacity] lg:duration-300 lg:ease-in-out ${
+        className={`fixed inset-y-0 left-0 z-50 w-[250px] transform border-r border-[#B4B4B4] bg-white transition-transform duration-300 ease-in-out lg:transition-[width,opacity] lg:duration-300 lg:ease-in-out ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         } ${
           desktopSidebarVisible
@@ -48,7 +48,7 @@ export function AppShell({ children, session }: AppShellProps) {
       >
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className="flex h-[72px] items-center justify-between border-b border-gray-200 px-5">
+          <div className="flex h-[72px] items-center justify-between border-b border-[#B4B4B4] px-5">
             <Link href="/" className="flex items-center gap-2.5">
               <div className="flex h-8 w-8 items-center justify-center text-blue-700">
                 <img
