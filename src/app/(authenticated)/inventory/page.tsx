@@ -817,7 +817,7 @@ export default function InventoryPage() {
         }}
       />
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-4">
         <Link
           href="/inventory/fulfillment"
           className="rounded-xl border border-blue-200 bg-blue-50 p-5 shadow-sm transition hover:border-blue-300 hover:bg-blue-100"
@@ -847,6 +847,16 @@ export default function InventoryPage() {
           <p className="mt-2 text-2xl font-bold text-violet-950">Sinkron</p>
           <p className="mt-2 text-sm text-violet-800">
             Kelola product/service CRM yang terhubung ke inventory item.
+          </p>
+        </Link>
+        <Link
+          href="/inventory/movements"
+          className="rounded-xl border border-slate-200 bg-slate-50 p-5 shadow-sm transition hover:border-slate-300 hover:bg-slate-100"
+        >
+          <p className="text-sm font-semibold text-slate-900">Riwayat Mutasi Stok</p>
+          <p className="mt-2 text-2xl font-bold text-slate-950">Ledger</p>
+          <p className="mt-2 text-sm text-slate-700">
+            Lihat seluruh stok masuk dan keluar, sumber mutasi, saldo awal, perubahan, dan saldo akhir.
           </p>
         </Link>
       </div>

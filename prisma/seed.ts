@@ -2,17 +2,28 @@ import {
   PrismaClient,
   BailoutCategory,
   BailoutStatus,
+  BusinessFlowType,
   ClaimStatus,
   ClaimType,
+  GoodsReceiptStatus,
   InventoryBucketType,
+  InventoryItemType,
   InventoryTrackingMode,
   InventoryUnitCondition,
   InventoryUnitStatus,
   InventoryUsageType,
   JournalSourceType,
   JournalStatus,
+  PurchaseOrderStatus,
+  PurchaseRequestStatus,
+  SalesInvoiceStatus,
+  SalesOrderStatus,
+  SalesQuotationStatus,
   TravelStatus,
   TravelType,
+  VendorInvoiceMatchType,
+  VendorInvoiceStatus,
+  DeliveryOrderStatus,
   type Role,
 } from "../generated/prisma/index.js";
 import bcrypt from "bcryptjs";
@@ -460,6 +471,18 @@ async function main() {
     adminChief: { id: adminChief.id, name: adminChief.name },
   });
 
+  console.log("🧾 Creating purchase & sales relational sample data…");
+  await createPurchaseSalesSeedData({
+    salesStaff1Id: salesStaff1.id,
+    salesStaff1Name: salesStaff1.name ?? "Sales Staff 1",
+    salesStaff2Id: salesStaff2.id,
+    salesStaff2Name: salesStaff2.name ?? "Sales Staff 2",
+    adminUserId: adminChief.id,
+    adminUserName: adminChief.name ?? "Admin Chief",
+    financeDeptId: deptFinance.id,
+  });
+  console.log("  ✅ Purchase & sales sample data ready\n");
+
   // ── 7. Summary ────────────────────────────────────────────────────────────────
   console.log("🎉 Seeding completed!\n");
   console.log(
@@ -530,6 +553,651 @@ async function findCoaByCode(code: string) {
   }
 
   return coa;
+}
+
+async function createPurchaseSalesSeedData(input: {
+  salesStaff1Id: string;
+  salesStaff1Name: string;
+  salesStaff2Id: string;
+  salesStaff2Name: string;
+  adminUserId: string;
+  adminUserName: string;
+  financeDeptId: string;
+}) {
+  const {
+    salesStaff1Id,
+    salesStaff1Name,
+    salesStaff2Id,
+    salesStaff2Name,
+    adminUserId,
+    adminUserName,
+    financeDeptId,
+  } = input;
+
+  const vendorOne = await prisma.crmCustomer.upsert({
+    where: { id: "seed-vendor-1" },
+    update: {
+      company: "PT Infra Solusi Teknologi",
+      isVendor: true,
+      isCustomer: false,
+      ownerName: adminUserName,
+      status: "ACTIVE",
+      email: "procurement@infrasolusi.co.id",
+      phone: "+62217119991",
+      city: "Jakarta",
+    },
+    create: {
+      id: "seed-vendor-1",
+      company: "PT Infra Solusi Teknologi",
+      isVendor: true,
+      isCustomer: false,
+      ownerName: adminUserName,
+      status: "ACTIVE",
+      email: "procurement@infrasolusi.co.id",
+      phone: "+62217119991",
+      city: "Jakarta",
+    },
+  });
+
+  const vendorTwo = await prisma.crmCustomer.upsert({
+    where: { id: "seed-vendor-2" },
+    update: {
+      company: "PT Jaringan Data Nusantara",
+      isVendor: true,
+      isCustomer: false,
+      ownerName: adminUserName,
+      status: "ACTIVE",
+      email: "sales@jaringandata.co.id",
+      phone: "+62227119992",
+      city: "Bandung",
+    },
+    create: {
+      id: "seed-vendor-2",
+      company: "PT Jaringan Data Nusantara",
+      isVendor: true,
+      isCustomer: false,
+      ownerName: adminUserName,
+      status: "ACTIVE",
+      email: "sales@jaringandata.co.id",
+      phone: "+62227119992",
+      city: "Bandung",
+    },
+  });
+
+  const customerOne = await prisma.crmCustomer.findUniqueOrThrow({ where: { id: "seed-crm-customer-1" } });
+  const customerTwo = await prisma.crmCustomer.findUniqueOrThrow({ where: { id: "seed-crm-customer-3" } });
+
+  const warehouseMain = await prisma.warehouse.upsert({
+    where: { code: "WH-UTAMA" },
+    update: { name: "Gudang Perangkat IT", description: "Stok perangkat jaringan, server, dan hardware resale.", isActive: true },
+    create: { code: "WH-UTAMA", name: "Gudang Perangkat IT", description: "Stok perangkat jaringan, server, dan hardware resale.", isActive: true },
+  });
+  const warehouseWest = await prisma.warehouse.upsert({
+    where: { code: "WH-BARAT" },
+    update: { name: "Gudang Staging Proyek", description: "Area staging perangkat dan persiapan implementasi proyek client.", isActive: true },
+    create: { code: "WH-BARAT", name: "Gudang Staging Proyek", description: "Area staging perangkat dan persiapan implementasi proyek client.", isActive: true },
+  });
+
+  const itemOne = await prisma.inventoryItem.upsert({
+    where: { sku: "SKU-SWITCH-001" },
+    update: {
+      name: "Managed Switch 24 Port Gigabit",
+      description: "Switch managed untuk implementasi jaringan kantor dan cabang.",
+      unitOfMeasure: "Unit",
+      category: "Networking",
+      brand: "Cisco",
+      model: "CBS250-24T-4G",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 3750000,
+      reorderPoint: 2,
+      isActive: true,
+    },
+    create: {
+      sku: "SKU-SWITCH-001",
+      name: "Managed Switch 24 Port Gigabit",
+      description: "Switch managed untuk implementasi jaringan kantor dan cabang.",
+      unitOfMeasure: "Unit",
+      category: "Networking",
+      brand: "Cisco",
+      model: "CBS250-24T-4G",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 3750000,
+      reorderPoint: 2,
+      isActive: true,
+    },
+  });
+  const itemTwo = await prisma.inventoryItem.upsert({
+    where: { sku: "SKU-AP-001" },
+    update: {
+      name: "Access Point WiFi 6 Indoor",
+      description: "Access point untuk deploy jaringan wireless kantor dan retail outlet.",
+      unitOfMeasure: "Unit",
+      category: "Networking",
+      brand: "Ubiquiti",
+      model: "U6+",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 1850000,
+      reorderPoint: 4,
+      isActive: true,
+    },
+    create: {
+      sku: "SKU-AP-001",
+      name: "Access Point WiFi 6 Indoor",
+      description: "Access point untuk deploy jaringan wireless kantor dan retail outlet.",
+      unitOfMeasure: "Unit",
+      category: "Networking",
+      brand: "Ubiquiti",
+      model: "U6+",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 1850000,
+      reorderPoint: 4,
+      isActive: true,
+    },
+  });
+  const itemThree = await prisma.inventoryItem.upsert({
+    where: { sku: "SKU-SVC-IMPLEMENT-001" },
+    update: {
+      name: "Jasa Implementasi & Konfigurasi Jaringan",
+      description: "Jasa implementasi onsite untuk instalasi perangkat, konfigurasi VLAN, SSID, dan testing.",
+      unitOfMeasure: "Paket",
+      category: "Professional Service",
+      brand: "Internal Service",
+      model: "Implementation Package",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.SALE,
+      itemType: InventoryItemType.SERVICE,
+      isStockTracked: false,
+      isActive: true,
+    },
+    create: {
+      sku: "SKU-SVC-IMPLEMENT-001",
+      name: "Jasa Implementasi & Konfigurasi Jaringan",
+      description: "Jasa implementasi onsite untuk instalasi perangkat, konfigurasi VLAN, SSID, dan testing.",
+      unitOfMeasure: "Paket",
+      category: "Professional Service",
+      brand: "Internal Service",
+      model: "Implementation Package",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.SALE,
+      itemType: InventoryItemType.SERVICE,
+      isStockTracked: false,
+      isActive: true,
+    },
+  });
+  const itemFour = await prisma.inventoryItem.upsert({
+    where: { sku: "SKU-FW-001" },
+    update: {
+      name: "Next Gen Firewall Appliance",
+      description: "Firewall appliance untuk security gateway kantor dan cabang.",
+      unitOfMeasure: "Unit",
+      category: "Security",
+      brand: "Fortinet",
+      model: "FortiGate 40F",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 6750000,
+      reorderPoint: 1,
+      isActive: true,
+    },
+    create: {
+      sku: "SKU-FW-001",
+      name: "Next Gen Firewall Appliance",
+      description: "Firewall appliance untuk security gateway kantor dan cabang.",
+      unitOfMeasure: "Unit",
+      category: "Security",
+      brand: "Fortinet",
+      model: "FortiGate 40F",
+      trackingMode: InventoryTrackingMode.QUANTITY,
+      usageType: InventoryUsageType.BOTH,
+      itemType: InventoryItemType.HARDWARE,
+      standardCost: 6750000,
+      reorderPoint: 1,
+      isActive: true,
+    },
+  });
+
+  const pr1Payload = {
+    vendorId: vendorOne.id,
+    requesterId: adminUserId,
+    requesterName: adminUserName,
+    departmentId: financeDeptId,
+    departmentName: "Finance",
+    neededDate: new Date("2026-04-08"),
+    status: PurchaseRequestStatus.CONVERTED,
+    procurementMode: BusinessFlowType.GOODS,
+    priority: "HIGH",
+    budgetType: "PROJECT_PROCUREMENT",
+    subtotalAmount: 26100000,
+    totalAmount: 26100000,
+    convertedAt: new Date("2026-03-27"),
+    notes: "Pengadaan perangkat jaringan untuk proyek implementasi client retail.",
+  };
+
+  const pr1 = await prisma.purchaseRequest.upsert({
+    where: { requestNumber: "PR-2026-00001" },
+    update: pr1Payload,
+    create: {
+      requestNumber: "PR-2026-00001",
+      ...pr1Payload,
+    },
+  });
+
+  const pr1Line1Payload = {
+    purchaseRequestId: pr1.id,
+    inventoryItemId: itemOne.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 1,
+    description: "Managed switch untuk rollout jaringan core outlet.",
+    qtyRequested: 4,
+    qtyOrdered: 4,
+    unitPriceEstimate: 3750000,
+    lineTotalEstimate: 15000000,
+  };
+  const pr1Line1 = await prisma.purchaseRequestLine.upsert({
+    where: { id: "seed-pr-line-1" },
+    update: pr1Line1Payload,
+    create: { id: "seed-pr-line-1", ...pr1Line1Payload },
+  });
+
+  const pr1Line2Payload = {
+    purchaseRequestId: pr1.id,
+    inventoryItemId: itemTwo.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 2,
+    description: "Access point untuk kebutuhan wireless area outlet dan backoffice.",
+    qtyRequested: 6,
+    qtyOrdered: 6,
+    unitPriceEstimate: 1850000,
+    lineTotalEstimate: 11100000,
+  };
+  const pr1Line2 = await prisma.purchaseRequestLine.upsert({
+    where: { id: "seed-pr-line-2" },
+    update: pr1Line2Payload,
+    create: { id: "seed-pr-line-2", ...pr1Line2Payload },
+  });
+
+  const po1Payload = {
+    purchaseRequestId: pr1.id,
+    vendorId: vendorOne.id,
+    buyerId: adminUserId,
+    buyerName: adminUserName,
+    orderDate: new Date("2026-03-27"),
+    expectedDate: new Date("2026-04-08"),
+    status: PurchaseOrderStatus.ISSUED,
+    procurementMode: BusinessFlowType.GOODS,
+    requiresReceipt: true,
+    subtotalAmount: 26100000,
+    totalAmount: 26100000,
+    notes: "PO perangkat jaringan untuk proyek client retail.",
+    issuedAt: new Date("2026-03-27"),
+  };
+  const po1 = await prisma.purchaseOrder.upsert({
+    where: { orderNumber: "PO-2026-00001" },
+    update: po1Payload,
+    create: {
+      orderNumber: "PO-2026-00001",
+      ...po1Payload,
+    },
+  });
+
+  const po1Line1Payload = {
+    purchaseOrderId: po1.id,
+    purchaseRequestLineId: pr1Line1.id,
+    inventoryItemId: itemOne.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 1,
+    description: "Managed switch untuk rollout jaringan core outlet.",
+    qtyOrdered: 4,
+    qtyReceived: 4,
+    qtyInvoiced: 4,
+    unitPrice: 3750000,
+    lineTotal: 15000000,
+  };
+  const po1Line1 = await prisma.purchaseOrderLine.upsert({
+    where: { id: "seed-po-line-1" },
+    update: po1Line1Payload,
+    create: { id: "seed-po-line-1", ...po1Line1Payload },
+  });
+
+  const po1Line2Payload = {
+    purchaseOrderId: po1.id,
+    purchaseRequestLineId: pr1Line2.id,
+    inventoryItemId: itemTwo.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 2,
+    description: "Access point untuk kebutuhan wireless area outlet dan backoffice.",
+    qtyOrdered: 6,
+    qtyReceived: 6,
+    qtyInvoiced: 6,
+    unitPrice: 1850000,
+    lineTotal: 11100000,
+  };
+  const po1Line2 = await prisma.purchaseOrderLine.upsert({
+    where: { id: "seed-po-line-2" },
+    update: po1Line2Payload,
+    create: { id: "seed-po-line-2", ...po1Line2Payload },
+  });
+
+  const gr1Payload = {
+    purchaseOrderId: po1.id,
+    vendorId: vendorOne.id,
+    warehouseId: warehouseMain.id,
+    receiptDate: new Date("2026-03-28"),
+    status: GoodsReceiptStatus.RECEIVED,
+    notes: "Penerimaan perangkat jaringan untuk staging proyek.",
+    receivedAt: new Date("2026-03-28"),
+  };
+  const gr1 = await prisma.goodsReceipt.upsert({
+    where: { receiptNumber: "GR-2026-00001" },
+    update: gr1Payload,
+    create: { receiptNumber: "GR-2026-00001", ...gr1Payload },
+  });
+
+  const gr1Line1Payload = {
+    goodsReceiptId: gr1.id,
+    purchaseOrderLineId: po1Line1.id,
+    inventoryItemId: itemOne.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 1,
+    qtyOrdered: 4,
+    qtyReceived: 4,
+    qtyAccepted: 4,
+    qtyRejected: 0,
+    unitCost: 3750000,
+    notes: "Switch diterima lengkap dan siap staging.",
+  };
+  const gr1Line1 = await prisma.goodsReceiptLine.upsert({
+    where: { id: "seed-gr-line-1" },
+    update: gr1Line1Payload,
+    create: { id: "seed-gr-line-1", ...gr1Line1Payload },
+  });
+
+  const gr1Line2Payload = {
+    goodsReceiptId: gr1.id,
+    purchaseOrderLineId: po1Line2.id,
+    inventoryItemId: itemTwo.id,
+    warehouseId: warehouseMain.id,
+    lineNumber: 2,
+    qtyOrdered: 6,
+    qtyReceived: 6,
+    qtyAccepted: 6,
+    qtyRejected: 0,
+    unitCost: 1850000,
+    notes: "Access point diterima lengkap dan lolos pengecekan fisik.",
+  };
+  const gr1Line2 = await prisma.goodsReceiptLine.upsert({
+    where: { id: "seed-gr-line-2" },
+    update: gr1Line2Payload,
+    create: { id: "seed-gr-line-2", ...gr1Line2Payload },
+  });
+
+  const vi1Payload = {
+    vendorId: vendorOne.id,
+    purchaseOrderId: po1.id,
+    goodsReceiptId: gr1.id,
+    invoiceDate: new Date("2026-03-29"),
+    dueDate: new Date("2026-04-12"),
+    status: VendorInvoiceStatus.READY_TO_PAY,
+    matchType: VendorInvoiceMatchType.THREE_WAY,
+    subtotalAmount: 26100000,
+    totalAmount: 26100000,
+    notes: "Invoice vendor untuk perangkat jaringan proyek retail.",
+    readyToPayAt: new Date("2026-03-29"),
+  };
+  const vi1 = await prisma.vendorInvoice.upsert({
+    where: { invoiceNumber: "VINV-2026-00001" },
+    update: vi1Payload,
+    create: { invoiceNumber: "VINV-2026-00001", ...vi1Payload },
+  });
+
+  await prisma.vendorInvoiceLine.upsert({
+    where: { id: "seed-vi-line-1" },
+    update: { vendorInvoiceId: vi1.id, purchaseOrderLineId: po1Line1.id, goodsReceiptLineId: gr1Line1.id, inventoryItemId: itemOne.id, lineNumber: 1, description: "Managed switch rollout jaringan.", qtyBilled: 4, unitPrice: 3750000, lineTotal: 15000000 },
+    create: { id: "seed-vi-line-1", vendorInvoiceId: vi1.id, purchaseOrderLineId: po1Line1.id, goodsReceiptLineId: gr1Line1.id, inventoryItemId: itemOne.id, lineNumber: 1, description: "Managed switch rollout jaringan.", qtyBilled: 4, unitPrice: 3750000, lineTotal: 15000000 },
+  });
+  await prisma.vendorInvoiceLine.upsert({
+    where: { id: "seed-vi-line-2" },
+    update: { vendorInvoiceId: vi1.id, purchaseOrderLineId: po1Line2.id, goodsReceiptLineId: gr1Line2.id, inventoryItemId: itemTwo.id, lineNumber: 2, description: "Access point wireless rollout.", qtyBilled: 6, unitPrice: 1850000, lineTotal: 11100000 },
+    create: { id: "seed-vi-line-2", vendorInvoiceId: vi1.id, purchaseOrderLineId: po1Line2.id, goodsReceiptLineId: gr1Line2.id, inventoryItemId: itemTwo.id, lineNumber: 2, description: "Access point wireless rollout.", qtyBilled: 6, unitPrice: 1850000, lineTotal: 11100000 },
+  });
+
+  const sq1Payload = {
+    customerId: customerOne.id,
+    salesOwnerId: salesStaff1Id,
+    salesOwnerName: salesStaff1Name,
+    issueDate: new Date("2026-03-27"),
+    validUntil: new Date("2026-04-10"),
+    status: SalesQuotationStatus.APPROVED,
+    fulfillmentMode: BusinessFlowType.GOODS,
+    subtotalAmount: 43100000,
+    totalAmount: 43100000,
+    notes: "Penawaran perangkat jaringan untuk rollout cabang retail.",
+    approvedAt: new Date("2026-03-28"),
+  };
+  const sq1 = await prisma.salesQuotation.upsert({
+    where: { quotationNumber: "QT-2026-00001" },
+    update: sq1Payload,
+    create: { quotationNumber: "QT-2026-00001", ...sq1Payload },
+  });
+
+  const sq1Line1Payload = {
+    salesQuotationId: sq1.id,
+    inventoryItemId: itemOne.id,
+    warehouseId: warehouseWest.id,
+    lineNumber: 1,
+    description: "Managed switch untuk rollout jaringan outlet.",
+    qtyQuoted: 4,
+    unitPrice: 6500000,
+    lineTotal: 26000000,
+  };
+  const sq1Line1 = await prisma.salesQuotationLine.upsert({
+    where: { id: "seed-sq-line-1" },
+    update: sq1Line1Payload,
+    create: { id: "seed-sq-line-1", ...sq1Line1Payload },
+  });
+
+  const sq1Line2Payload = {
+    salesQuotationId: sq1.id,
+    inventoryItemId: itemTwo.id,
+    warehouseId: warehouseWest.id,
+    lineNumber: 2,
+    description: "Access point WiFi 6 untuk area outlet dan backoffice.",
+    qtyQuoted: 6,
+    unitPrice: 2850000,
+    lineTotal: 17100000,
+  };
+  const sq1Line2 = await prisma.salesQuotationLine.upsert({
+    where: { id: "seed-sq-line-3" },
+    update: sq1Line2Payload,
+    create: { id: "seed-sq-line-3", ...sq1Line2Payload },
+  });
+
+  const so1Payload = {
+    quotationId: sq1.id,
+    customerId: customerOne.id,
+    salesOwnerId: salesStaff1Id,
+    salesOwnerName: salesStaff1Name,
+    orderDate: new Date("2026-03-28"),
+    plannedShipDate: new Date("2026-03-30"),
+    status: SalesOrderStatus.DELIVERED,
+    fulfillmentMode: BusinessFlowType.GOODS,
+    requiresDelivery: true,
+    subtotalAmount: 43100000,
+    totalAmount: 43100000,
+    notes: "SO rollout jaringan cabang retail.",
+    deliveredAt: new Date("2026-03-30"),
+  };
+  const so1 = await prisma.salesOrder.upsert({
+    where: { salesOrderNumber: "SO-2026-00001" },
+    update: so1Payload,
+    create: { salesOrderNumber: "SO-2026-00001", ...so1Payload },
+  });
+
+  const so1Line1Payload = {
+    salesOrderId: so1.id,
+    salesQuotationLineId: sq1Line1.id,
+    inventoryItemId: itemOne.id,
+    warehouseId: warehouseWest.id,
+    lineNumber: 1,
+    description: "Managed switch untuk rollout jaringan outlet.",
+    qtyOrdered: 4,
+    qtyDelivered: 4,
+    qtyInvoiced: 4,
+    unitPrice: 6500000,
+    lineTotal: 26000000,
+  };
+  const so1Line1 = await prisma.salesOrderLine.upsert({
+    where: { id: "seed-so-line-1" },
+    update: so1Line1Payload,
+    create: { id: "seed-so-line-1", ...so1Line1Payload },
+  });
+
+  const so1Line2Payload = {
+    salesOrderId: so1.id,
+    salesQuotationLineId: sq1Line2.id,
+    inventoryItemId: itemTwo.id,
+    warehouseId: warehouseWest.id,
+    lineNumber: 2,
+    description: "Access point WiFi 6 untuk area outlet dan backoffice.",
+    qtyOrdered: 6,
+    qtyDelivered: 6,
+    qtyInvoiced: 6,
+    unitPrice: 2850000,
+    lineTotal: 17100000,
+  };
+  const so1Line2 = await prisma.salesOrderLine.upsert({
+    where: { id: "seed-so-line-2" },
+    update: so1Line2Payload,
+    create: { id: "seed-so-line-2", ...so1Line2Payload },
+  });
+
+  const do1Payload = {
+    salesOrderId: so1.id,
+    customerId: customerOne.id,
+    warehouseId: warehouseWest.id,
+    shipDate: new Date("2026-03-29"),
+    deliveredAt: new Date("2026-03-30"),
+    status: DeliveryOrderStatus.DELIVERED,
+    carrierName: "Project Deployment Team",
+    destinationAddress: "Jakarta",
+  };
+  const do1 = await prisma.deliveryOrder.upsert({
+    where: { deliveryOrderNumber: "DO-2026-00001" },
+    update: do1Payload,
+    create: { deliveryOrderNumber: "DO-2026-00001", ...do1Payload },
+  });
+
+  const do1Line1 = await prisma.deliveryOrderLine.upsert({
+    where: { id: "seed-do-line-1" },
+    update: { deliveryOrderId: do1.id, salesOrderLineId: so1Line1.id, inventoryItemId: itemOne.id, warehouseId: warehouseWest.id, lineNumber: 1, qtyOrdered: 4, qtyShipped: 4, qtyDelivered: 4 },
+    create: { id: "seed-do-line-1", deliveryOrderId: do1.id, salesOrderLineId: so1Line1.id, inventoryItemId: itemOne.id, warehouseId: warehouseWest.id, lineNumber: 1, qtyOrdered: 4, qtyShipped: 4, qtyDelivered: 4 },
+  });
+  const do1Line2 = await prisma.deliveryOrderLine.upsert({
+    where: { id: "seed-do-line-2" },
+    update: { deliveryOrderId: do1.id, salesOrderLineId: so1Line2.id, inventoryItemId: itemTwo.id, warehouseId: warehouseWest.id, lineNumber: 2, qtyOrdered: 6, qtyShipped: 6, qtyDelivered: 6 },
+    create: { id: "seed-do-line-2", deliveryOrderId: do1.id, salesOrderLineId: so1Line2.id, inventoryItemId: itemTwo.id, warehouseId: warehouseWest.id, lineNumber: 2, qtyOrdered: 6, qtyShipped: 6, qtyDelivered: 6 },
+  });
+
+  const si1Payload = {
+    customerId: customerOne.id,
+    salesOrderId: so1.id,
+    deliveryOrderId: do1.id,
+    issueDate: new Date("2026-03-31"),
+    dueDate: new Date("2026-04-14"),
+    status: SalesInvoiceStatus.SENT,
+    subtotalAmount: 43100000,
+    totalAmount: 43100000,
+    notes: "Invoice perangkat jaringan dan deployment outlet retail.",
+  };
+  const si1 = await prisma.salesInvoice.upsert({
+    where: { salesInvoiceNumber: "SINV-2026-00001" },
+    update: si1Payload,
+    create: { salesInvoiceNumber: "SINV-2026-00001", ...si1Payload },
+  });
+
+  await prisma.salesInvoiceLine.upsert({
+    where: { id: "seed-si-line-1" },
+    update: { salesInvoiceId: si1.id, salesOrderLineId: so1Line1.id, deliveryOrderLineId: do1Line1.id, inventoryItemId: itemOne.id, lineNumber: 1, qtyInvoiced: 4, unitPrice: 6500000, lineTotal: 26000000 },
+    create: { id: "seed-si-line-1", salesInvoiceId: si1.id, salesOrderLineId: so1Line1.id, deliveryOrderLineId: do1Line1.id, inventoryItemId: itemOne.id, lineNumber: 1, qtyInvoiced: 4, unitPrice: 6500000, lineTotal: 26000000 },
+  });
+  await prisma.salesInvoiceLine.upsert({
+    where: { id: "seed-si-line-2" },
+    update: { salesInvoiceId: si1.id, salesOrderLineId: so1Line2.id, deliveryOrderLineId: do1Line2.id, inventoryItemId: itemTwo.id, lineNumber: 2, qtyInvoiced: 6, unitPrice: 2850000, lineTotal: 17100000 },
+    create: { id: "seed-si-line-2", salesInvoiceId: si1.id, salesOrderLineId: so1Line2.id, deliveryOrderLineId: do1Line2.id, inventoryItemId: itemTwo.id, lineNumber: 2, qtyInvoiced: 6, unitPrice: 2850000, lineTotal: 17100000 },
+  });
+
+  const sq2Payload = {
+    customerId: customerTwo.id,
+    salesOwnerId: salesStaff2Id,
+    salesOwnerName: salesStaff2Name,
+    issueDate: new Date("2026-03-27"),
+    validUntil: new Date("2026-04-15"),
+    status: SalesQuotationStatus.NEGOTIATION,
+    fulfillmentMode: BusinessFlowType.SERVICE,
+    subtotalAmount: 18500000,
+    totalAmount: 18500000,
+    notes: "Penawaran jasa implementasi dan hardening jaringan untuk rumah sakit.",
+  };
+  const sq2 = await prisma.salesQuotation.upsert({
+    where: { quotationNumber: "QT-2026-00002" },
+    update: sq2Payload,
+    create: { quotationNumber: "QT-2026-00002", ...sq2Payload },
+  });
+
+  await prisma.salesQuotationLine.upsert({
+    where: { id: "seed-sq-line-2" },
+    update: { salesQuotationId: sq2.id, inventoryItemId: itemThree.id, warehouseId: warehouseWest.id, lineNumber: 1, description: "Paket implementasi, konfigurasi, testing, dan handover dokumentasi.", qtyQuoted: 1, unitPrice: 18500000, lineTotal: 18500000 },
+    create: { id: "seed-sq-line-2", salesQuotationId: sq2.id, inventoryItemId: itemThree.id, warehouseId: warehouseWest.id, lineNumber: 1, description: "Paket implementasi, konfigurasi, testing, dan handover dokumentasi.", qtyQuoted: 1, unitPrice: 18500000, lineTotal: 18500000 },
+  });
+
+  await prisma.salesOrder.updateMany({
+    where: { quotationId: sq2.id },
+    data: {
+      fulfillmentMode: BusinessFlowType.SERVICE,
+      requiresDelivery: false,
+      plannedShipDate: null,
+    },
+  });
+
+  const pr2Payload = {
+    vendorId: vendorTwo.id,
+    requesterId: adminUserId,
+    requesterName: adminUserName,
+    departmentId: financeDeptId,
+    departmentName: "Finance",
+    neededDate: new Date("2026-04-12"),
+    status: PurchaseRequestStatus.APPROVED,
+    procurementMode: BusinessFlowType.GOODS,
+    priority: "MEDIUM",
+    budgetType: "BUFFER_STOCK",
+    subtotalAmount: 13500000,
+    totalAmount: 13500000,
+    approvedAt: new Date("2026-03-28"),
+    notes: "Pengadaan buffer stock firewall appliance untuk kebutuhan proyek dan support client.",
+  };
+  const pr2 = await prisma.purchaseRequest.upsert({
+    where: { requestNumber: "PR-2026-00002" },
+    update: pr2Payload,
+    create: {
+      requestNumber: "PR-2026-00002",
+      ...pr2Payload,
+    },
+  });
+
+  await prisma.purchaseRequestLine.upsert({
+    where: { id: "seed-pr-line-3" },
+    update: { purchaseRequestId: pr2.id, inventoryItemId: itemFour.id, warehouseId: warehouseMain.id, lineNumber: 1, description: "Firewall cadangan untuk kebutuhan implementasi cepat dan support client.", qtyRequested: 2, qtyOrdered: 0, unitPriceEstimate: 6750000, lineTotalEstimate: 13500000 },
+    create: { id: "seed-pr-line-3", purchaseRequestId: pr2.id, inventoryItemId: itemFour.id, warehouseId: warehouseMain.id, lineNumber: 1, description: "Firewall cadangan untuk kebutuhan implementasi cepat dan support client.", qtyRequested: 2, qtyOrdered: 0, unitPriceEstimate: 6750000, lineTotalEstimate: 13500000 },
+  });
 }
 
 async function createSampleBusinessData(input: {

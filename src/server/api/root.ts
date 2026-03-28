@@ -18,6 +18,7 @@ import { balanceAccountRouter } from "@/server/api/routers/balanceAccount";
 import { roleRouter } from "@/server/api/routers/role";
 import { crmRouter } from "@/server/api/routers/crm";
 import { inventoryRouter } from "@/server/api/routers/inventory";
+import { businessRouter } from "@/server/api/routers/business";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 /**
@@ -46,6 +47,7 @@ export const appRouter = createTRPCRouter({
   role: roleRouter,
   crm: crmRouter,
   inventory: inventoryRouter,
+  business: businessRouter,
 });
 
 // export type definition of API

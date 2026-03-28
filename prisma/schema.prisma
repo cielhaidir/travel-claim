@@ -353,6 +353,19 @@ enum InventoryUsageType {
   BOTH
 }
 
+enum InventoryItemType {
+  HARDWARE
+  SOFTWARE_LICENSE
+  SERVICE
+  MANAGED_SERVICE
+}
+
+enum BusinessFlowType {
+  GOODS
+  SERVICE
+  MIXED
+}
+
 enum InventoryUnitStatus {
   IN_STOCK
   RESERVED
@@ -379,6 +392,85 @@ enum CrmFulfillmentStatus {
   PARTIAL
   READY
   DELIVERED
+  CANCELED
+}
+
+enum PurchaseRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CONVERTED
+  CLOSED
+  CANCELED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ISSUED
+  PARTIAL_RECEIPT
+  COMPLETED
+  CANCELED
+}
+
+enum GoodsReceiptStatus {
+  DRAFT
+  PARTIAL
+  RECEIVED
+  QC_HOLD
+  CANCELED
+}
+
+enum VendorInvoiceStatus {
+  DRAFT
+  WAITING_MATCH
+  MATCHED
+  DISPUTE
+  READY_TO_PAY
+  PAID
+  CANCELED
+}
+
+enum VendorInvoiceMatchType {
+  TWO_WAY
+  THREE_WAY
+}
+
+enum SalesQuotationStatus {
+  DRAFT
+  SENT
+  NEGOTIATION
+  APPROVED
+  EXPIRED
+  REJECTED
+  CANCELED
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  CONFIRMED
+  READY_TO_SHIP
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CLOSED
+  CANCELED
+}
+
+enum DeliveryOrderStatus {
+  DRAFT
+  READY
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  CANCELED
+}
+
+enum SalesInvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
   CANCELED
 }
 
@@ -525,6 +617,7 @@ model Department {
   updatedAt DateTime  @updatedAt // -- Waktu terakhir pembaruan departemen ini.
 
   users User[] // -- Daftar pengguna yang terkait dengan departemen ini.
+  purchaseRequests PurchaseRequest[]
 
   @@unique([code])
   @@index([code])
@@ -637,6 +730,14 @@ model CrmCustomer {
   activities    CrmActivity[]
   conversations CrmConversation[]
   fulfillmentRequests CrmFulfillmentRequest[]
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders  PurchaseOrder[]
+  goodsReceipts   GoodsReceipt[]
+  vendorInvoices  VendorInvoice[]
+  salesQuotations SalesQuotation[]
+  salesOrders     SalesOrder[]
+  deliveryOrders  DeliveryOrder[]
+  salesInvoices   SalesInvoice[]
   @@index([deletedAt])
 }
 
@@ -984,6 +1085,510 @@ model CrmFulfillmentRequestLine {
   @@index([warehouseId])
 }
 
+model PurchaseRequest {
+  id                String                @id @default(cuid())
+  requestNumber     String                @unique @db.VarChar(50)
+  vendorId          String?
+  requesterId       String?
+  requesterName     String?               @db.VarChar(150)
+  departmentId      String?
+  departmentName    String?               @db.VarChar(150)
+  requestDate       DateTime              @default(now())
+  neededDate        DateTime?
+  status            PurchaseRequestStatus @default(DRAFT)
+  procurementMode   BusinessFlowType      @default(GOODS)
+  priority          String?               @db.VarChar(30)
+  budgetType        String?               @db.VarChar(30)
+  subtotalAmount    Decimal               @default(0) @db.Decimal(15, 2)
+  taxAmount         Decimal               @default(0) @db.Decimal(15, 2)
+  totalAmount       Decimal               @default(0) @db.Decimal(15, 2)
+  notes             String?               @db.Text
+  submittedAt       DateTime?
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  convertedAt       DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  vendor         CrmCustomer?         @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  department     Department?          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  lines          PurchaseRequestLine[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([requestNumber])
+  @@index([vendorId])
+  @@index([departmentId])
+  @@index([status])
+  @@index([procurementMode])
+  @@index([neededDate])
+  @@index([deletedAt])
+}
+
+model PurchaseRequestLine {
+  id                  String   @id @default(cuid())
+  purchaseRequestId   String
+  inventoryItemId     String?
+  warehouseId         String?
+  lineNumber          Int      @default(1)
+  description         String?  @db.Text
+  qtyRequested        Decimal  @default(0) @db.Decimal(15, 2)
+  qtyOrdered          Decimal  @default(0) @db.Decimal(15, 2)
+  unitPriceEstimate   Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotalEstimate   Decimal  @default(0) @db.Decimal(15, 2)
+  neededDate          DateTime?
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse       Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  purchaseOrderLines PurchaseOrderLine[]
+
+  @@index([purchaseRequestId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model PurchaseOrder {
+  id                String              @id @default(cuid())
+  orderNumber       String              @unique @db.VarChar(50)
+  purchaseRequestId String?
+  vendorId          String
+  buyerId           String?
+  buyerName         String?             @db.VarChar(150)
+  orderDate         DateTime            @default(now())
+  expectedDate      DateTime?
+  status            PurchaseOrderStatus @default(DRAFT)
+  procurementMode   BusinessFlowType    @default(GOODS)
+  requiresReceipt   Boolean             @default(true)
+  subtotalAmount    Decimal             @default(0) @db.Decimal(15, 2)
+  taxAmount         Decimal             @default(0) @db.Decimal(15, 2)
+  totalAmount       Decimal             @default(0) @db.Decimal(15, 2)
+  notes             String?             @db.Text
+  issuedAt          DateTime?
+  completedAt       DateTime?
+  canceledAt        DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  purchaseRequest PurchaseRequest?  @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
+  vendor          CrmCustomer       @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  lines           PurchaseOrderLine[]
+  goodsReceipts   GoodsReceipt[]
+  vendorInvoices  VendorInvoice[]
+
+  @@index([orderNumber])
+  @@index([purchaseRequestId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([procurementMode])
+  @@index([requiresReceipt])
+  @@index([orderDate])
+  @@index([deletedAt])
+}
+
+model PurchaseOrderLine {
+  id                    String   @id @default(cuid())
+  purchaseOrderId       String
+  purchaseRequestLineId String?
+  inventoryItemId       String?
+  warehouseId           String?
+  lineNumber            Int      @default(1)
+  description           String?  @db.Text
+  qtyOrdered            Decimal  @default(0) @db.Decimal(15, 2)
+  qtyReceived           Decimal  @default(0) @db.Decimal(15, 2)
+  qtyInvoiced           Decimal  @default(0) @db.Decimal(15, 2)
+  unitPrice             Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotal             Decimal  @default(0) @db.Decimal(15, 2)
+  notes                 String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  purchaseOrder     PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseRequestLine PurchaseRequestLine? @relation(fields: [purchaseRequestLineId], references: [id], onDelete: SetNull)
+  inventoryItem     InventoryItem?       @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse         Warehouse?           @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  goodsReceiptLines GoodsReceiptLine[]
+  vendorInvoiceLines VendorInvoiceLine[]
+
+  @@index([purchaseOrderId])
+  @@index([purchaseRequestLineId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model GoodsReceipt {
+  id              String             @id @default(cuid())
+  receiptNumber   String             @unique @db.VarChar(50)
+  purchaseOrderId String
+  vendorId        String
+  warehouseId     String?
+  receiptDate     DateTime           @default(now())
+  status          GoodsReceiptStatus @default(DRAFT)
+  notes           String?            @db.Text
+  receivedAt      DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  purchaseOrder  PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  vendor         CrmCustomer        @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  warehouse      Warehouse?         @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  lines          GoodsReceiptLine[]
+  vendorInvoices VendorInvoice[]
+
+  @@index([receiptNumber])
+  @@index([purchaseOrderId])
+  @@index([vendorId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([receiptDate])
+  @@index([deletedAt])
+}
+
+model GoodsReceiptLine {
+  id                  String   @id @default(cuid())
+  goodsReceiptId      String
+  purchaseOrderLineId String?
+  inventoryItemId     String?
+  warehouseId         String?
+  receiptBatchId      String?
+  lineNumber          Int      @default(1)
+  qtyOrdered          Decimal  @default(0) @db.Decimal(15, 2)
+  qtyReceived         Decimal  @default(0) @db.Decimal(15, 2)
+  qtyAccepted         Decimal  @default(0) @db.Decimal(15, 2)
+  qtyRejected         Decimal  @default(0) @db.Decimal(15, 2)
+  unitCost            Decimal  @default(0) @db.Decimal(15, 2)
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  goodsReceipt      GoodsReceipt         @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine?   @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  inventoryItem     InventoryItem?       @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse         Warehouse?           @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  receiptBatch      InventoryReceiptBatch? @relation(fields: [receiptBatchId], references: [id], onDelete: SetNull)
+  vendorInvoiceLines VendorInvoiceLine[]
+
+  @@index([goodsReceiptId])
+  @@index([purchaseOrderLineId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+  @@index([receiptBatchId])
+}
+
+model VendorInvoice {
+  id              String                 @id @default(cuid())
+  invoiceNumber   String                 @unique @db.VarChar(50)
+  vendorId        String
+  purchaseOrderId String?
+  goodsReceiptId  String?
+  invoiceDate     DateTime               @default(now())
+  dueDate         DateTime?
+  status          VendorInvoiceStatus    @default(DRAFT)
+  matchType       VendorInvoiceMatchType @default(THREE_WAY)
+  subtotalAmount  Decimal                @default(0) @db.Decimal(15, 2)
+  taxAmount       Decimal                @default(0) @db.Decimal(15, 2)
+  totalAmount     Decimal                @default(0) @db.Decimal(15, 2)
+  paidAmount      Decimal                @default(0) @db.Decimal(15, 2)
+  notes           String?                @db.Text
+  matchedAt       DateTime?
+  readyToPayAt    DateTime?
+  paidAt          DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  vendor        CrmCustomer    @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  goodsReceipt  GoodsReceipt?  @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
+  lines         VendorInvoiceLine[]
+
+  @@index([invoiceNumber])
+  @@index([vendorId])
+  @@index([purchaseOrderId])
+  @@index([goodsReceiptId])
+  @@index([status])
+  @@index([invoiceDate])
+  @@index([dueDate])
+  @@index([deletedAt])
+}
+
+model VendorInvoiceLine {
+  id                  String   @id @default(cuid())
+  vendorInvoiceId     String
+  purchaseOrderLineId String?
+  goodsReceiptLineId  String?
+  inventoryItemId     String?
+  lineNumber          Int      @default(1)
+  description         String?  @db.Text
+  qtyBilled           Decimal  @default(0) @db.Decimal(15, 2)
+  unitPrice           Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotal           Decimal  @default(0) @db.Decimal(15, 2)
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  vendorInvoice    VendorInvoice      @relation(fields: [vendorInvoiceId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  goodsReceiptLine GoodsReceiptLine?  @relation(fields: [goodsReceiptLineId], references: [id], onDelete: SetNull)
+  inventoryItem    InventoryItem?     @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([vendorInvoiceId])
+  @@index([purchaseOrderLineId])
+  @@index([goodsReceiptLineId])
+  @@index([inventoryItemId])
+}
+
+model SalesQuotation {
+  id             String               @id @default(cuid())
+  quotationNumber String              @unique @db.VarChar(50)
+  customerId     String
+  salesOwnerId   String?
+  salesOwnerName String?              @db.VarChar(150)
+  issueDate      DateTime             @default(now())
+  validUntil     DateTime?
+  status         SalesQuotationStatus @default(DRAFT)
+  fulfillmentMode BusinessFlowType    @default(GOODS)
+  subtotalAmount Decimal              @default(0) @db.Decimal(15, 2)
+  taxAmount      Decimal              @default(0) @db.Decimal(15, 2)
+  totalAmount    Decimal              @default(0) @db.Decimal(15, 2)
+  notes          String?              @db.Text
+  approvedAt     DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  customer    CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines       SalesQuotationLine[]
+  salesOrders SalesOrder[]
+
+  @@index([quotationNumber])
+  @@index([customerId])
+  @@index([status])
+  @@index([fulfillmentMode])
+  @@index([issueDate])
+  @@index([validUntil])
+  @@index([deletedAt])
+}
+
+model SalesQuotationLine {
+  id              String   @id @default(cuid())
+  salesQuotationId String
+  inventoryItemId String?
+  warehouseId     String?
+  lineNumber      Int      @default(1)
+  description     String?  @db.Text
+  qtyQuoted       Decimal  @default(0) @db.Decimal(15, 2)
+  unitPrice       Decimal  @default(0) @db.Decimal(15, 2)
+  discountAmount  Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotal       Decimal  @default(0) @db.Decimal(15, 2)
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salesQuotation SalesQuotation  @relation(fields: [salesQuotationId], references: [id], onDelete: Cascade)
+  inventoryItem  InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse      Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  salesOrderLines SalesOrderLine[]
+
+  @@index([salesQuotationId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model SalesOrder {
+  id               String           @id @default(cuid())
+  salesOrderNumber String           @unique @db.VarChar(50)
+  quotationId      String?
+  customerId       String
+  salesOwnerId     String?
+  salesOwnerName   String?          @db.VarChar(150)
+  orderDate        DateTime         @default(now())
+  plannedShipDate  DateTime?
+  status           SalesOrderStatus @default(DRAFT)
+  fulfillmentMode  BusinessFlowType @default(GOODS)
+  requiresDelivery Boolean          @default(true)
+  subtotalAmount   Decimal          @default(0) @db.Decimal(15, 2)
+  taxAmount        Decimal          @default(0) @db.Decimal(15, 2)
+  totalAmount      Decimal          @default(0) @db.Decimal(15, 2)
+  notes            String?          @db.Text
+  deliveredAt      DateTime?
+  closedAt         DateTime?
+  canceledAt       DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  quotation      SalesQuotation?  @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  customer       CrmCustomer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines          SalesOrderLine[]
+  deliveryOrders DeliveryOrder[]
+  salesInvoices  SalesInvoice[]
+
+  @@index([salesOrderNumber])
+  @@index([quotationId])
+  @@index([customerId])
+  @@index([status])
+  @@index([fulfillmentMode])
+  @@index([requiresDelivery])
+  @@index([orderDate])
+  @@index([plannedShipDate])
+  @@index([deletedAt])
+}
+
+model SalesOrderLine {
+  id                String   @id @default(cuid())
+  salesOrderId      String
+  salesQuotationLineId String?
+  inventoryItemId   String?
+  warehouseId       String?
+  lineNumber        Int      @default(1)
+  description       String?  @db.Text
+  qtyOrdered        Decimal  @default(0) @db.Decimal(15, 2)
+  qtyDelivered      Decimal  @default(0) @db.Decimal(15, 2)
+  qtyInvoiced       Decimal  @default(0) @db.Decimal(15, 2)
+  unitPrice         Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotal         Decimal  @default(0) @db.Decimal(15, 2)
+  notes             String?  @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  salesOrder      SalesOrder        @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  salesQuotationLine SalesQuotationLine? @relation(fields: [salesQuotationLineId], references: [id], onDelete: SetNull)
+  inventoryItem   InventoryItem?    @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse       Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  deliveryOrderLines DeliveryOrderLine[]
+  salesInvoiceLines  SalesInvoiceLine[]
+
+  @@index([salesOrderId])
+  @@index([salesQuotationLineId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model DeliveryOrder {
+  id                  String              @id @default(cuid())
+  deliveryOrderNumber String              @unique @db.VarChar(50)
+  salesOrderId        String
+  customerId          String
+  warehouseId         String?
+  shipDate            DateTime            @default(now())
+  deliveredAt         DateTime?
+  status              DeliveryOrderStatus @default(DRAFT)
+  carrierName         String?             @db.VarChar(150)
+  trackingNumber      String?             @db.VarChar(100)
+  destinationAddress  String?             @db.Text
+  notes               String?             @db.Text
+  deletedAt           DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  salesOrder    SalesOrder          @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
+  customer      CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  warehouse     Warehouse?          @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  lines         DeliveryOrderLine[]
+  salesInvoices SalesInvoice[]
+
+  @@index([deliveryOrderNumber])
+  @@index([salesOrderId])
+  @@index([customerId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([shipDate])
+  @@index([deletedAt])
+}
+
+model DeliveryOrderLine {
+  id                String   @id @default(cuid())
+  deliveryOrderId   String
+  salesOrderLineId  String?
+  inventoryItemId   String?
+  warehouseId       String?
+  lineNumber        Int      @default(1)
+  qtyOrdered        Decimal  @default(0) @db.Decimal(15, 2)
+  qtyShipped        Decimal  @default(0) @db.Decimal(15, 2)
+  qtyDelivered      Decimal  @default(0) @db.Decimal(15, 2)
+  notes             String?  @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  deliveryOrder DeliveryOrder   @relation(fields: [deliveryOrderId], references: [id], onDelete: Cascade)
+  salesOrderLine SalesOrderLine? @relation(fields: [salesOrderLineId], references: [id], onDelete: SetNull)
+  inventoryItem InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  warehouse     Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  salesInvoiceLines SalesInvoiceLine[]
+
+  @@index([deliveryOrderId])
+  @@index([salesOrderLineId])
+  @@index([inventoryItemId])
+  @@index([warehouseId])
+}
+
+model SalesInvoice {
+  id                 String             @id @default(cuid())
+  salesInvoiceNumber String             @unique @db.VarChar(50)
+  customerId         String
+  salesOrderId       String?
+  deliveryOrderId    String?
+  issueDate          DateTime           @default(now())
+  dueDate            DateTime?
+  status             SalesInvoiceStatus @default(DRAFT)
+  subtotalAmount     Decimal            @default(0) @db.Decimal(15, 2)
+  taxAmount          Decimal            @default(0) @db.Decimal(15, 2)
+  totalAmount        Decimal            @default(0) @db.Decimal(15, 2)
+  paidAmount         Decimal            @default(0) @db.Decimal(15, 2)
+  notes              String?            @db.Text
+  sentAt             DateTime?
+  paidAt             DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  customer      CrmCustomer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  salesOrder    SalesOrder?    @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
+  deliveryOrder DeliveryOrder? @relation(fields: [deliveryOrderId], references: [id], onDelete: SetNull)
+  lines         SalesInvoiceLine[]
+
+  @@index([salesInvoiceNumber])
+  @@index([customerId])
+  @@index([salesOrderId])
+  @@index([deliveryOrderId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([dueDate])
+  @@index([deletedAt])
+}
+
+model SalesInvoiceLine {
+  id               String   @id @default(cuid())
+  salesInvoiceId   String
+  salesOrderLineId String?
+  deliveryOrderLineId String?
+  inventoryItemId  String?
+  lineNumber       Int      @default(1)
+  description      String?  @db.Text
+  qtyInvoiced      Decimal  @default(0) @db.Decimal(15, 2)
+  unitPrice        Decimal  @default(0) @db.Decimal(15, 2)
+  lineTotal        Decimal  @default(0) @db.Decimal(15, 2)
+  notes            String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  salesInvoice      SalesInvoice      @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  salesOrderLine    SalesOrderLine?   @relation(fields: [salesOrderLineId], references: [id], onDelete: SetNull)
+  deliveryOrderLine DeliveryOrderLine? @relation(fields: [deliveryOrderLineId], references: [id], onDelete: SetNull)
+  inventoryItem     InventoryItem?    @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([salesInvoiceId])
+  @@index([salesOrderLineId])
+  @@index([deliveryOrderLineId])
+  @@index([inventoryItemId])
+}
+
 model InventoryItem {
   id                   String               @id @default(cuid())
   sku                  String               @unique @db.VarChar(50)
@@ -998,6 +1603,7 @@ model InventoryItem {
   technicalSpecs       String?               @db.Text
   trackingMode         InventoryTrackingMode @default(QUANTITY)
   usageType            InventoryUsageType   @default(BOTH)
+  itemType             InventoryItemType    @default(HARDWARE)
   isStockTracked       Boolean              @default(true)
   minStock             Decimal              @default(0) @db.Decimal(15, 2)
   reorderPoint         Decimal              @default(0) @db.Decimal(15, 2)
@@ -1016,6 +1622,14 @@ model InventoryItem {
   crmProducts       CrmProduct[]
   leadLines         CrmLeadLine[]
   fulfillmentLines  CrmFulfillmentRequestLine[]
+  purchaseRequestLines PurchaseRequestLine[]
+  purchaseOrderLines   PurchaseOrderLine[]
+  goodsReceiptLines    GoodsReceiptLine[]
+  vendorInvoiceLines   VendorInvoiceLine[]
+  salesQuotationLines  SalesQuotationLine[]
+  salesOrderLines      SalesOrderLine[]
+  deliveryOrderLines   DeliveryOrderLine[]
+  salesInvoiceLines    SalesInvoiceLine[]
   balances          InventoryBalance[]
   ledgerEntries     InventoryLedgerEntry[]
   reservations      InventoryReservation[]
@@ -1044,6 +1658,14 @@ model Warehouse {
   reservations        InventoryReservation[]
   leadLinePreferences CrmLeadLine[]
   fulfillmentLines    CrmFulfillmentRequestLine[]
+  purchaseRequestLines PurchaseRequestLine[]
+  purchaseOrderLines   PurchaseOrderLine[]
+  goodsReceipts        GoodsReceipt[]
+  goodsReceiptLines    GoodsReceiptLine[]
+  salesQuotationLines  SalesQuotationLine[]
+  salesOrderLines      SalesOrderLine[]
+  deliveryOrders       DeliveryOrder[]
+  deliveryOrderLines   DeliveryOrderLine[]
   receiptBatches      InventoryReceiptBatch[]
   units               InventoryItemUnit[]
 
@@ -1109,6 +1731,7 @@ model InventoryReceiptBatch {
   inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   warehouse     Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   units         InventoryItemUnit[]
+  goodsReceiptLines GoodsReceiptLine[]
 
   @@index([inventoryItemId])
   @@index([warehouseId])

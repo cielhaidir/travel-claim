@@ -3,180 +3,62 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { BusinessFlowBadge } from "@/components/features/business/BusinessFlowBadge";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/features/PageHeader";
 import { CrmEmptyHint, crmInputClassName, CrmMetricCard } from "@/components/features/crm/shared";
 import { userHasPermission } from "@/lib/auth/role-check";
-import { getCrmLabel } from "@/lib/constants/crm";
 import { formatDate } from "@/lib/utils/format";
 import { api } from "@/trpc/react";
 
+type GoodsReceiptLineRecord = {
+  qtyOrdered: number | string;
+  qtyReceived: number | string;
+  qtyAccepted?: number | string;
+  description?: string | null;
+  inventoryItem?: { sku: string; name: string } | null;
+};
+type GoodsReceiptRecord = {
+  id: string;
+  receiptNumber: string;
+  receiptDate: string | Date;
+  status: string;
+  vendor: { company: string };
+  purchaseOrder: { orderNumber: string; procurementMode?: string; requiresReceipt?: boolean } | null;
+  warehouse: { name: string } | null;
+  lines: GoodsReceiptLineRecord[];
+};
+
+const toLabel = (value?: string | null) => value ? value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "-";
+const toBadge = (status?: string | null): "default" | "success" | "warning" | "danger" | "info" => status === "RECEIVED" ? "success" : status === "PARTIAL" ? "warning" : status === "QC_HOLD" ? "danger" : "default";
+const summarizeItems = (lines: GoodsReceiptLineRecord[]) => {
+  const labels = lines
+    .map((line) => line.inventoryItem?.name ?? line.description ?? null)
+    .filter((value): value is string => Boolean(value));
+
+  if (labels.length === 0) return "-";
+  if (labels.length === 1) return labels[0];
+  return `${labels[0]} +${labels.length - 1} item`;
+};
+
 export default function GoodsReceiptPage() {
   const { data: session } = useSession();
-  const [vendorId, setVendorId] = useState("");
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
   const isAllowed = session?.user ? userHasPermission(session.user, "purchases", "read") : false;
 
-  const { data: vendors, isLoading } = api.crm.listOrganizations.useQuery(
-    { search: search || undefined, usage: "vendor" },
+  const query = api.business.listGoodsReceipts.useQuery(
+    { search: search || undefined, status: status ? (status as never) : undefined, limit: 100 },
     { enabled: isAllowed, refetchOnWindowFocus: false },
-  );
+  ) as unknown as { data?: GoodsReceiptRecord[]; isLoading: boolean };
 
-  const rows = useMemo(() => vendors ?? [], [vendors]);
-  const selectedVendor = useMemo(() => rows.find((item) => item.id === vendorId) ?? null, [rows, vendorId]);
+  const rows = useMemo(() => query.data ?? [], [query.data]);
+  const expectedQty = rows.reduce((sum, row) => sum + row.lines.reduce((lineSum, line) => lineSum + Number(line.qtyOrdered ?? 0), 0), 0);
+  const receivedQty = rows.reduce((sum, row) => sum + row.lines.reduce((lineSum, line) => lineSum + Number(line.qtyReceived ?? 0), 0), 0);
+  const partialCount = rows.filter((row) => row.status === "PARTIAL").length;
+  const holdCount = rows.filter((row) => row.status === "QC_HOLD").length;
 
   if (!session || !isAllowed) return null;
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Goods Receipt"
-        description="Penerimaan barang terhubung ke vendor CRM agar inbound inventory, PO, dan invoice vendor memakai master yang sama."
-        badge={<Badge variant="info">Vendor Source: CRM</Badge>}
-        primaryAction={{ label: "Buka Purchase Order", href: "/pembelian/purchase-order" }}
-        secondaryAction={{ label: "Kembali ke Pembelian", href: "/pembelian" }}
-      />
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <CrmMetricCard label="Vendor CRM" value={String(rows.length)} helper="Vendor tersedia untuk penerimaan" />
-        <CrmMetricCard label="Active Vendor" value={String(rows.filter((item) => item.status === "ACTIVE").length)} helper="Siap dipakai di receipt" />
-        <CrmMetricCard label="Dengan Contact" value={String(rows.filter((item) => item.contacts.length > 0).length)} helper="PIC vendor tersedia" />
-        <CrmMetricCard label="Dengan Deals" value={String(rows.filter((item) => item.deals.length > 0).length)} helper="Relasi account di CRM" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Draft Goods Receipt</h2>
-              <p className="mt-1 text-sm text-gray-500">Pilih vendor CRM dan referensikan ke nomor PO untuk inbound receipt.</p>
-            </div>
-            <Badge variant="success">Linked</Badge>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-medium text-gray-700">Vendor dari CRM</span>
-              <select value={vendorId} onChange={(event) => setVendorId(event.target.value)} className={crmInputClassName}>
-                <option value="">Pilih vendor</option>
-                {rows.map((vendor) => (
-                  <option key={vendor.id} value={vendor.id}>
-                    {vendor.company}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Nomor GR</span>
-              <input value="AUTO / GR-XXXX" readOnly className={`${crmInputClassName} bg-gray-50`} />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Nomor PO</span>
-              <input placeholder="Contoh: PO-2026-0045" className={crmInputClassName} />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Tanggal Terima</span>
-              <input type="date" className={crmInputClassName} />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">Gudang Tujuan</span>
-              <input placeholder="Gudang utama / gudang service" className={crmInputClassName} />
-            </label>
-          </div>
-
-          {selectedVendor ? (
-            <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold text-blue-950">{selectedVendor.company}</p>
-                <Badge variant={selectedVendor.status === "ACTIVE" ? "success" : "default"}>{getCrmLabel(selectedVendor.status)}</Badge>
-                <Badge variant="info">{selectedVendor.contacts.length} contact</Badge>
-              </div>
-              <div className="mt-3 grid gap-2 text-sm text-blue-900 md:grid-cols-2">
-                <p>Website: {selectedVendor.website ?? "-"}</p>
-                <p>Industry: {getCrmLabel(selectedVendor.industry)}</p>
-                <p>Employee Range: {getCrmLabel(selectedVendor.employeeCount)}</p>
-                <p>Updated: {formatDate(selectedVendor.updatedAt)}</p>
-              </div>
-              <div className="mt-4">
-                <Link href={`/crm/organizations/${selectedVendor.id}`} className="text-sm font-semibold text-blue-700 hover:text-blue-800">
-                  Buka detail CRM →
-                </Link>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-5">
-              <CrmEmptyHint text="Pilih vendor CRM untuk melihat master vendor yang dipakai pada goods receipt." />
-            </div>
-          )}
-
-          <div className="mt-6 flex justify-end gap-3">
-            <Button variant="secondary">Simpan Draft</Button>
-            <Button>Buat Goods Receipt</Button>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">Cari Vendor CRM</h2>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Cari company, website, atau notes"
-              className={`${crmInputClassName} mt-4`}
-            />
-            <p className="mt-2 text-xs text-gray-500">Receipt hanya memakai organization CRM yang ditandai sebagai vendor.</p>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">Alur Integrasi</h2>
-            <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-gray-600">
-              <li>Vendor dipilih dari CRM master yang sama dengan PO.</li>
-              <li>Goods receipt akan menjadi dasar validasi invoice vendor.</li>
-              <li>Receipt nantinya dapat diteruskan ke inventory batch / serial receipt.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Preview Vendor CRM untuk Goods Receipt</h2>
-          <p className="text-sm text-gray-500">{rows.length} vendor tersedia</p>
-        </div>
-        {isLoading ? (
-          <div className="p-5 text-sm text-gray-500">Memuat vendor dari CRM...</div>
-        ) : rows.length === 0 ? (
-          <div className="p-5">
-            <CrmEmptyHint text="Belum ada organization CRM yang ditandai sebagai vendor." />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Vendor</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Website</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Industry</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Contacts</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Updated</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {rows.map((vendor) => (
-                  <tr key={vendor.id}>
-                    <td className="px-4 py-3 font-medium text-gray-900">{vendor.company}</td>
-                    <td className="px-4 py-3 text-gray-600">{vendor.website ?? "-"}</td>
-                    <td className="px-4 py-3 text-gray-600">{getCrmLabel(vendor.industry)}</td>
-                    <td className="px-4 py-3 text-gray-600">{vendor.contacts.length}</td>
-                    <td className="px-4 py-3 text-gray-600">{formatDate(vendor.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="space-y-6"><PageHeader title="Goods Receipt" description="Goods receipt sekarang konsisten dengan flow barang perusahaan IT dan menampilkan item inventory fisik yang benar-benar diterima dari vendor." badge={<Badge variant="info">Live Data</Badge>} secondaryAction={{ label: "Kembali ke Pembelian", href: "/pembelian" }} /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><CrmMetricCard label="Receipt" value={String(rows.length)} helper="Dokumen penerimaan" /><CrmMetricCard label="Qty Ordered" value={String(expectedQty)} helper="Dari line PO barang" /><CrmMetricCard label="Qty Received" value={String(receivedQty)} helper="Perangkat sudah diterima" /><CrmMetricCard label="QC / Partial" value={String(partialCount + holdCount)} helper="Perlu tindak lanjut" /></div><div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><div className="grid gap-3 md:grid-cols-[1fr_220px]"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari nomor GR, nomor PO, item inventory, atau vendor" className={crmInputClassName} /><select value={status} onChange={(e) => setStatus(e.target.value)} className={crmInputClassName}><option value="">Semua status</option><option value="DRAFT">Draft</option><option value="PARTIAL">Partial</option><option value="RECEIVED">Received</option><option value="QC_HOLD">QC Hold</option><option value="CANCELED">Canceled</option></select></div></div><div className="grid gap-6 xl:grid-cols-[1.3fr_1fr]"><div className="rounded-xl border border-gray-200 bg-white shadow-sm"><div className="border-b border-gray-200 px-5 py-4"><h2 className="text-lg font-semibold text-gray-900">Monitoring Goods Receipt</h2><p className="text-sm text-gray-500">Receipt menampilkan perangkat fisik seperti switch, access point, firewall, dan item inventory IT lain yang masuk ke gudang.</p></div>{query.isLoading ? <div className="p-5 text-sm text-gray-500">Memuat goods receipt...</div> : rows.length === 0 ? <div className="p-5"><CrmEmptyHint text="Belum ada goods receipt di database." /></div> : <div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 text-sm"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">GR</th><th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Item Inventory</th><th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Vendor / Gudang</th><th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Qty</th><th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th></tr></thead><tbody className="divide-y divide-gray-100 bg-white">{rows.map((row) => { const qtyOrdered = row.lines.reduce((sum, line) => sum + Number(line.qtyOrdered ?? 0), 0); const qtyReceivedLine = row.lines.reduce((sum, line) => sum + Number(line.qtyReceived ?? 0), 0); const flowLabel = row.purchaseOrder?.requiresReceipt === false ? "Service PO" : row.purchaseOrder?.procurementMode === "MIXED" ? "Mixed goods receipt" : "Goods receipt"; return <tr key={row.id}><td className="px-4 py-3"><p className="font-semibold text-gray-900">{row.receiptNumber}</p><p className="text-xs text-gray-500">{formatDate(row.receiptDate)} • {row.purchaseOrder?.orderNumber ?? "-"}</p></td><td className="px-4 py-3"><p className="text-gray-900">{summarizeItems(row.lines)}</p><div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-xs text-gray-500">{row.lines.length} line • {flowLabel}</p><BusinessFlowBadge value={row.purchaseOrder?.procurementMode} /></div></td><td className="px-4 py-3 text-gray-600">{row.vendor.company} • {row.warehouse?.name ?? "-"}</td><td className="px-4 py-3 text-gray-600">{qtyReceivedLine} / {qtyOrdered}</td><td className="px-4 py-3"><Badge variant={toBadge(row.status)}>{toLabel(row.status)}</Badge></td></tr>; })}</tbody></table></div>}</div><div className="space-y-6"><div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold text-gray-900">Relasi Dokumen</h2><ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-gray-600"><li>GR dipakai untuk purchase order barang yang memang memerlukan penerimaan fisik.</li><li>Line GR dapat refer ke line PO, gudang, dan item inventory perangkat IT.</li><li>GR yang valid menjadi dasar vendor invoice untuk flow 3-way matching.</li></ul></div><div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><Link href="/pembelian/vendor-invoice" className="block rounded-lg border border-gray-200 px-4 py-3 transition hover:border-blue-200 hover:bg-blue-50/50"><p className="text-sm font-semibold text-gray-900">Vendor Invoice</p><p className="mt-1 text-sm text-gray-600">Lanjutkan matching invoice berdasarkan receipt perangkat yang sudah diterima.</p></Link></div></div></div></div>;
 }

@@ -735,6 +735,77 @@ export const inventoryRouter = createTRPCRouter({
       return updated;
     }),
 
+  listStockMovements: permissionProcedure("inventory", "read")
+    .input(
+      z.object({
+        search: z.string().optional(),
+        warehouseId: z.string().optional(),
+        itemId: z.string().optional(),
+        bucketType: z.nativeEnum(InventoryBucketType).optional(),
+        movementType: z.nativeEnum(InventoryMovementType).optional(),
+        referenceType: z.string().max(50).optional(),
+        limit: z.number().min(1).max(300).default(100),
+      }),
+    )
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const where = withInventoryWhere({
+        ...(input.warehouseId ? { warehouseId: input.warehouseId } : {}),
+        ...(input.itemId ? { itemId: input.itemId } : {}),
+        ...(input.bucketType ? { bucketType: input.bucketType } : {}),
+        ...(input.movementType ? { movementType: input.movementType } : {}),
+        ...(input.referenceType ? { referenceType: input.referenceType } : {}),
+        ...(input.search
+          ? {
+              OR: [
+                { referenceType: { contains: input.search, mode: "insensitive" as const } },
+                { referenceId: { contains: input.search, mode: "insensitive" as const } },
+                { notes: { contains: input.search, mode: "insensitive" as const } },
+                { item: { sku: { contains: input.search, mode: "insensitive" as const } } },
+                { item: { name: { contains: input.search, mode: "insensitive" as const } } },
+                { warehouse: { code: { contains: input.search, mode: "insensitive" as const } } },
+                { warehouse: { name: { contains: input.search, mode: "insensitive" as const } } },
+              ],
+            }
+          : {}),
+      });
+
+      const movements = await ctx.db.inventoryLedgerEntry.findMany({
+        where,
+        include: {
+          item: {
+            select: {
+              id: true,
+              sku: true,
+              name: true,
+              unitOfMeasure: true,
+              usageType: true,
+              trackingMode: true,
+            },
+          },
+          warehouse: { select: { id: true, code: true, name: true } },
+          chartOfAccount: { select: { id: true, code: true, name: true } },
+          createdBy: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
+        take: input.limit,
+      });
+
+      const summary = movements.reduce(
+        (acc, row) => {
+          const qtyChange = Number(row.quantityChange ?? 0);
+          if (qtyChange > 0) acc.totalIn += qtyChange;
+          if (qtyChange < 0) acc.totalOut += Math.abs(qtyChange);
+          if (row.bucketType === InventoryBucketType.SALE_STOCK) acc.saleStockRows += 1;
+          if (row.bucketType === InventoryBucketType.TEMP_ASSET) acc.tempAssetRows += 1;
+          return acc;
+        },
+        { totalIn: 0, totalOut: 0, saleStockRows: 0, tempAssetRows: 0 },
+      );
+
+      return { movements, summary };
+    }),
+
   stockOverview: permissionProcedure("inventory", "read")
     .input(
       z.object({
@@ -1212,6 +1283,98 @@ export const inventoryRouter = createTRPCRouter({
       return updated;
     }),
 
+  fulfillmentWorkspace: permissionProcedure("inventory", "read")
+    .input(z.object({ limit: z.number().min(1).max(50).default(12) }).optional())
+    .output(z.any())
+    .query(async ({ ctx, input }) => {
+      const limit = input?.limit ?? 12;
+
+      const [salesOrders, deliveryOrders, purchaseOrders, goodsReceipts] = await Promise.all([
+        ctx.db.salesOrder.findMany({
+          where: {
+            deletedAt: null,
+            requiresDelivery: true,
+            status: { in: ["CONFIRMED", "READY_TO_SHIP", "PARTIALLY_DELIVERED", "DELIVERED"] },
+          },
+          take: limit,
+          orderBy: [{ updatedAt: "desc" }],
+          include: {
+            customer: { select: { id: true, company: true } },
+            deliveryOrders: {
+              where: { deletedAt: null },
+              select: { id: true, deliveryOrderNumber: true, status: true, shipDate: true },
+              orderBy: [{ createdAt: "desc" }],
+            },
+            lines: {
+              include: {
+                inventoryItem: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },
+                warehouse: { select: { id: true, code: true, name: true } },
+              },
+              orderBy: [{ lineNumber: "asc" }],
+            },
+          },
+        }),
+        ctx.db.deliveryOrder.findMany({
+          where: { deletedAt: null },
+          take: limit,
+          orderBy: [{ updatedAt: "desc" }],
+          include: {
+            customer: { select: { id: true, company: true } },
+            salesOrder: { select: { id: true, salesOrderNumber: true, status: true, fulfillmentMode: true } },
+            warehouse: { select: { id: true, code: true, name: true } },
+            lines: {
+              include: {
+                inventoryItem: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },
+              },
+              orderBy: [{ lineNumber: "asc" }],
+            },
+          },
+        }),
+        ctx.db.purchaseOrder.findMany({
+          where: {
+            deletedAt: null,
+            requiresReceipt: true,
+            status: { in: ["ISSUED", "PARTIAL_RECEIPT", "COMPLETED"] },
+          },
+          take: limit,
+          orderBy: [{ updatedAt: "desc" }],
+          include: {
+            vendor: { select: { id: true, company: true } },
+            goodsReceipts: {
+              where: { deletedAt: null },
+              select: { id: true, receiptNumber: true, status: true, receiptDate: true },
+              orderBy: [{ createdAt: "desc" }],
+            },
+            lines: {
+              include: {
+                inventoryItem: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },
+                warehouse: { select: { id: true, code: true, name: true } },
+              },
+              orderBy: [{ lineNumber: "asc" }],
+            },
+          },
+        }),
+        ctx.db.goodsReceipt.findMany({
+          where: { deletedAt: null },
+          take: limit,
+          orderBy: [{ updatedAt: "desc" }],
+          include: {
+            vendor: { select: { id: true, company: true } },
+            purchaseOrder: { select: { id: true, orderNumber: true, status: true, procurementMode: true } },
+            warehouse: { select: { id: true, code: true, name: true } },
+            lines: {
+              include: {
+                inventoryItem: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },
+              },
+              orderBy: [{ lineNumber: "asc" }],
+            },
+          },
+        }),
+      ]);
+
+      return { salesOrders, deliveryOrders, purchaseOrders, goodsReceipts };
+    }),
+
   fulfillmentSummary: permissionProcedure("inventory", "read")
     .input(z.object({}).optional())
     .output(z.any())
@@ -1414,20 +1577,20 @@ export const inventoryRouter = createTRPCRouter({
       const saleQuantity = Number(input.saleQuantity ?? 0);
       const temporaryAssetQuantity = Number(input.temporaryAssetQuantity ?? 0);
       const totalQuantity = saleQuantity + temporaryAssetQuantity;
-      const normalizedBatchNumber = input.batchNumber?.trim() || undefined;
-      const normalizedVendorName = input.vendorName?.trim() || undefined;
-      const normalizedVendorReference = input.vendorReference?.trim() || undefined;
+      const normalizedBatchNumber = input.batchNumber?.trim() ?? undefined;
+      const normalizedVendorName = input.vendorName?.trim() ?? undefined;
+      const normalizedVendorReference = input.vendorReference?.trim() ?? undefined;
       const normalizedSerializedUnits = (input.serializedUnits ?? []).map((unit, index) => ({
         index,
         bucketType: unit.bucketType,
-        serialNumber: unit.serialNumber?.trim() || undefined,
-        assetTag: unit.assetTag?.trim() || undefined,
-        batchNumber: unit.batchNumber?.trim() || undefined,
+        serialNumber: unit.serialNumber?.trim() ?? undefined,
+        assetTag: unit.assetTag?.trim() ?? undefined,
+        batchNumber: unit.batchNumber?.trim() ?? undefined,
         condition: unit.condition,
         receivedDate: unit.receivedDate,
         purchaseDate: unit.purchaseDate,
         warrantyExpiry: unit.warrantyExpiry,
-        notes: unit.notes?.trim() || undefined,
+        notes: unit.notes?.trim() ?? undefined,
       }));
 
       if (totalQuantity <= 0) {

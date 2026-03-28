@@ -11,7 +11,9 @@
  * generation stays inside the same transaction context when needed.
  */
 
-import type { PrismaClient } from "../../../generated/prisma";
+import type { Prisma, PrismaClient } from "../../../generated/prisma";
+
+type DbClient = PrismaClient | Prisma.TransactionClient;
 
 function parseSuffix(value: string): number {
   const parts = value.split("-");
@@ -40,7 +42,7 @@ function toBusinessNumber(prefix: string, year: number, seq: number): string {
  * @returns    Promise<string>  e.g. "TR-2026-00042"
  */
 export async function generateRequestNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("TR", year)}-`;
@@ -70,7 +72,7 @@ export async function generateRequestNumber(
  * @returns    Promise<string>  e.g. "CLM-2026-00007"
  */
 export async function generateClaimNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("CLM", year)}-`;
@@ -110,7 +112,7 @@ export async function generateClaimNumber(
  * ```
  */
 export async function generateApprovalNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("APR", year)}-`;
@@ -130,7 +132,7 @@ export async function generateApprovalNumber(
 }
 
 export async function generateBailoutNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("BLT", year)}-`;
@@ -150,7 +152,7 @@ export async function generateBailoutNumber(
 }
 
 export async function generateJournalTransactionNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("JRN", year)}-`;
@@ -170,7 +172,7 @@ export async function generateJournalTransactionNumber(
 }
 
 export async function generateJournalEntryNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("JE", year)}-`;
@@ -190,7 +192,7 @@ export async function generateJournalEntryNumber(
 }
 
 export async function generateFulfillmentRequestNumber(
-  db: PrismaClient,
+  db: DbClient,
   year = new Date().getFullYear(),
 ): Promise<string> {
   const prefix = `${buildPrefix("FUL", year)}-`;
@@ -207,4 +209,132 @@ export async function generateFulfillmentRequestNumber(
     year,
     parseSuffix(last?.requestNumber ?? "") + 1,
   );
+}
+
+export async function generatePurchaseRequestNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("PR", year)}-`;
+  const last = await db.purchaseRequest.findFirst({
+    where: {
+      requestNumber: { startsWith: prefix },
+    },
+    orderBy: { requestNumber: "desc" },
+    select: { requestNumber: true },
+  });
+
+  return toBusinessNumber("PR", year, parseSuffix(last?.requestNumber ?? "") + 1);
+}
+
+export async function generatePurchaseOrderNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("PO", year)}-`;
+  const last = await db.purchaseOrder.findFirst({
+    where: {
+      orderNumber: { startsWith: prefix },
+    },
+    orderBy: { orderNumber: "desc" },
+    select: { orderNumber: true },
+  });
+
+  return toBusinessNumber("PO", year, parseSuffix(last?.orderNumber ?? "") + 1);
+}
+
+export async function generateGoodsReceiptNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("GR", year)}-`;
+  const last = await db.goodsReceipt.findFirst({
+    where: {
+      receiptNumber: { startsWith: prefix },
+    },
+    orderBy: { receiptNumber: "desc" },
+    select: { receiptNumber: true },
+  });
+
+  return toBusinessNumber("GR", year, parseSuffix(last?.receiptNumber ?? "") + 1);
+}
+
+export async function generateVendorInvoiceNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("VINV", year)}-`;
+  const last = await db.vendorInvoice.findFirst({
+    where: {
+      invoiceNumber: { startsWith: prefix },
+    },
+    orderBy: { invoiceNumber: "desc" },
+    select: { invoiceNumber: true },
+  });
+
+  return toBusinessNumber("VINV", year, parseSuffix(last?.invoiceNumber ?? "") + 1);
+}
+
+export async function generateSalesQuotationNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("QT", year)}-`;
+  const last = await db.salesQuotation.findFirst({
+    where: {
+      quotationNumber: { startsWith: prefix },
+    },
+    orderBy: { quotationNumber: "desc" },
+    select: { quotationNumber: true },
+  });
+
+  return toBusinessNumber("QT", year, parseSuffix(last?.quotationNumber ?? "") + 1);
+}
+
+export async function generateSalesOrderNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("SO", year)}-`;
+  const last = await db.salesOrder.findFirst({
+    where: {
+      salesOrderNumber: { startsWith: prefix },
+    },
+    orderBy: { salesOrderNumber: "desc" },
+    select: { salesOrderNumber: true },
+  });
+
+  return toBusinessNumber("SO", year, parseSuffix(last?.salesOrderNumber ?? "") + 1);
+}
+
+export async function generateDeliveryOrderNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("DO", year)}-`;
+  const last = await db.deliveryOrder.findFirst({
+    where: {
+      deliveryOrderNumber: { startsWith: prefix },
+    },
+    orderBy: { deliveryOrderNumber: "desc" },
+    select: { deliveryOrderNumber: true },
+  });
+
+  return toBusinessNumber("DO", year, parseSuffix(last?.deliveryOrderNumber ?? "") + 1);
+}
+
+export async function generateSalesInvoiceNumber(
+  db: DbClient,
+  year = new Date().getFullYear(),
+): Promise<string> {
+  const prefix = `${buildPrefix("SINV", year)}-`;
+  const last = await db.salesInvoice.findFirst({
+    where: {
+      salesInvoiceNumber: { startsWith: prefix },
+    },
+    orderBy: { salesInvoiceNumber: "desc" },
+    select: { salesInvoiceNumber: true },
+  });
+
+  return toBusinessNumber("SINV", year, parseSuffix(last?.salesInvoiceNumber ?? "") + 1);
 }
