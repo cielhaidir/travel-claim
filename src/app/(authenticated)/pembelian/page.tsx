@@ -87,7 +87,7 @@ function toLabel(value?: string | null) {
 }
 
 export default function PembelianPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [search, setSearch] = useState("");
   const [flowFilter, setFlowFilter] = useState<"ALL" | "OPEN" | "COMPLETED">("ALL");
   const [modeFilter, setModeFilter] = useState<"ALL" | "GOODS" | "SERVICE" | "MIXED">("ALL");
@@ -120,7 +120,29 @@ export default function PembelianPage() {
   const completedFlows = flows.filter((flow) => Boolean(flow.purchaseOrders?.[0]?.vendorInvoices?.[0])).length;
   const inProgressFlows = flows.filter((flow) => !flow.purchaseOrders?.[0]?.vendorInvoices?.[0]).length;
 
-  if (!session || !isAllowed) return null;
+  if (status === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan workspace pembelian...
+      </div>
+    );
+  }
+
+  if (status !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses workspace pembelian.
+      </div>
+    );
+  }
+
+  if (!isAllowed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat modul pembelian.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

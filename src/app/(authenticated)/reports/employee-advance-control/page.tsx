@@ -476,6 +476,10 @@ export default function EmployeeAdvanceControlPage() {
               <option value="SETTLEMENT">SETTLEMENT</option>
               <option value="ADJUSTMENT">ADJUSTMENT</option>
               <option value="MANUAL">MANUAL</option>
+              <option value="SALES_DELIVERY_COGS">SALES_DELIVERY_COGS</option>
+              <option value="SALES_DELIVERY_COGS_REVERSAL">SALES_DELIVERY_COGS_REVERSAL</option>
+              <option value="SALES_INVOICE_AR">SALES_INVOICE_AR</option>
+              <option value="SALES_INVOICE_AR_REVERSAL">SALES_INVOICE_AR_REVERSAL</option>
               <option value="FUNDING">FUNDING</option>
               <option value="CLAIM">CLAIM</option>
             </select>

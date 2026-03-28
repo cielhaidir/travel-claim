@@ -22,6 +22,7 @@
     "preview": "next build && next start",
     "start": "node .next/standalone/server.js",
     "typecheck": "tsc --noEmit",
+    "audit:inventory-master": "tsx scripts/audit-inventory-master.ts",
     "test:user-role-management": "set QUIET_TEST_LOGS=1&& set NODE_ENV=test&& tsx scripts/test-user-role-management.ts"
   },
   "prisma": {

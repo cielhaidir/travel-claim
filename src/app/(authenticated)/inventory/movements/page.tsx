@@ -58,7 +58,7 @@ function referenceLabel(row: StockMovementRecord) {
 }
 
 export default function InventoryMovementsPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [search, setSearch] = useState("");
   const [bucketType, setBucketType] = useState("");
   const [movementType, setMovementType] = useState("");
@@ -85,7 +85,29 @@ export default function InventoryMovementsPage() {
   const summary = query.data?.summary;
   const warehouses = useMemo(() => warehousesQuery.data?.warehouses ?? [], [warehousesQuery.data]);
 
-  if (!session || !isAllowed) return null;
+  if (sessionStatus === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan data mutasi stok...
+      </div>
+    );
+  }
+
+  if (sessionStatus !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses mutasi stok.
+      </div>
+    );
+  }
+
+  if (!isAllowed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat mutasi stok.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

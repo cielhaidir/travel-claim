@@ -30,6 +30,7 @@ const DEFAULT_ITEM_FORM = {
   barcode: "",
   technicalSpecs: "",
   trackingMode: "QUANTITY",
+  itemType: "HARDWARE",
   usageType: "BOTH",
   isStockTracked: true,
   minStock: "0",
@@ -95,7 +96,7 @@ const DEFAULT_UNIT_RECLASS_FORM = {
 };
 
 export default function InventoryPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -482,7 +483,29 @@ export default function InventoryPage() {
     });
   }, [isSerializedReceiptItem, receiptForm.saleQuantity, receiptForm.temporaryAssetQuantity]);
 
-  if (!session || !canReadInventory) return null;
+  if (sessionStatus === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan dashboard inventory...
+      </div>
+    );
+  }
+
+  if (sessionStatus !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses inventory.
+      </div>
+    );
+  }
+
+  if (!canReadInventory) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat modul inventory.
+      </div>
+    );
+  }
 
   async function copyToClipboard(value: string, label: string) {
     try {
@@ -506,6 +529,7 @@ export default function InventoryPage() {
       barcode: itemForm.barcode || undefined,
       technicalSpecs: itemForm.technicalSpecs || undefined,
       trackingMode: itemForm.trackingMode as "QUANTITY" | "SERIAL" | "BOTH",
+      itemType: itemForm.itemType as "HARDWARE" | "SERVICE" | "SOFTWARE_LICENSE" | "MANAGED_SERVICE",
       usageType: itemForm.usageType as "SALE" | "OPERATIONAL" | "BOTH",
       isStockTracked: itemForm.isStockTracked,
       minStock: Number(itemForm.minStock || 0),
@@ -542,6 +566,7 @@ export default function InventoryPage() {
       barcode: itemForm.barcode || null,
       technicalSpecs: itemForm.technicalSpecs || null,
       trackingMode: itemForm.trackingMode as "QUANTITY" | "SERIAL" | "BOTH",
+      itemType: itemForm.itemType as "HARDWARE" | "SERVICE" | "SOFTWARE_LICENSE" | "MANAGED_SERVICE",
       usageType: itemForm.usageType as "SALE" | "OPERATIONAL" | "BOTH",
       isStockTracked: itemForm.isStockTracked,
       minStock: Number(itemForm.minStock || 0),
@@ -753,6 +778,7 @@ export default function InventoryPage() {
       barcode: item.barcode ?? "",
       technicalSpecs: item.technicalSpecs ?? "",
       trackingMode: item.trackingMode ?? "QUANTITY",
+      itemType: item.itemType ?? "HARDWARE",
       usageType: item.usageType ?? "BOTH",
       isStockTracked: item.isStockTracked ?? true,
       minStock: String(item.minStock ?? 0),
@@ -777,6 +803,38 @@ export default function InventoryPage() {
     });
     setShowEditWarehouse(true);
   }
+
+  const nonStockItemTypes = new Set(["SERVICE", "SOFTWARE_LICENSE", "MANAGED_SERVICE"]);
+  const isNonStockItemType = nonStockItemTypes.has(itemForm.itemType);
+  const itemFormValidationMessages = useMemo(() => {
+    const messages: string[] = [];
+
+    if (isNonStockItemType) {
+      if (itemForm.isStockTracked) {
+        messages.push("Item jasa / lisensi / managed service tidak boleh mengaktifkan track stock.");
+      }
+      if (itemForm.usageType !== "SALE") {
+        messages.push("Item non-stock harus memakai usage type SALE.");
+      }
+      if (itemForm.inventoryCoaId || itemForm.temporaryAssetCoaId || itemForm.cogsCoaId) {
+        messages.push("Item non-stock tidak boleh memakai COA persediaan / aset sementara / COGS.");
+      }
+    } else if (itemForm.isStockTracked) {
+      if (!itemForm.standardCost || Number(itemForm.standardCost) <= 0) {
+        messages.push("Item stock-tracked wajib memiliki standard cost > 0.");
+      }
+      if (!itemForm.inventoryCoaId) {
+        messages.push("Item stock-tracked wajib memiliki COA persediaan.");
+      }
+      if (!itemForm.cogsCoaId) {
+        messages.push("Item stock-tracked wajib memiliki COA COGS.");
+      }
+    }
+
+    return messages;
+  }, [isNonStockItemType, itemForm.cogsCoaId, itemForm.inventoryCoaId, itemForm.isStockTracked, itemForm.itemType, itemForm.standardCost, itemForm.temporaryAssetCoaId, itemForm.usageType]);
+
+  const isItemFormValid = itemFormValidationMessages.length === 0;
 
   return (
     <div className="space-y-6">
@@ -1330,6 +1388,35 @@ export default function InventoryPage() {
                   <option value="BOTH">BOTH</option>
                 </select>
               </Field>
+              <Field label="Item Type" helper="Pilih tipe item agar aturan stok dan accounting terjaga konsisten.">
+                <select
+                  value={itemForm.itemType}
+                  onChange={(e) =>
+                    setItemForm((prev) => {
+                      const nextItemType = e.target.value;
+                      if (["SERVICE", "SOFTWARE_LICENSE", "MANAGED_SERVICE"].includes(nextItemType)) {
+                        return {
+                          ...prev,
+                          itemType: nextItemType,
+                          usageType: "SALE",
+                          isStockTracked: false,
+                          inventoryCoaId: "",
+                          temporaryAssetCoaId: "",
+                          cogsCoaId: "",
+                          standardCost: "",
+                        };
+                      }
+                      return { ...prev, itemType: nextItemType };
+                    })
+                  }
+                  className={SELECT_CLASS}
+                >
+                  <option value="HARDWARE">HARDWARE</option>
+                  <option value="SERVICE">SERVICE</option>
+                  <option value="SOFTWARE_LICENSE">SOFTWARE_LICENSE</option>
+                  <option value="MANAGED_SERVICE">MANAGED_SERVICE</option>
+                </select>
+              </Field>
               <Field label="Usage Type" helper="Tentukan apakah item dipakai untuk penjualan, operasional, atau keduanya.">
                 <select
                   value={itemForm.usageType}
@@ -1397,6 +1484,16 @@ export default function InventoryPage() {
           </FormSection>
 
           <FormSection title="Relasi COA" description="Hubungkan item ke akun COA agar stok manual bisa dipisahkan antara stok jual dan aset sementara.">
+            {itemFormValidationMessages.length > 0 ? (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-semibold">Periksa aturan item sebelum menyimpan:</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {itemFormValidationMessages.map((message) => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="COA Persediaan Jual" helper="Dipakai saat stok masuk ke bucket sale stock / persediaan untuk dijual.">
                 <select
@@ -1449,7 +1546,19 @@ export default function InventoryPage() {
                 title="Track stock"
                 description="Jika aktif, item ikut tercatat dalam on-hand, reserved, receipt, dan issue."
                 checked={itemForm.isStockTracked}
-                onChange={(checked) => setItemForm((prev) => ({ ...prev, isStockTracked: checked }))}
+                onChange={(checked) =>
+                  setItemForm((prev) => {
+                    if (isNonStockItemType && checked) {
+                      showToast({
+                        title: "Track stock tidak valid",
+                        message: "Item jasa / lisensi / managed service tidak boleh mengaktifkan track stock.",
+                        variant: "error",
+                      });
+                      return prev;
+                    }
+                    return { ...prev, isStockTracked: checked };
+                  })
+                }
               />
               <CheckboxCard
                 title="Item aktif"
@@ -1463,7 +1572,7 @@ export default function InventoryPage() {
 
         <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-gray-100 pt-4">
           <Button variant="secondary" onClick={() => setShowCreateItem(false)}>Batal</Button>
-          <Button onClick={() => void handleCreateItem()} isLoading={createItemMutation.isPending}>Simpan Item</Button>
+          <Button disabled={!isItemFormValid} onClick={() => void handleCreateItem()} isLoading={createItemMutation.isPending}>Simpan Item</Button>
         </div>
       </Modal>
 
@@ -1923,6 +2032,35 @@ export default function InventoryPage() {
                   <option value="BOTH">BOTH</option>
                 </select>
               </Field>
+              <Field label="Item Type">
+                <select
+                  value={itemForm.itemType}
+                  onChange={(e) =>
+                    setItemForm((prev) => {
+                      const nextItemType = e.target.value;
+                      if (["SERVICE", "SOFTWARE_LICENSE", "MANAGED_SERVICE"].includes(nextItemType)) {
+                        return {
+                          ...prev,
+                          itemType: nextItemType,
+                          usageType: "SALE",
+                          isStockTracked: false,
+                          inventoryCoaId: "",
+                          temporaryAssetCoaId: "",
+                          cogsCoaId: "",
+                          standardCost: "",
+                        };
+                      }
+                      return { ...prev, itemType: nextItemType };
+                    })
+                  }
+                  className={SELECT_CLASS}
+                >
+                  <option value="HARDWARE">HARDWARE</option>
+                  <option value="SERVICE">SERVICE</option>
+                  <option value="SOFTWARE_LICENSE">SOFTWARE_LICENSE</option>
+                  <option value="MANAGED_SERVICE">MANAGED_SERVICE</option>
+                </select>
+              </Field>
               <Field label="Usage Type">
                 <select value={itemForm.usageType} onChange={(e) => setItemForm((prev) => ({ ...prev, usageType: e.target.value }))} className={SELECT_CLASS}>
                   <option value="SALE">SALE</option>
@@ -1945,6 +2083,16 @@ export default function InventoryPage() {
               <Field label="Standard Cost">
                 <input type="number" min="0" step="0.01" value={itemForm.standardCost} onChange={(e) => setItemForm((prev) => ({ ...prev, standardCost: e.target.value }))} className={INPUT_CLASS} />
               </Field>
+              {itemFormValidationMessages.length > 0 ? (
+                <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <p className="font-semibold">Periksa aturan item sebelum menyimpan:</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    {itemFormValidationMessages.map((message) => (
+                      <li key={message}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <Field label="COA Persediaan Jual">
                 <select value={itemForm.inventoryCoaId} onChange={(e) => setItemForm((prev) => ({ ...prev, inventoryCoaId: e.target.value }))} className={SELECT_CLASS}>
                   <option value="">Pilih COA persediaan</option>
@@ -1971,7 +2119,17 @@ export default function InventoryPage() {
               </Field>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <CheckboxCard title="Track stock" description="Tetap catat saldo, reservasi, receipt, dan issue." checked={itemForm.isStockTracked} onChange={(checked) => setItemForm((prev) => ({ ...prev, isStockTracked: checked }))} />
+              <CheckboxCard title="Track stock" description="Tetap catat saldo, reservasi, receipt, dan issue." checked={itemForm.isStockTracked} onChange={(checked) => setItemForm((prev) => {
+                if (isNonStockItemType && checked) {
+                  showToast({
+                    title: "Track stock tidak valid",
+                    message: "Item jasa / lisensi / managed service tidak boleh mengaktifkan track stock.",
+                    variant: "error",
+                  });
+                  return prev;
+                }
+                return { ...prev, isStockTracked: checked };
+              })} />
               <CheckboxCard title="Item aktif" description="Nonaktifkan jika item tidak dipakai untuk transaksi baru." checked={itemForm.isActive} onChange={(checked) => setItemForm((prev) => ({ ...prev, isActive: checked }))} />
             </div>
             {!itemForm.isActive ? (
@@ -1983,7 +2141,7 @@ export default function InventoryPage() {
         </div>
         <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-gray-100 pt-4">
           <Button variant="secondary" onClick={() => setShowEditItem(false)}>Batal</Button>
-          <Button onClick={() => void handleUpdateItem()} isLoading={updateItemMutation.isPending}>Simpan Perubahan</Button>
+          <Button disabled={!isItemFormValid} onClick={() => void handleUpdateItem()} isLoading={updateItemMutation.isPending}>Simpan Perubahan</Button>
         </div>
       </Modal>
 

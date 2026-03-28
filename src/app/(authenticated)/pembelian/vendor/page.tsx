@@ -12,7 +12,7 @@ import { api } from "@/trpc/react";
 import { useState } from "react";
 
 export default function PembelianVendorPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [search, setSearch] = useState("");
   const isAllowed = session?.user ? userHasPermission(session.user, "purchases", "read") : false;
 
@@ -26,7 +26,29 @@ export default function PembelianVendorPage() {
   const withContacts = rows.filter((item) => item.contacts.length > 0);
   const withDeals = rows.filter((item) => item.deals.length > 0);
 
-  if (!session || !isAllowed) return null;
+  if (status === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan data vendor pembelian...
+      </div>
+    );
+  }
+
+  if (status !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses data vendor pembelian.
+      </div>
+    );
+  }
+
+  if (!isAllowed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat data vendor pembelian.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

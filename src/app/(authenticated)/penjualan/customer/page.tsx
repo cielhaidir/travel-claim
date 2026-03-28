@@ -12,7 +12,7 @@ import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { api } from "@/trpc/react";
 
 export default function CustomerSalesPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [search, setSearch] = useState("");
   const isAllowed = session?.user ? userHasPermission(session.user, "sales", "read") : false;
 
@@ -27,7 +27,29 @@ export default function CustomerSalesPage() {
   const totalContacts = rows.reduce((sum, item) => sum + item.contacts.length, 0);
   const totalRevenue = rows.reduce((sum, item) => sum + Number(item.annualRevenue ?? 0), 0);
 
-  if (!session || !isAllowed) return null;
+  if (status === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan data customer penjualan...
+      </div>
+    );
+  }
+
+  if (status !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses customer penjualan.
+      </div>
+    );
+  }
+
+  if (!isAllowed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat data customer penjualan.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

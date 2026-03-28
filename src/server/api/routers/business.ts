@@ -25,6 +25,12 @@ import {
   generateVendorInvoiceNumber,
 } from "@/lib/utils/numberGenerators";
 import { createTRPCRouter, permissionProcedure } from "@/server/api/trpc";
+import {
+  postDeliveryCogsJournal,
+  postSalesInvoiceJournal,
+  reverseDeliveryCogsJournal,
+  reverseSalesInvoiceJournal,
+} from "@/lib/accounting/sales";
 import { type Prisma } from "../../../../generated/prisma";
 
 const purchaseRequestStatusSchema = z.nativeEnum(PurchaseRequestStatus);
@@ -1912,10 +1918,19 @@ export const businessRouter = createTRPCRouter({
             deliveryOrderId: deliveryOrder.id,
             createdById: ctx.session.user.id,
           });
+          await postDeliveryCogsJournal(tx, {
+            deliveryOrderId: deliveryOrder.id,
+            createdById: ctx.session.user.id,
+          });
         }
 
         if (input.status === DeliveryOrderStatus.RETURNED || input.status === DeliveryOrderStatus.CANCELED) {
           await reverseDeliveryInventoryIssue(tx, {
+            deliveryOrderId: deliveryOrder.id,
+            createdById: ctx.session.user.id,
+            reason: input.status,
+          });
+          await reverseDeliveryCogsJournal(tx, {
             deliveryOrderId: deliveryOrder.id,
             createdById: ctx.session.user.id,
             reason: input.status,
@@ -1972,6 +1987,21 @@ export const businessRouter = createTRPCRouter({
             paidAt: input.status === SalesInvoiceStatus.PAID ? (salesInvoice.paidAt ?? new Date()) : input.status === SalesInvoiceStatus.CANCELED ? null : salesInvoice.paidAt,
           },
         });
+
+        if (input.status === SalesInvoiceStatus.SENT) {
+          await postSalesInvoiceJournal(tx, {
+            salesInvoiceId: salesInvoice.id,
+            createdById: ctx.session.user.id,
+          });
+        }
+
+        if (input.status === SalesInvoiceStatus.CANCELED) {
+          await reverseSalesInvoiceJournal(tx, {
+            salesInvoiceId: salesInvoice.id,
+            createdById: ctx.session.user.id,
+            reason: "CANCELED",
+          });
+        }
 
         if (salesInvoice.salesOrderId) {
           await syncSalesOrderWorkflowState(tx, salesInvoice.salesOrderId);
@@ -2098,6 +2128,11 @@ export const businessRouter = createTRPCRouter({
           createdById: ctx.session.user.id,
           reason: "CANCELED",
         });
+        await reverseDeliveryCogsJournal(tx, {
+          deliveryOrderId: deliveryOrder.id,
+          createdById: ctx.session.user.id,
+          reason: "CANCELED",
+        });
 
         await Promise.all([
           tx.deliveryOrder.update({
@@ -2182,6 +2217,12 @@ export const businessRouter = createTRPCRouter({
               )
             : []),
         ]);
+
+        await reverseSalesInvoiceJournal(tx, {
+          salesInvoiceId: salesInvoice.id,
+          createdById: ctx.session.user.id,
+          reason: "DELETED",
+        });
 
         if (salesInvoice.salesOrderId) {
           await syncSalesOrderWorkflowState(tx, salesInvoice.salesOrderId);
@@ -2272,6 +2313,10 @@ export const businessRouter = createTRPCRouter({
         ]);
 
         await applyDeliveryInventoryIssue(tx, {
+          deliveryOrderId: deliveryOrder.id,
+          createdById: ctx.session.user.id,
+        });
+        await postDeliveryCogsJournal(tx, {
           deliveryOrderId: deliveryOrder.id,
           createdById: ctx.session.user.id,
         });
@@ -2400,6 +2445,10 @@ export const businessRouter = createTRPCRouter({
           ),
         );
 
+        await postSalesInvoiceJournal(tx, {
+          salesInvoiceId: salesInvoice.id,
+          createdById: ctx.session.user.id,
+        });
         await syncSalesOrderWorkflowState(tx, salesOrder.id);
         return salesInvoice;
       });

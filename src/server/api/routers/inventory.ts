@@ -5,6 +5,7 @@ import {
   COAType,
   CrmFulfillmentStatus,
   InventoryBucketType,
+  InventoryItemType,
   InventoryMovementType,
   InventoryReservationStatus,
   InventoryTrackingMode,
@@ -29,6 +30,118 @@ const decimalNumber = z.coerce.number().finite();
 
 function isSerializedTrackingMode(mode: InventoryTrackingMode) {
   return mode === InventoryTrackingMode.SERIAL || mode === InventoryTrackingMode.BOTH;
+}
+
+const NON_STOCK_ITEM_TYPES = new Set<InventoryItemType>([
+  InventoryItemType.SERVICE,
+  InventoryItemType.SOFTWARE_LICENSE,
+  InventoryItemType.MANAGED_SERVICE,
+]);
+
+async function assertInventoryItemAccountingRules(
+  tx: Prisma.TransactionClient,
+  input: {
+    name: string;
+    itemType: InventoryItemType;
+    usageType: InventoryUsageType;
+    isStockTracked: boolean;
+    standardCost?: number | null;
+    inventoryCoaId?: string | null;
+    temporaryAssetCoaId?: string | null;
+    cogsCoaId?: string | null;
+  },
+) {
+  const isNonStockType = NON_STOCK_ITEM_TYPES.has(input.itemType);
+
+  if (isNonStockType) {
+    if (input.isStockTracked) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item ${input.name} bertipe ${input.itemType} tidak boleh stock-tracked`,
+      });
+    }
+
+    if (input.inventoryCoaId || input.cogsCoaId || input.temporaryAssetCoaId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item ${input.name} bertipe ${input.itemType} tidak boleh memakai mapping COA inventory / COGS / temp asset`,
+      });
+    }
+
+    if (input.usageType !== InventoryUsageType.SALE) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item ${input.name} bertipe ${input.itemType} harus memakai usage type SALE`,
+      });
+    }
+
+    return;
+  }
+
+  if (input.isStockTracked) {
+    if (input.standardCost == null || Number(input.standardCost) <= 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item stock-tracked ${input.name} wajib memiliki standard cost > 0`,
+      });
+    }
+
+    if (!input.inventoryCoaId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item stock-tracked ${input.name} wajib memiliki COA persediaan`,
+      });
+    }
+
+    if (!input.cogsCoaId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Item stock-tracked ${input.name} wajib memiliki COA COGS`,
+      });
+    }
+  }
+
+  const coaIds = [input.inventoryCoaId, input.temporaryAssetCoaId, input.cogsCoaId].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  if (coaIds.length === 0) return;
+
+  const coas = await tx.chartOfAccount.findMany({
+    where: { id: { in: coaIds }, isActive: true },
+    select: { id: true, code: true, name: true, accountType: true },
+  });
+  const coaById = new Map(coas.map((coa) => [coa.id, coa]));
+
+  if (input.inventoryCoaId) {
+    const inventoryCoa = coaById.get(input.inventoryCoaId);
+    if (!inventoryCoa || inventoryCoa.accountType !== COAType.ASSET) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `COA persediaan untuk item ${input.name} harus bertipe ASSET`,
+      });
+    }
+  }
+
+  if (input.temporaryAssetCoaId) {
+    const tempAssetCoa = coaById.get(input.temporaryAssetCoaId);
+    if (!tempAssetCoa || tempAssetCoa.accountType !== COAType.ASSET) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `COA temporary asset untuk item ${input.name} harus bertipe ASSET`,
+      });
+    }
+  }
+
+  if (input.cogsCoaId) {
+    const cogsCoa = coaById.get(input.cogsCoaId);
+    if (!cogsCoa || cogsCoa.accountType !== COAType.EXPENSE) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `COA COGS untuk item ${input.name} harus bertipe EXPENSE`,
+      });
+    }
+  }
 }
 
 async function ensureInventoryBalance(
@@ -305,6 +418,7 @@ export const inventoryRouter = createTRPCRouter({
         technicalSpecs: z.string().optional(),
         trackingMode: z.nativeEnum(InventoryTrackingMode).default(InventoryTrackingMode.QUANTITY),
         usageType: z.nativeEnum(InventoryUsageType).default(InventoryUsageType.BOTH),
+        itemType: z.nativeEnum(InventoryItemType).default(InventoryItemType.HARDWARE),
         isStockTracked: z.boolean().default(true),
         minStock: decimalNumber.default(0),
         reorderPoint: decimalNumber.default(0),
@@ -328,6 +442,17 @@ export const inventoryRouter = createTRPCRouter({
         });
       }
 
+      await assertInventoryItemAccountingRules(ctx.db, {
+        name: input.name,
+        itemType: input.itemType,
+        usageType: input.usageType,
+        isStockTracked: input.isStockTracked,
+        standardCost: input.standardCost,
+        inventoryCoaId: input.inventoryCoaId,
+        temporaryAssetCoaId: input.temporaryAssetCoaId,
+        cogsCoaId: input.cogsCoaId,
+      });
+
       const item = await ctx.db.inventoryItem.create({
         data: {
           sku: input.sku,
@@ -342,6 +467,7 @@ export const inventoryRouter = createTRPCRouter({
           technicalSpecs: input.technicalSpecs,
           trackingMode: input.trackingMode,
           usageType: input.usageType,
+          itemType: input.itemType,
           isStockTracked: input.isStockTracked,
           minStock: input.minStock,
           reorderPoint: input.reorderPoint,
@@ -367,6 +493,7 @@ export const inventoryRouter = createTRPCRouter({
               model: item.model,
               trackingMode: item.trackingMode,
               usageType: item.usageType,
+              itemType: item.itemType,
               unitOfMeasure: item.unitOfMeasure,
               category: item.category,
               inventoryCoaId: item.inventoryCoaId,
@@ -395,6 +522,7 @@ export const inventoryRouter = createTRPCRouter({
         technicalSpecs: z.string().nullable().optional(),
         trackingMode: z.nativeEnum(InventoryTrackingMode).optional(),
         usageType: z.nativeEnum(InventoryUsageType).optional(),
+        itemType: z.nativeEnum(InventoryItemType).optional(),
         isStockTracked: z.boolean().optional(),
         minStock: decimalNumber.optional(),
         reorderPoint: decimalNumber.optional(),
@@ -463,6 +591,29 @@ export const inventoryRouter = createTRPCRouter({
         }
       }
 
+      const nextState = {
+        name: input.name ?? current.name,
+        itemType: input.itemType ?? current.itemType,
+        usageType: input.usageType ?? current.usageType,
+        isStockTracked: input.isStockTracked ?? current.isStockTracked,
+        standardCost: input.standardCost === undefined ? current.standardCost : input.standardCost,
+        inventoryCoaId: input.inventoryCoaId === undefined ? current.inventoryCoaId : input.inventoryCoaId,
+        temporaryAssetCoaId:
+          input.temporaryAssetCoaId === undefined ? current.temporaryAssetCoaId : input.temporaryAssetCoaId,
+        cogsCoaId: input.cogsCoaId === undefined ? current.cogsCoaId : input.cogsCoaId,
+      };
+
+      await assertInventoryItemAccountingRules(ctx.db, {
+        name: nextState.name,
+        itemType: nextState.itemType,
+        usageType: nextState.usageType,
+        isStockTracked: nextState.isStockTracked,
+        standardCost: nextState.standardCost == null ? null : Number(nextState.standardCost),
+        inventoryCoaId: nextState.inventoryCoaId,
+        temporaryAssetCoaId: nextState.temporaryAssetCoaId,
+        cogsCoaId: nextState.cogsCoaId,
+      });
+
       const updated = await ctx.db.inventoryItem.update({
         where: { id: current.id },
         data: {
@@ -479,6 +630,7 @@ export const inventoryRouter = createTRPCRouter({
             input.technicalSpecs === undefined ? undefined : input.technicalSpecs,
           trackingMode: input.trackingMode,
           usageType: input.usageType,
+          itemType: input.itemType,
           isStockTracked: input.isStockTracked,
           minStock: input.minStock,
           reorderPoint: input.reorderPoint,

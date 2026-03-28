@@ -64,7 +64,7 @@ function summarizeItems(lines: PurchaseRequestRecord["lines"]) {
 }
 
 export default function PurchaseRequestPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { showToast } = useToast();
   const utils = api.useUtils();
   const [search, setSearch] = useState("");
@@ -116,7 +116,29 @@ export default function PurchaseRequestPage() {
     });
   }
 
-  if (!session || !isAllowed) return null;
+  if (sessionStatus === "loading") {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+        Memuat sesi dan data purchase request...
+      </div>
+    );
+  }
+
+  if (sessionStatus !== "authenticated" || !session?.user) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 shadow-sm">
+        Sesi login tidak ditemukan. Silakan login ulang untuk mengakses purchase request.
+      </div>
+    );
+  }
+
+  if (!isAllowed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-900 shadow-sm">
+        Anda tidak memiliki akses untuk melihat purchase request.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

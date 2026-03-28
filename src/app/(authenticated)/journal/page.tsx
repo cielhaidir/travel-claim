@@ -151,7 +151,7 @@ export default function JournalPage() {
 
         <FilterCard title="Filter Sumber">
           <div className="flex flex-wrap gap-2">
-            {(["ALL", "CLAIM", "BAILOUT", "SETTLEMENT", "ADJUSTMENT", "FUNDING", "MANUAL"] as const).map((value) => (
+            {(["ALL", "CLAIM", "BAILOUT", "SETTLEMENT", "ADJUSTMENT", "FUNDING", "MANUAL", "SALES_DELIVERY_COGS", "SALES_DELIVERY_COGS_REVERSAL", "SALES_INVOICE_AR", "SALES_INVOICE_AR_REVERSAL"] as const).map((value) => (
               <Button
                 key={value}
                 size="sm"
